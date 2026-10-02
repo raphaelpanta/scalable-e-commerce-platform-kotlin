@@ -3,3 +3,6 @@
 logging:
   level:
     org.springframework.boot.reactor.netty.GracefulShutdown: warn
+    # Testcontainers stops the database while R2DBC connections are still open; the resulting "Connection
+    # reset" is expected at shutdown and would otherwise print at ERROR level (Principle VIII).
+    io.r2dbc.postgresql.client.ReactorNettyClient: off
