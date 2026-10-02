@@ -134,3 +134,12 @@ Rotate the exposed credential first, then rewrite the offending commit (for exam
 `git filter-repo --replace-text`), force-push through a temporary branch-protection exception, and ask
 GitHub support to purge cached views if the value was ever visible. `CONTRIBUTING.md` and `SECURITY.md`
 carry the same steps.
+
+## Recorded results (2026-10-02)
+
+- Publication run: `scripts/bootstrap-repo.sh --yes --admin-bypass --require-check pr-gate` completed 17 steps and `verify-repo.sh` reported VERIFIED with 16 checks (SC-002, SC-005).
+- Signed-out visitor: README, LICENSE, CONTRIBUTING, SECURITY and CODE_OF_CONDUCT all fetched anonymously within 2 s (SC-001).
+- Anonymous clone on a second checkout: 1 s, 420 files, tree identical to local HEAD (SC-004 pending the build; SC-002).
+- Seeded secret on a scratch branch: blocked by `.githooks/pre-push` (gitleaks), no remote branch created (SC-003).
+- Direct-push rejection test skipped: `--admin-bypass` is enabled for the single maintainer (logged).
+- Total publication time from unversioned directory to VERIFIED: under 5 minutes (SC-006).
