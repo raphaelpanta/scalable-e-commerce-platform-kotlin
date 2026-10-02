@@ -1,0 +1,24 @@
+# gitleaks configuration (feature 003). Used by .githooks/pre-push and scripts/bootstrap-repo.sh.
+# Requires gitleaks >= 8.25 for [[allowlists]] (the bootstrap script installs the current release).
+title = "scalable-e-commerce-platform-kotlin gitleaks config"
+
+[extend]
+useDefault = true
+
+# Shell-test fixtures: seeded secrets there are assembled at runtime and never stored as literals,
+# so this path should never hide a real finding.
+[[allowlists]]
+description = "scripts/tests fixtures that contain no literal secrets"
+paths = [
+  '''^scripts/tests/''',
+]
+
+# OpenAPI contract examples (specs/004) use placeholder values such as a random UUID idempotency key or
+# a truncated sample JWT; the generic-api-key heuristic flags them. Scoped to that single rule and
+# directory so every other rule still applies there.
+[[allowlists]]
+description = "placeholder example values in OpenAPI contracts (generic-api-key rule only)"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^specs/[^/]+/contracts/openapi/[^/]+\.ya?ml$''',
+]

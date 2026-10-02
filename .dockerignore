@@ -1,0 +1,9 @@
+**/build
+# ...but not the Kotlin package com.ecommerce.build of the convention plugins
+!build-logic/src/*/kotlin/com/ecommerce/build
+.gradle
+**/.gradle
+.git
+.kotlin
+.idea
+frontend/node_modules

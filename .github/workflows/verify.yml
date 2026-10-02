@@ -1,0 +1,87 @@
+# Runs the single repository gate, ./gradlew -q verify, on every push to main and, as a reusable workflow
+# (workflow_call), on every pull request through .github/workflows/pr-gate.yml (feature 001), whose aggregate
+# `pr-gate` job is the required status check for branch protection (docs/ci-cd.md, docs/harness.md). Pull
+# requests are not a trigger of this file on purpose: they would run the same gate twice.
+#
+# Runner: containerised self-hosted runner labelled `ecommerce` with Docker socket access (Testcontainers).
+# Registration of ephemeral (just-in-time) runners is covered by feature 004 (specs/004-ecommerce-platform-mvp,
+# research section 4). Because the repository is public, fork pull requests must never run here: the job guard
+# below skips them, and the repository setting "Require approval for all outside collaborators" backs it up.
+#
+# Every `uses:` reference is pinned to a full commit SHA (the trailing comment is the release it resolves to).
+# To bump one: `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`, then update both the SHA and the comment.
+name: verify
+
+on:
+  push:
+    branches: [main]
+  workflow_call:
+    inputs:
+      mutation-reports:
+        description: Hand the Pitest XML reports to the caller as the pitest-reports artifact (pr-gate mutation job)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# The event name keeps this group apart from the caller's (pr-gate-<ref>) when called from pr-gate.yml.
+concurrency:
+  group: verify-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify
+    runs-on: [self-hosted, linux, ecommerce]
+    timeout-minutes: 15
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK from .java-version
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version-file: .java-version
+
+      # Also validates every gradle-wrapper.jar against the published checksums (validate-wrappers defaults to true).
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          validate-wrappers: true
+
+      - name: Verify
+        run: ./gradlew -q verify
+
+      # Paths are kept by archiving: an upload of several modules' files would strip their common prefix.
+      - name: Pack the Pitest reports for the pr-gate mutation job
+        if: success() && inputs.mutation-reports
+        run: >-
+          find . -path ./build-logic -prune -o -path '*/build/reports/pitest/mutations.xml' -print
+          | tar -cf pitest-reports.tar -T -
+
+      - name: Upload the Pitest reports for the pr-gate mutation job
+        if: success() && inputs.mutation-reports
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pitest-reports
+          retention-days: 1
+          if-no-files-found: error
+          path: pitest-reports.tar
+
+      - name: Upload test and quality reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verify-reports
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            **/build/reports/**
+            **/build/test-results/**
+            **/build/pitest/stderr.log

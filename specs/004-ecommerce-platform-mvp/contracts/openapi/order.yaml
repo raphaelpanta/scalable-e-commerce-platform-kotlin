@@ -1,0 +1,543 @@
+openapi: 3.1.0
+info:
+  title: Order API
+  version: 1.0.0
+  summary: Checkout, order history, cancellation and operator lifecycle transitions.
+  description: |
+    Public contract of the order service as exposed through the gateway under `/api/v1/orders`.
+    Covers FR-011..FR-017 (user stories 4 and 5).
+
+    Two statuses (FR-015). Any transition outside these rules is refused with 409 and the order is
+    unchanged:
+    - `orderStatus`: placed -> preparing -> shipped -> delivered; `cancelled` is reachable only
+      from `placed` or `preparing`. Moving to `preparing` is allowed only while `paymentStatus` is
+      `approved`.
+    - `paymentStatus`: pending -> approved | failed.
+    - A `failed` payment, or a payment still `pending` after 30 minutes, cancels the order
+      (`cancellationReason` PAYMENT_FAILED / PAYMENT_EXPIRED) and releases the reserved stock.
+    - `cancellationReason` (SHOPPER_REQUEST, OPERATOR, PAYMENT_FAILED, PAYMENT_EXPIRED) is present
+      only when `orderStatus` is `cancelled`.
+    - Shoppers may cancel only while `placed`; operators may cancel while `placed` or `preparing`.
+
+    Checkout order of events (FR-011, FR-012): the cart revision is checked, stock is reserved
+    synchronously with the catalogue before any payment attempt, then payment is attempted.
+
+    All operations require a bearer JWT with role `shopper` or `operator`. Shoppers only see their
+    own orders; another shopper's order answers 404 so existence is not leaked. Money is in minor
+    units, timestamps are UTC.
+servers:
+  - {url: 'https://localhost:8443', description: Local gateway (the only public entry point)}
+security:
+  - bearerAuth: []
+tags:
+  - {name: Orders, description: Shopper-facing order operations}
+  - {name: Operator, description: Operator-only lifecycle operations}
+paths:
+  /api/v1/orders:
+    post:
+      tags: [Orders]
+      operationId: placeOrder
+      summary: Place an order from the current cart
+      description: |
+        Required role: `shopper`. Converts the shopper's current cart into an order with lines,
+        prices and totals frozen at the current catalogue prices at confirmation (FR-011). The
+        request carries the `cartRevision` the shopper last saw (`revision` of `GET /api/v1/cart`);
+        if any line's price changed since that revision the checkout is refused with 409
+        `price-changed` and no order is created. Stock is then reserved synchronously before any
+        payment attempt (insufficient stock is a 409 `insufficient-stock`), committed on payment
+        approval and released on payment failure, cancellation or expiry (FR-012). The cart is
+        emptied only on a 201.
+
+        Idempotency (FR-013): `Idempotency-Key` is mandatory. Same key and same body replays the
+        original 201 (one order, one payment attempt). Same key with a different body is 422.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PlaceOrderRequest'}
+            example:
+              addressId: 5f0c1a52-3a43-4a53-9f58-7a1d8b9d2c11
+              cartRevision: rev-7f3a9c21
+              paymentMethod: {type: card, token: tok_sim_approve_4242}
+      responses:
+        '201':
+          description: Order created with `orderStatus` placed and `paymentStatus` approved. Also returned on idempotent replay.
+          headers:
+            X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}
+            Location: {description: URL of the created order., schema: {type: string, format: uri-reference}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+              example:
+                id: 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10
+                orderStatus: placed
+                paymentStatus: approved
+                cancellationReason: null
+                lines:
+                  - {productId: 9a4f1e0e-6c2d-4a17-8d3b-0c7e5f2a1b01, name: Espresso Machine, unitPrice: {amountMinor: 14900, currency: BRL}, quantity: 1, lineTotal: {amountMinor: 14900, currency: BRL}}
+                  - {productId: 3d7c2b9a-1f44-4c8e-9a52-6b0e7d3c4f02, name: Coffee Beans 1kg, unitPrice: {amountMinor: 2450, currency: BRL}, quantity: 2, lineTotal: {amountMinor: 4900, currency: BRL}}
+                total: {amountMinor: 19800, currency: BRL}
+                deliveryAddress: {recipientName: Ada Lovelace, line1: 12 Analytical Street, line2: null, city: London, postalCode: N1 9GU, country: GB}
+                statusHistory:
+                  - {kind: order, status: placed, at: '2026-10-02T10:15:00Z', by: 7c1d4f3e-0a52-4c0b-8d3a-1e2f3a4b5c6d}
+                  - {kind: payment, status: pending, at: '2026-10-02T10:15:00Z', by: system}
+                  - {kind: payment, status: approved, at: '2026-10-02T10:15:01Z', by: system}
+                createdAt: '2026-10-02T10:15:00Z'
+                paymentAttemptId: c2f1d0a9-5b3e-4e7a-9a60-8d1b2c3e4f50
+        '202':
+          description: |
+            Payment provider unreachable. The order is created with `orderStatus` placed and
+            `paymentStatus` pending; stock stays reserved but is not committed, and the shopper
+            should retry with the same `Idempotency-Key`; a retry completes or fails the payment
+            without duplicating the order. A payment still pending after 30 minutes cancels the
+            order (`cancellationReason` PAYMENT_EXPIRED) and releases the stock.
+          headers:
+            X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}
+            Location: {description: URL of the pending order., schema: {type: string, format: uri-reference}}
+            Retry-After: {description: Suggested seconds before retrying., schema: {type: integer}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+              example:
+                id: 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a11
+                orderStatus: placed
+                paymentStatus: pending
+                cancellationReason: null
+                lines:
+                  - {productId: 3d7c2b9a-1f44-4c8e-9a52-6b0e7d3c4f02, name: Coffee Beans 1kg, unitPrice: {amountMinor: 2450, currency: BRL}, quantity: 2, lineTotal: {amountMinor: 4900, currency: BRL}}
+                total: {amountMinor: 4900, currency: BRL}
+                deliveryAddress: {recipientName: Ada Lovelace, line1: 12 Analytical Street, line2: null, city: London, postalCode: N1 9GU, country: GB}
+                statusHistory:
+                  - {kind: order, status: placed, at: '2026-10-02T10:20:00Z', by: 7c1d4f3e-0a52-4c0b-8d3a-1e2f3a4b5c6d}
+                  - {kind: payment, status: pending, at: '2026-10-02T10:20:00Z', by: system}
+                createdAt: '2026-10-02T10:20:00Z'
+                paymentAttemptId: null
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: |
+            Checkout refused; no order is created and the cart is unchanged. Two outcomes,
+            distinguished by the problem `type` URI:
+            - `https://shop.example/problems/insufficient-stock`: stock could not be reserved for
+              one or more cart lines; `unavailableLines` lists each affected line (FR-012).
+            - `https://shop.example/problems/price-changed`: at least one line's price changed
+              since the `cartRevision` the shopper last saw (FR-011); `changedLines` lists each
+              line with its old and new price and `currentCartRevision` is the revision to
+              resubmit. Resubmitting the request with `cartRevision` set to `currentCartRevision`
+              (and a new `Idempotency-Key`) places the order at the current prices.
+          headers:
+            X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}
+          content:
+            application/problem+json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/InsufficientStockProblem'
+                  - $ref: '#/components/schemas/PriceChangedProblem'
+              examples:
+                insufficientStock:
+                  summary: Stock could not be reserved
+                  value:
+                    type: https://shop.example/problems/insufficient-stock
+                    title: Insufficient stock
+                    status: 409
+                    detail: One or more items in the cart are no longer available.
+                    instance: /api/v1/orders
+                    unavailableLines:
+                      - {productId: 3d7c2b9a-1f44-4c8e-9a52-6b0e7d3c4f02, name: Coffee Beans 1kg, requestedQuantity: 2, availableQuantity: 0}
+                priceChanged:
+                  summary: A cart line's price changed since the revision the shopper saw
+                  value:
+                    type: https://shop.example/problems/price-changed
+                    title: Price changed
+                    status: 409
+                    detail: The price of one or more items changed since you last viewed the cart. Review the new prices and resubmit with the current cart revision.
+                    instance: /api/v1/orders
+                    changedLines:
+                      - lineId: c1a9e2f4-6b07-4d3a-8e51-0b7d4a9c2f18
+                        productId: 9a4f1e0e-6c2d-4a17-8d3b-0c7e5f2a1b01
+                        oldPrice: {amountMinor: 14900, currency: BRL}
+                        newPrice: {amountMinor: 15900, currency: BRL}
+                    currentCartRevision: rev-9d4c1b37
+        '422':
+          description: |
+            The payment was declined: the order is recorded as `orderStatus` cancelled with
+            `cancellationReason` PAYMENT_FAILED and `paymentStatus` failed, stock is released, the
+            cart is kept and `declineReason` is set. Also returned when the `Idempotency-Key` was reused with a different body
+            (`idempotencyConflict` true), or when the cart is empty or the address is unknown.
+          headers:
+            X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/PlaceOrderRejectedProblem'}
+              examples:
+                paymentDeclined:
+                  summary: Payment declined by the provider
+                  value:
+                    type: https://shop.example/problems/payment-declined
+                    title: Payment declined
+                    status: 422
+                    detail: The payment provider declined the charge.
+                    instance: /api/v1/orders
+                    declineReason: insufficient_funds
+                    orderId: 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a12
+                idempotencyKeyReused:
+                  summary: Same key, different body
+                  value:
+                    type: https://shop.example/problems/idempotency-key-reuse
+                    title: Idempotency key reused with a different request
+                    status: 422
+                    detail: The Idempotency-Key was already used with a different request body.
+                    instance: /api/v1/orders
+                    idempotencyConflict: true
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+    get:
+      tags: [Orders]
+      operationId: listOwnOrders
+      summary: List the caller's orders, newest first
+      description: |
+        Required role: `shopper`. Returns only the authenticated shopper's orders ordered by
+        `createdAt` descending (FR-016).
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: A page of orders.
+          headers:
+            X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OrderPage'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /api/v1/orders/{orderId}:
+    get:
+      tags: [Orders]
+      operationId: getOwnOrder
+      summary: Get one order with its status history
+      description: |
+        Required role: `shopper` (own orders only) or `operator` (any order). A shopper asking for
+        another shopper's order receives 404.
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The order.
+          headers:
+            X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /api/v1/orders/{orderId}/cancellation:
+    post:
+      tags: [Orders]
+      operationId: cancelOwnOrder
+      summary: Cancel one of the caller's orders
+      description: |
+        Required role: `shopper` (own orders only). Allowed only while `orderStatus` is `placed`
+        (before preparation begins). The order becomes `cancelled` with `cancellationReason`
+        SHOPPER_REQUEST, stock is returned and a refund is recorded with the payment provider
+        when `paymentStatus` is `approved` (FR-016). Any other `orderStatus` answers 409 with the
+        reason.
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The order, now `orderStatus` cancelled with `cancellationReason` SHOPPER_REQUEST.
+          headers:
+            X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: Not cancellable any more (`orderStatus` is preparing, shipped, delivered or already cancelled).
+          headers:
+            X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+              example:
+                type: https://shop.example/problems/order-not-cancellable
+                title: Order cannot be cancelled
+                status: 409
+                detail: Shoppers can only cancel an order while it is placed; this order is shipped.
+                instance: /api/v1/orders/0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10/cancellation
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /api/v1/orders/{orderId}/status:
+    post:
+      tags: [Operator]
+      operationId: transitionOrderStatus
+      summary: Advance an order through the lifecycle (operator)
+      description: |
+        Required role: `operator`; shoppers receive 403. The body carries an `orderStatus` value
+        and enforces the lifecycle described in the API description: placed -> preparing ->
+        shipped -> delivered, plus `cancelled` while the order is `placed` or `preparing`
+        (recorded with `cancellationReason` OPERATOR). Moving to `preparing` is refused with 409
+        unless `paymentStatus` is `approved`. A disallowed transition answers 409 and leaves the
+        order unchanged. `paymentStatus` is driven by the payment service and cannot be set here.
+        Moving to `shipped` or `delivered` produces a notification event (FR-017, FR-018). The
+        transition is recorded in `statusHistory` (`kind` order) with the operator's account id
+        in `by`.
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/TransitionRequest'}
+            example: {orderStatus: shipped}
+      responses:
+        '200':
+          description: The order in its new `orderStatus`.
+          headers:
+            X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Order'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409':
+          description: Transition not allowed from the current `orderStatus`, or `preparing` requested while `paymentStatus` is not `approved`.
+          headers:
+            X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/Problem'}
+              example:
+                type: https://shop.example/problems/invalid-transition
+                title: Invalid status transition
+                status: 409
+                detail: Cannot move an order from delivered to preparing.
+                instance: /api/v1/orders/0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10/status
+        '422': {$ref: '#/components/responses/Unprocessable'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT issued by the identity service; carries the `shopper` or `operator` role.
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Client-generated UUID identifying one checkout attempt.
+      schema: {type: string, format: uuid}
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: Optional correlation id; a malformed value is replaced by the gateway.
+      schema: {type: string, maxLength: 64}
+    OrderId: {name: orderId, in: path, required: true, schema: {type: string, format: uuid}}
+    Page: {name: page, in: query, schema: {type: integer, minimum: 0, default: 0}}
+    Size: {name: size, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+  headers:
+    CorrelationId:
+      description: Correlation id of the request, echoed on every response.
+      schema: {type: string}
+  responses:
+    BadRequest:
+      description: Malformed request.
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    Unauthorized:
+      description: Missing, expired or invalid bearer token.
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    Forbidden:
+      description: Authenticated but the role is not allowed.
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    NotFound:
+      description: Resource does not exist or is not visible to the caller.
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    Unprocessable:
+      description: Well-formed but semantically invalid request.
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    TooManyRequests:
+      description: Rate limit exceeded.
+      headers:
+        X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}
+        Retry-After: {description: Seconds to wait., schema: {type: integer}}
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    ServiceUnavailable:
+      description: Service or a dependency is temporarily unavailable.
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status]
+      properties:
+        type: {type: string, format: uri}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string}
+        errors:
+          type: array
+          items: {type: object, required: [field, message], properties: {field: {type: string}, message: {type: string}}}
+    InsufficientStockProblem:
+      description: 409 problem with `type` ending in `/problems/insufficient-stock`.
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          required: [unavailableLines]
+          properties:
+            unavailableLines:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                required: [productId, name, requestedQuantity, availableQuantity]
+                properties: {productId: {type: string, format: uuid}, name: {type: string}, requestedQuantity: {type: integer, minimum: 1}, availableQuantity: {type: integer, minimum: 0}}
+    PriceChangedProblem:
+      description: 409 problem with `type` ending in `/problems/price-changed`; no order was created.
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          required: [changedLines, currentCartRevision]
+          properties:
+            changedLines:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                required: [lineId, productId, oldPrice, newPrice]
+                properties:
+                  lineId: {type: string, format: uuid, description: Cart line identifier.}
+                  productId: {type: string, format: uuid}
+                  oldPrice: {$ref: '#/components/schemas/Money'}
+                  newPrice: {$ref: '#/components/schemas/Money'}
+            currentCartRevision: {type: string, description: Revision to send as `cartRevision` when resubmitting to accept the new prices.}
+    PlaceOrderRejectedProblem:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          properties:
+            declineReason: {$ref: '#/components/schemas/DeclineReason'}
+            orderId: {type: string, format: uuid, description: Order recorded as `cancelled` (PAYMENT_FAILED, paymentStatus `failed`) when declined.}
+            idempotencyConflict: {type: boolean}
+    DeclineReason:
+      type: string
+      description: Decline category surfaced to the shopper (no provider internals).
+      enum: [insufficient_funds, card_expired, card_rejected, suspected_fraud, invalid_payment_method]
+    Money:
+      type: object
+      required: [amountMinor, currency]
+      properties: {amountMinor: {type: integer, format: int64, minimum: 0}, currency: {type: string, pattern: '^[A-Z]{3}$', description: ISO-4217 code.}}
+    PlaceOrderRequest:
+      type: object
+      required: [addressId, cartRevision, paymentMethod]
+      additionalProperties: false
+      properties:
+        addressId: {type: string, format: uuid, description: One of the shopper's saved addresses.}
+        cartRevision: {type: string, minLength: 1, description: Opaque `revision` of the cart the shopper last saw (`GET /api/v1/cart`). A price change since that revision refuses the checkout with 409 `price-changed`.}
+        paymentMethod:
+          type: object
+          required: [type, token]
+          additionalProperties: false
+          properties: {type: {type: string, const: card}, token: {type: string, minLength: 1, maxLength: 128, description: Opaque provider token; never a card number.}}
+    TransitionRequest:
+      type: object
+      required: [orderStatus]
+      additionalProperties: false
+      properties: {orderStatus: {$ref: '#/components/schemas/OrderStatus'}}
+    OrderStatus:
+      type: string
+      description: placed -> preparing -> shipped -> delivered; cancelled only from placed or preparing.
+      enum: [placed, preparing, shipped, delivered, cancelled]
+    PaymentStatus:
+      type: string
+      description: pending -> approved | failed. Preparing requires approved.
+      enum: [pending, approved, failed]
+    CancellationReason:
+      type: string
+      description: Why the order was cancelled; present only when `orderStatus` is `cancelled`.
+      enum: [SHOPPER_REQUEST, OPERATOR, PAYMENT_FAILED, PAYMENT_EXPIRED]
+    OrderLine:
+      type: object
+      required: [productId, name, unitPrice, quantity, lineTotal]
+      properties:
+        productId: {type: string, format: uuid}
+        name: {type: string, description: Product name snapshot at confirmation.}
+        unitPrice: {$ref: '#/components/schemas/Money'}
+        quantity: {type: integer, minimum: 1}
+        lineTotal: {$ref: '#/components/schemas/Money'}
+    DeliveryAddress:
+      type: object
+      description: Snapshot of the chosen address at confirmation.
+      required: [recipientName, line1, city, postalCode, country]
+      properties:
+        recipientName: {type: string}
+        line1: {type: string}
+        line2: {type: [string, 'null']}
+        city: {type: string}
+        postalCode: {type: string}
+        country: {type: string, pattern: '^[A-Z]{2}$'}
+    StatusChange:
+      type: object
+      required: [kind, status, at, by]
+      properties:
+        kind: {type: string, enum: [order, payment], description: 'Which status changed: `order` (orderStatus) or `payment` (paymentStatus).'}
+        status:
+          description: New value; an OrderStatus when `kind` is `order`, a PaymentStatus when `kind` is `payment`.
+          oneOf:
+            - {$ref: '#/components/schemas/OrderStatus'}
+            - {$ref: '#/components/schemas/PaymentStatus'}
+        at: {type: string, format: date-time}
+        by: {type: string, description: 'Account id of the actor, or system.'}
+    Order:
+      type: object
+      required: [id, orderStatus, paymentStatus, lines, total, deliveryAddress, statusHistory, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        orderStatus: {$ref: '#/components/schemas/OrderStatus'}
+        paymentStatus: {$ref: '#/components/schemas/PaymentStatus'}
+        cancellationReason:
+          description: Present (non-null) only when `orderStatus` is `cancelled`.
+          oneOf:
+            - {$ref: '#/components/schemas/CancellationReason'}
+            - {type: 'null'}
+        lines: {type: array, items: {$ref: '#/components/schemas/OrderLine'}}
+        total: {$ref: '#/components/schemas/Money'}
+        deliveryAddress: {$ref: '#/components/schemas/DeliveryAddress'}
+        statusHistory: {type: array, items: {$ref: '#/components/schemas/StatusChange'}}
+        createdAt: {type: string, format: date-time}
+        paymentAttemptId: {type: [string, 'null'], format: uuid, description: Latest payment attempt; null while none reached the provider.}
+    OrderPage:
+      type: object
+      required: [items, page, size, totalItems]
+      properties: {items: {type: array, items: {$ref: '#/components/schemas/Order'}}, page: {type: integer, minimum: 0}, size: {type: integer, minimum: 1, maximum: 100}, totalItems: {type: integer, format: int64, minimum: 0}}

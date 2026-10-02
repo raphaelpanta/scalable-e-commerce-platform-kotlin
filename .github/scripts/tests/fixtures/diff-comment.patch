@@ -1,0 +1,6 @@
+diff --git a/services/demo/domain-ok/src/main/kotlin/com/ecommerce/demo/domain/Price.kt b/services/demo/domain-ok/src/main/kotlin/com/ecommerce/demo/domain/Price.kt
+--- a/services/demo/domain-ok/src/main/kotlin/com/ecommerce/demo/domain/Price.kt
++++ b/services/demo/domain-ok/src/main/kotlin/com/ecommerce/demo/domain/Price.kt
+@@ -15 +15 @@ data class Price(val cents: Long) {
+-    // pricing rules
++    // pricing rules live in the catalog service

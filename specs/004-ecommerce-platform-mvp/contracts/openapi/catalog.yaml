@@ -1,0 +1,563 @@
+openapi: 3.1.0
+info:
+  title: Catalog API
+  version: 1.0.0
+  summary: Products, categories, images and inventory.
+  description: |
+    Public contract of the catalogue service as exposed through the gateway (spec 004, user
+    stories 1 and 7, FR-001..FR-003).
+
+    Conventions shared by all services: bearer JWT with roles `shopper` and `operator`; deny by
+    default; RFC 9457 `application/problem+json` errors; `X-Correlation-Id` accepted on every
+    request and echoed on every response; money as `{amountMinor, currency}`; UUID identifiers;
+    UTC `date-time` timestamps; pagination with `page` (default 0) and `size` (default 20, max 100).
+
+    Catalogue reads are anonymous. Every write requires the `operator` role; a shopper token is
+    refused with 403 and the attempt is logged. Reads accept an optional bearer token: when it
+    carries the `operator` role, `availability.availableQuantity` and withdrawn products are
+    included; for everyone else they are never exposed.
+servers:
+  - url: http://localhost:8080
+    description: Local platform entry point (API gateway)
+tags:
+  - name: Products
+  - name: Inventory
+  - name: Categories
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/catalog/products:
+    get:
+      operationId: listProducts
+      tags: [Products]
+      summary: List or search active products
+      description: |
+        Anonymous (optional bearer). Returns only active products, paged. With `q` the result is
+        ranked by relevance; otherwise ordered by name. Withdrawn products are never returned to
+        non-operators. Operators may list withdrawn products with `includeWithdrawn=true`.
+      security: [{}, { bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: q
+          in: query
+          description: Free-text search over name and description.
+          schema: { type: string, maxLength: 100 }
+        - name: categoryId
+          in: query
+          description: Restrict to this category and its descendants.
+          schema: { type: string, format: uuid }
+        - name: includeWithdrawn
+          in: query
+          description: Operator only; ignored for other callers.
+          schema: { type: boolean, default: false }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: A page of products.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductPage' }
+              example:
+                items:
+                  - id: 0b4e6d1c-2a57-4c83-9f10-6d8a3e5b7c21
+                    name: Trail Running Shoes
+                    description: Lightweight shoes with a grippy sole.
+                    price: { amountMinor: 8990, currency: BRL }
+                    categoryId: 5c2f9a7e-1b34-4d68-8a0e-3f6c1d9b2e45
+                    status: active
+                    images: [{ id: 91d3a0b2-7c4e-4f15-b6a8-2e0d5c1f3a67, url: 'https://cdn.example.test/shoes.jpg', altText: Shoes, primary: true }]
+                    availability: { inStock: true }
+                    createdAt: '2026-10-02T08:00:00Z'
+                    updatedAt: '2026-10-02T08:00:00Z'
+                page: 0
+                size: 20
+                totalItems: 1
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      operationId: createProduct
+      tags: [Products]
+      summary: Create a product
+      description: Requires role operator. The product is visible to shoppers immediately with the given stock.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductCreate' }
+            example:
+              name: Trail Running Shoes
+              description: Lightweight shoes with a grippy sole.
+              price: { amountMinor: 8990, currency: BRL }
+              categoryId: 5c2f9a7e-1b34-4d68-8a0e-3f6c1d9b2e45
+              initialStock: 5
+      responses:
+        '201':
+          description: Product created.
+          headers:
+            X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+            Location: { description: URL of the new product., schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+  /api/v1/catalog/products/{productId}:
+    parameters:
+      - $ref: '#/components/parameters/ProductId'
+      - $ref: '#/components/parameters/CorrelationId'
+    get:
+      operationId: getProduct
+      tags: [Products]
+      summary: Get a product
+      description: Anonymous (optional bearer). A withdrawn product answers 404 except to operators.
+      security: [{}, { bearerAuth: [] }]
+      responses:
+        '200':
+          description: The product.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+              example:
+                id: 0b4e6d1c-2a57-4c83-9f10-6d8a3e5b7c21
+                name: Trail Running Shoes
+                description: Lightweight shoes with a grippy sole.
+                price: { amountMinor: 8990, currency: BRL }
+                categoryId: 5c2f9a7e-1b34-4d68-8a0e-3f6c1d9b2e45
+                status: active
+                images: []
+                availability: { inStock: false }
+                createdAt: '2026-10-02T08:00:00Z'
+                updatedAt: '2026-10-02T09:30:00Z'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    put:
+      operationId: updateProduct
+      tags: [Products]
+      summary: Update a product
+      description: Requires role operator. Replaces name, description, price and category; stock is changed only through stock adjustments. Existing orders keep their frozen prices.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductUpdate' }
+      responses:
+        '200':
+          description: The updated product.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+  /api/v1/catalog/products/{productId}/withdrawal:
+    post:
+      operationId: withdrawProduct
+      tags: [Products]
+      summary: Withdraw a product from sale
+      description: |
+        Requires role operator. The product disappears from browsing and search and cannot be added
+        to carts; existing orders are unaffected. Withdrawing an already withdrawn product answers
+        409.
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The withdrawn product.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/catalog/products/{productId}/stock-adjustments:
+    post:
+      operationId: adjustStock
+      tags: [Inventory]
+      summary: Adjust stock by a positive or negative delta
+      description: |
+        Requires role operator. Applies `delta` to the available quantity and records who, when and
+        why. A delta that would make the available quantity negative answers 422.
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StockAdjustmentRequest' }
+            example: { delta: -2, reason: Damaged units found during stocktake }
+      responses:
+        '201':
+          description: Adjustment recorded.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StockAdjustment' }
+              example:
+                id: 4e7a2c91-0d63-4b58-a1f4-9c3e8b5d2a70
+                productId: 0b4e6d1c-2a57-4c83-9f10-6d8a3e5b7c21
+                delta: -2
+                reason: Damaged units found during stocktake
+                previousQuantity: 5
+                newQuantity: 3
+                adjustedBy: 3f2b8c0e-5d41-4a39-9c1e-0a7f6b2d4e11
+                adjustedAt: '2026-10-02T10:00:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+  /api/v1/catalog/products/{productId}/images:
+    post:
+      operationId: addProductImage
+      tags: [Products]
+      summary: Add an image to a product (metadata only)
+      description: Requires role operator. Registers an image URL; the binary is not uploaded through this API. Marking an image primary demotes the previous primary.
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductImageInput' }
+            example: { url: 'https://cdn.example.test/shoes-side.jpg', altText: Side view, primary: false }
+      responses:
+        '201':
+          description: Image registered.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductImage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+  /api/v1/catalog/categories:
+    get:
+      operationId: listCategories
+      tags: [Categories]
+      summary: List categories
+      description: Anonymous. Flat list; nesting is expressed by `parentId`. Optionally restrict to the children of one parent.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: parentId
+          in: query
+          schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: A page of categories.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CategoryPage' }
+              example:
+                items: [{ id: 5c2f9a7e-1b34-4d68-8a0e-3f6c1d9b2e45, name: Footwear, description: Shoes and boots }]
+                page: 0
+                size: 20
+                totalItems: 1
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      operationId: createCategory
+      tags: [Categories]
+      summary: Create a category
+      description: Requires role operator. A duplicate name under the same parent answers 409.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoryInput' }
+            example: { name: Footwear, description: Shoes and boots }
+      responses:
+        '201':
+          description: Category created.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+  /api/v1/catalog/categories/{categoryId}:
+    parameters:
+      - $ref: '#/components/parameters/CategoryId'
+      - $ref: '#/components/parameters/CorrelationId'
+    get:
+      operationId: getCategory
+      tags: [Categories]
+      summary: Get a category
+      description: Anonymous.
+      security: []
+      responses:
+        '200':
+          description: The category.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    put:
+      operationId: updateCategory
+      tags: [Categories]
+      summary: Update a category
+      description: Requires role operator. Moving a category beneath one of its own descendants answers 422.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoryInput' }
+      responses:
+        '200':
+          description: The updated category.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token issued by the identity service. Roles are carried in the `roles` claim (`shopper`, `operator`).
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: Optional correlation identifier; a malformed value is replaced by the gateway.
+      schema: { type: string, maxLength: 64 }
+    ProductId:
+      name: productId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    CategoryId:
+      name: categoryId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+    Size:
+      name: size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+  headers:
+    CorrelationId:
+      description: Correlation identifier echoed from the request, or generated when absent or malformed.
+      schema: { type: string }
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      schema: { type: integer, minimum: 0 }
+  responses:
+    BadRequest:
+      description: Malformed request (400).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'https://errors.example.test/bad-request', title: Bad request, status: 400, detail: Query parameter size must be at most 100., instance: /api/v1/catalog/products }
+    Unauthorized:
+      description: Missing, invalid or expired credentials (401).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: Authenticated but lacking the operator role (403).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'https://errors.example.test/forbidden', title: Forbidden, status: 403, detail: Operator role required., instance: /api/v1/catalog/products }
+    NotFound:
+      description: Resource not found, or withdrawn and hidden from the caller (404).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'https://errors.example.test/not-found', title: Not found, status: 404, detail: Product not found., instance: /api/v1/catalog/products/0b4e6d1c-2a57-4c83-9f10-6d8a3e5b7c21 }
+    Conflict:
+      description: State conflict, such as a duplicate name or an already withdrawn product (409).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    UnprocessableEntity:
+      description: Well-formed but semantically invalid (422), with per-field errors.
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: https://errors.example.test/validation
+            title: Validation failed
+            status: 422
+            detail: Stock cannot become negative.
+            instance: /api/v1/catalog/products/0b4e6d1c-2a57-4c83-9f10-6d8a3e5b7c21/stock-adjustments
+            errors: [{ field: delta, message: would make available quantity negative }]
+    TooManyRequests:
+      description: Rate limited (429).
+      headers:
+        X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string }
+              message: { type: string }
+    Money:
+      type: object
+      required: [amountMinor, currency]
+      properties:
+        amountMinor: { type: integer, format: int64, minimum: 0, description: Amount in minor units (for example cents). }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: ISO 4217 code. }
+    Availability:
+      type: object
+      required: [inStock]
+      properties:
+        inStock: { type: boolean }
+        availableQuantity: { type: integer, minimum: 0, description: Present only for callers with the operator role. }
+    ProductImageInput:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, format: uri, maxLength: 2048 }
+        altText: { type: string, maxLength: 200 }
+        primary: { type: boolean, default: false }
+    ProductImage:
+      allOf:
+        - $ref: '#/components/schemas/ProductImageInput'
+        - type: object
+          required: [id, primary]
+          properties:
+            id: { type: string, format: uuid }
+    ProductUpdate:
+      type: object
+      required: [name, price, categoryId]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string, maxLength: 4000 }
+        price: { $ref: '#/components/schemas/Money' }
+        categoryId: { type: string, format: uuid }
+    ProductCreate:
+      allOf:
+        - $ref: '#/components/schemas/ProductUpdate'
+        - type: object
+          properties:
+            initialStock: { type: integer, minimum: 0, default: 0 }
+    Product:
+      type: object
+      required: [id, name, price, categoryId, status, images, availability, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        price: { $ref: '#/components/schemas/Money' }
+        categoryId: { type: string, format: uuid }
+        status: { type: string, enum: [active, withdrawn], description: '`withdrawn` is visible to operators only.' }
+        images: { type: array, items: { $ref: '#/components/schemas/ProductImage' } }
+        availability: { $ref: '#/components/schemas/Availability' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ProductPage:
+      type: object
+      required: [items, page, size, totalItems]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Product' } }
+        page: { type: integer }
+        size: { type: integer }
+        totalItems: { type: integer, format: int64 }
+    StockAdjustmentRequest:
+      type: object
+      required: [delta, reason]
+      properties:
+        delta: { type: integer, not: { const: 0 }, description: Positive adds stock, negative removes it. }
+        reason: { type: string, minLength: 1, maxLength: 255 }
+    StockAdjustment:
+      type: object
+      required: [id, productId, delta, reason, previousQuantity, newQuantity, adjustedBy, adjustedAt]
+      properties:
+        id: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        delta: { type: integer }
+        reason: { type: string }
+        previousQuantity: { type: integer, minimum: 0 }
+        newQuantity: { type: integer, minimum: 0 }
+        adjustedBy: { type: string, format: uuid, description: Account id of the operator. }
+        adjustedAt: { type: string, format: date-time }
+    CategoryInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        description: { type: string, maxLength: 1000 }
+        parentId: { type: [string, 'null'], format: uuid }
+    Category:
+      allOf:
+        - $ref: '#/components/schemas/CategoryInput'
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+    CategoryPage:
+      type: object
+      required: [items, page, size, totalItems]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Category' } }
+        page: { type: integer }
+        size: { type: integer }
+        totalItems: { type: integer, format: int64 }

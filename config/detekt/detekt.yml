@@ -1,0 +1,26 @@
+# detekt 2.x configuration, layered on top of the default config (buildUponDefaultConfig = true,
+# set by the `quality` convention). detekt 2 has no `build: maxIssues`; the convention sets
+# `failOnSeverity = Info`, so any finding fails the build (warnings as errors, Principle I).
+
+config:
+  validation: true
+
+style:
+  MagicNumber:
+    active: true
+    ignoreNumbers: ['-1', '0', '1', '2']
+  MaxLineLength:
+    maxLineLength: 120
+
+naming:
+  FunctionNaming:
+    # Test names may be sentences in backticks in every test layer, not only in src/test.
+    excludes: ['**/test/**', '**/integrationTest/**', '**/contractTest/**', '**/acceptanceTest/**']
+
+complexity:
+  LongMethod:
+    allowedLines: 40
+
+potential-bugs:
+  UnsafeCallOnNullableType:
+    active: true

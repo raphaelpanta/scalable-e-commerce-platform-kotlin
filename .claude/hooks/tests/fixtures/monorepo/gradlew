@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Fake Gradle wrapper for the hook tests (see .claude/hooks/tests/lib.sh).
+# Appends "<name> <args> #CI=.. #stdin=null|other #cwd=<dir>" to $FIXTURE_LOG, sleeps $FAKE_SLEEP seconds,
+# prints $FAKE_OUTPUT_LINES lines and exits with $FAKE_EXIT (default 0).
+#   FAKE_FAIL_MATCH     bash glob over the argument string; when set, only matching calls fail
+#   FAKE_NOTFOUND_MATCH bash glob; matching calls print Gradle's "Task '...' not found" and exit 1
+#   FAKE_NOTFOUND_MATCH2 a second such glob (e.g. a build with neither `verify` nor `pitest`)
+#   FAKE_TASKS          output of `tasks --all` (default: pitest exists in :services:demo:domain)
+name="$(basename "$0")"
+stdin_kind=other; [ /dev/stdin -ef /dev/null ] && stdin_kind=null
+echo "$name $* #CI=${CI:-} #stdin=$stdin_kind #cwd=$(basename "$PWD")" >>"${FIXTURE_LOG:-/dev/null}"
+args="$*"
+case " $args " in
+  *" tasks "*)
+    if [ "${FAKE_TASKS+set}" = set ]; then printf '%s\n' "$FAKE_TASKS"
+    else echo ":services:demo:domain:pitest - Run PIT mutation testing"; fi
+    exit 0 ;;
+esac
+for nf in "${FAKE_NOTFOUND_MATCH:-}" "${FAKE_NOTFOUND_MATCH2:-}"; do
+  [ -n "$nf" ] || continue
+  # shellcheck disable=SC2254
+  case "$args" in $nf)
+    echo "FAILURE: Build failed with an exception."
+    echo "* What went wrong:"
+    echo "Task 'verify' not found in root project 'fixture'."
+    exit 1 ;;
+  esac
+done
+sleep "${FAKE_SLEEP:-0}"
+i=0
+while [ "$i" -lt "${FAKE_OUTPUT_LINES:-0}" ]; do i=$((i + 1)); echo "fake $name output line $i"; done
+if [ -n "${FAKE_FAIL_MATCH:-}" ]; then
+  # shellcheck disable=SC2254
+  case "$args" in $FAKE_FAIL_MATCH) exit "${FAKE_EXIT:-1}" ;; *) exit 0 ;; esac
+fi
+exit "${FAKE_EXIT:-0}"

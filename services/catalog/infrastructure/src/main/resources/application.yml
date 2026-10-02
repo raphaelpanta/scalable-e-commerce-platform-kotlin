@@ -1,0 +1,41 @@
+spring:
+  application:
+    name: catalog
+  r2dbc:
+    url: r2dbc:postgresql://${CATALOG_DB_HOST:localhost}:5432/catalog
+    # No committed defaults: credentials come from the environment only.
+    username: ${CATALOG_DB_USER}
+    password: ${CATALOG_DB_PASSWORD}
+  flyway:
+    # Documented blocking exception (constitution Principle IV, plan Complexity Tracking): Flyway migrates
+    # over JDBC once at start-up, before the service reports ready; every request path stays non-blocking.
+    url: jdbc:postgresql://${CATALOG_DB_HOST:localhost}:5432/catalog
+    user: ${CATALOG_DB_USER}
+    password: ${CATALOG_DB_PASSWORD}
+  reactor:
+    # Restores thread locals (MDC correlationId) on Reactor operators, also when started without main().
+    context-propagation: auto
+
+management:
+  server:
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: never
+      # The body stays exactly {"status":"..."}; liveness/readiness groups can be enabled per environment.
+      probes:
+        enabled: false
+  health:
+    # The CheckServiceHealth use case (DatabaseHealthProbe, two-second timeout) decides database health;
+    # the built-in R2DBC indicator has no timeout and would hang while the database is unreachable.
+    r2dbc:
+      enabled: false
+
+logging:
+  structured:
+    format:
+      console: ecs

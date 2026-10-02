@@ -1,0 +1,23 @@
+== post-edit Price.kt ==
+DRY [<ROOT>]: <ROOT>/gradlew -q --console=plain :services:demo:domain:ktlintCheck :services:demo:domain:detekt :services:demo:domain:test --tests *.PriceSpec
+exit=0
+== post-edit PriceSpec.kt ==
+DRY [<ROOT>]: <ROOT>/gradlew -q --console=plain :services:demo:domain:ktlintCheck :services:demo:domain:detekt :services:demo:domain:test --tests *.PriceSpec
+exit=0
+== post-edit Repo.kt ==
+DRY [<ROOT>]: <ROOT>/gradlew -q --console=plain :services:demo:infrastructure:ktlintCheck :services:demo:infrastructure:detekt
+exit=0
+== post-edit domain build.gradle.kts ==
+DRY [<ROOT>]: <ROOT>/gradlew -q --console=plain help
+exit=0
+== post-edit index.ts ==
+DRY [<ROOT>/frontend/web]: npx --no-install eslint --max-warnings=0 <ROOT>/frontend/web/src/index.ts
+DRY [<ROOT>/frontend/web]: npx --no-install tsc --noEmit -p <ROOT>/frontend/web
+DRY [<ROOT>/frontend/web]: npx --no-install vitest related <ROOT>/frontend/web/src/index.ts --run --passWithNoTests
+exit=0
+== stop (complete gate) ==
+DRY [gradle:verify] (): <ROOT>/gradlew -q --console=plain verify
+DRY [web:lint] (/frontend/web): npm run -s lint
+DRY [web:test] (/frontend/web): npm run -s test
+DRY [web:stryker] (/frontend/web): npx --no-install stryker run --incremental
+exit=0

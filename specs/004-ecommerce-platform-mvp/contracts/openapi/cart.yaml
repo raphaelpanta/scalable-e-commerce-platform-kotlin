@@ -1,0 +1,392 @@
+openapi: 3.1.0
+info:
+  title: Cart API
+  version: 1.0.0
+  summary: Anonymous and account shopping carts.
+  description: |
+    Public contract of the cart service as exposed through the gateway (spec 004, user story 2,
+    FR-008..FR-010).
+
+    Conventions shared by all services: bearer JWT with roles `shopper` and `operator`; deny by
+    default; RFC 9457 `application/problem+json` errors; `X-Correlation-Id` accepted on every
+    request and echoed on every response; money as `{amountMinor, currency}`; UUID identifiers;
+    UTC `date-time` timestamps; pagination with `page` (default 0) and `size` (default 20, max 100)
+    (not used here: a cart is a single bounded resource).
+
+    Cart identity. Every cart operation except `mergeCart` is available anonymously and to
+    signed-in shoppers (`security: [{}, bearerAuth]`):
+    - Signed-in callers send a bearer token and operate on their account cart; `X-Cart-Token` is
+      ignored.
+    - Anonymous callers identify their cart with the opaque `X-Cart-Token` request header. The
+      service issues the token on the first write (adding a line) and returns it in the
+      `X-Cart-Token` response header; clients store it and send it on every later call. An
+      anonymous read without a token returns an empty cart and issues no token. An unknown or
+      expired token answers 404; the client discards it and starts again.
+    - On sign-in the client calls `mergeCart` with both the bearer token and the anonymous token.
+
+    Prices are never trusted from the client: the cart records `priceAtAdd` when a line is first
+    added and always reports the catalogue's `currentPrice`; `lineTotal` and the cart `total` use
+    `currentPrice`. Quantities are capped at available stock.
+servers:
+  - url: http://localhost:8080
+    description: Local platform entry point (API gateway)
+tags:
+  - name: Cart
+  - name: Cart lines
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/cart:
+    get:
+      operationId: getCart
+      tags: [Cart]
+      summary: Get the current cart
+      description: |
+        Anonymous (with `X-Cart-Token`) or signed-in shopper or operator (account cart). Without a
+        token and without a bearer token an empty cart is returned.
+
+        The cart carries an opaque `revision` string (FR-010) that changes whenever its lines,
+        quantities or prices change. Clients must treat it as an opaque value (never parse or
+        compare it for ordering) and send the revision they last displayed as `cartRevision` when
+        placing an order (`POST /api/v1/orders`); if any line's price changed since that revision
+        the order service refuses the checkout with 409 and the shopper confirms by resubmitting
+        with the current revision.
+      security: [{}, { bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/CartToken'
+      responses:
+        '200':
+          description: The cart.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+              example:
+                id: 8d3b7a10-4c52-4e96-b1a7-2f5e9c0d6b34
+                revision: rev-7f3a9c21
+                lines:
+                  - id: c1a9e2f4-6b07-4d3a-8e51-0b7d4a9c2f18
+                    productId: 0b4e6d1c-2a57-4c83-9f10-6d8a3e5b7c21
+                    productName: Trail Running Shoes
+                    quantity: 2
+                    priceAtAdd: { amountMinor: 8990, currency: BRL }
+                    currentPrice: { amountMinor: 9490, currency: BRL }
+                    priceChanged: true
+                    lineTotal: { amountMinor: 18980, currency: BRL }
+                total: { amountMinor: 18980, currency: BRL }
+                updatedAt: '2026-10-02T10:20:00Z'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      operationId: clearCart
+      tags: [Cart]
+      summary: Remove every line from the cart
+      description: Anonymous (with `X-Cart-Token`) or signed-in shopper or operator. Idempotent.
+      security: [{}, { bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/CartToken'
+      responses:
+        '204':
+          description: Cart emptied.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/cart/lines:
+    post:
+      operationId: addCartLine
+      tags: [Cart lines]
+      summary: Add a product to the cart
+      description: |
+        Anonymous (with `X-Cart-Token`, or without one to start a new anonymous cart) or signed-in
+        shopper or operator. If the product is already in the cart its quantity is increased. When
+        the resulting quantity exceeds available stock the request is refused with 422 and the
+        available quantity in `detail`. Withdrawn or out-of-stock products are also refused with
+        422; an unknown product answers 404. The first anonymous write returns the new
+        `X-Cart-Token` response header.
+      security: [{}, { bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/CartToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddLineRequest' }
+            example: { productId: 0b4e6d1c-2a57-4c83-9f10-6d8a3e5b7c21, quantity: 2 }
+      responses:
+        '201':
+          description: Line added; the whole cart is returned.
+          headers:
+            X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+            X-Cart-Token: { $ref: '#/components/headers/CartToken' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/cart/lines/{lineId}:
+    parameters:
+      - $ref: '#/components/parameters/LineId'
+      - $ref: '#/components/parameters/CorrelationId'
+      - $ref: '#/components/parameters/CartToken'
+    put:
+      operationId: updateCartLineQuantity
+      tags: [Cart lines]
+      summary: Set the quantity of a cart line
+      description: |
+        Anonymous (with `X-Cart-Token`) or signed-in shopper or operator. A quantity of 0 removes
+        the line. A quantity above available stock is refused with 422 and the available quantity
+        in `detail`.
+      security: [{}, { bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateLineRequest' }
+            example: { quantity: 3 }
+      responses:
+        '200':
+          description: The updated cart (totals recalculated).
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      operationId: removeCartLine
+      tags: [Cart lines]
+      summary: Remove a line from the cart
+      description: Anonymous (with `X-Cart-Token`) or signed-in shopper or operator. Returns the recalculated cart.
+      security: [{}, { bearerAuth: [] }]
+      responses:
+        '200':
+          description: The updated cart.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/cart/merge:
+    post:
+      operationId: mergeCart
+      tags: [Cart]
+      summary: Merge the anonymous cart into the account cart
+      description: |
+        Requires role shopper or operator (bearer) and the anonymous cart's `X-Cart-Token`. Lines
+        of the anonymous cart are added to the account cart; quantities of the same product are
+        summed and capped at available stock, and every capped line is reported in `cappedLines`.
+        Lines for withdrawn products are dropped and also reported. The anonymous cart and its
+        token are consumed; repeating the call with the same token answers 404. A merge already in
+        progress for the same token answers 409.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: X-Cart-Token
+          in: header
+          required: true
+          description: Token of the anonymous cart to merge.
+          schema: { type: string }
+      responses:
+        '200':
+          description: The account cart after merging, with any capping applied.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MergeResult' }
+              example:
+                cart:
+                  id: 8d3b7a10-4c52-4e96-b1a7-2f5e9c0d6b34
+                  revision: rev-b21e5d08
+                  lines:
+                    - id: c1a9e2f4-6b07-4d3a-8e51-0b7d4a9c2f18
+                      productId: 0b4e6d1c-2a57-4c83-9f10-6d8a3e5b7c21
+                      productName: Trail Running Shoes
+                      quantity: 5
+                      priceAtAdd: { amountMinor: 8990, currency: BRL }
+                      currentPrice: { amountMinor: 8990, currency: BRL }
+                      priceChanged: false
+                      lineTotal: { amountMinor: 44950, currency: BRL }
+                  total: { amountMinor: 44950, currency: BRL }
+                  updatedAt: '2026-10-02T10:30:00Z'
+                cappedLines:
+                  - { productId: 0b4e6d1c-2a57-4c83-9f10-6d8a3e5b7c21, requestedQuantity: 7, appliedQuantity: 5 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token issued by the identity service. Roles are carried in the `roles` claim (`shopper`, `operator`).
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: Optional correlation identifier; a malformed value is replaced by the gateway.
+      schema: { type: string, maxLength: 64 }
+    CartToken:
+      name: X-Cart-Token
+      in: header
+      required: false
+      description: Opaque anonymous-cart token issued by the cart service. Ignored when a bearer token is present.
+      schema: { type: string, maxLength: 128 }
+    LineId:
+      name: lineId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  headers:
+    CorrelationId:
+      description: Correlation identifier echoed from the request, or generated when absent or malformed.
+      schema: { type: string }
+    CartToken:
+      description: Opaque anonymous-cart token, issued on the first anonymous write. Store it and send it as `X-Cart-Token`.
+      schema: { type: string }
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      schema: { type: integer, minimum: 0 }
+  responses:
+    BadRequest:
+      description: Malformed request (400).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'https://errors.example.test/bad-request', title: Bad request, status: 400, detail: Header X-Cart-Token is required., instance: /api/v1/cart/merge }
+    Unauthorized:
+      description: Missing, invalid or expired bearer token where one is required or supplied (401).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: Authenticated but not permitted (403).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: Cart token, line or product not found, or token expired or already merged (404).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'https://errors.example.test/not-found', title: Not found, status: 404, detail: Cart token is unknown or expired., instance: /api/v1/cart }
+    Conflict:
+      description: Conflicting concurrent operation (409).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    UnprocessableEntity:
+      description: Semantically invalid (422), including quantity above available stock.
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: https://errors.example.test/insufficient-stock
+            title: Insufficient stock
+            status: 422
+            detail: Only 3 units are available; requested 5.
+            instance: /api/v1/cart/lines
+            errors: [{ field: quantity, message: 'available quantity: 3' }]
+    TooManyRequests:
+      description: Rate limited (429).
+      headers:
+        X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string }
+              message: { type: string }
+    Money:
+      type: object
+      required: [amountMinor, currency]
+      properties:
+        amountMinor: { type: integer, format: int64, description: Amount in minor units (for example cents). }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: ISO 4217 code. }
+    AddLineRequest:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId: { type: string, format: uuid }
+        quantity: { type: integer, minimum: 1 }
+    UpdateLineRequest:
+      type: object
+      required: [quantity]
+      properties:
+        quantity: { type: integer, minimum: 0, description: 0 removes the line. }
+    CartLine:
+      type: object
+      required: [id, productId, productName, quantity, priceAtAdd, currentPrice, priceChanged, lineTotal]
+      properties:
+        id: { type: string, format: uuid }
+        productId: { type: string, format: uuid }
+        productName: { type: string }
+        quantity: { type: integer, minimum: 1 }
+        priceAtAdd: { $ref: '#/components/schemas/Money' }
+        currentPrice: { $ref: '#/components/schemas/Money' }
+        priceChanged: { type: boolean, description: True when currentPrice differs from priceAtAdd. }
+        lineTotal: { $ref: '#/components/schemas/Money' }
+    Cart:
+      type: object
+      required: [id, revision, lines, total, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        revision: { type: string, minLength: 1, description: Opaque token that changes whenever the cart's lines, quantities or prices change. Send it as `cartRevision` when placing an order. }
+        lines: { type: array, items: { $ref: '#/components/schemas/CartLine' } }
+        total: { $ref: '#/components/schemas/Money' }
+        updatedAt: { type: string, format: date-time }
+    CappedLine:
+      type: object
+      required: [productId, requestedQuantity, appliedQuantity]
+      properties:
+        productId: { type: string, format: uuid }
+        requestedQuantity: { type: integer }
+        appliedQuantity: { type: integer, minimum: 0 }
+    MergeResult:
+      type: object
+      required: [cart, cappedLines]
+      properties:
+        cart: { $ref: '#/components/schemas/Cart' }
+        cappedLines: { type: array, items: { $ref: '#/components/schemas/CappedLine' } }

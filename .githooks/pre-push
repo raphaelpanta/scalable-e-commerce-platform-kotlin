@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Local secret gate (feature 003, FR-009). Activate per clone with:
+#   git config core.hooksPath .githooks
+# Scans the commits being pushed with gitleaks and refuses the push on any finding. Fails closed:
+# a missing gitleaks, a missing config or a scan error all block the push.
+set -euo pipefail
+
+ZERO="0000000000000000000000000000000000000000"
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  {
+    echo "pre-push: gitleaks is not installed, refusing to push (fail closed)."
+    echo "  Install it with:  brew install gitleaks   (see https://github.com/gitleaks/gitleaks)"
+    echo "  Then retry the push. Do not bypass this gate with --no-verify."
+  } >&2
+  exit 1
+fi
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+config="$root/.gitleaks.toml"
+if [ ! -f "$config" ]; then
+  echo "pre-push: $config is missing, refusing to push (fail closed)." >&2
+  exit 1
+fi
+
+status=0
+# shellcheck disable=SC2034  # remote_ref is part of git's fixed pre-push line format
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -n "${local_sha:-}" ] || continue
+  # Deleting a remote ref pushes no commits.
+  [ "$local_sha" != "$ZERO" ] || continue
+
+  if [ "$remote_sha" = "$ZERO" ] || ! git cat-file -e "${remote_sha}^{commit}" 2>/dev/null; then
+    range="$local_sha"                 # new branch (or unknown remote state): scan the full history
+    scope="full history"
+  else
+    range="${remote_sha}..${local_sha}"
+    scope="$range"
+  fi
+
+  rc=0
+  out="$(gitleaks git --no-banner --no-color --verbose --redact --config "$config" --log-opts="$range" "$root" 2>&1)" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    {
+      echo "pre-push: gitleaks blocked the push of $local_ref ($scope), exit code $rc."
+      printf '%s\n' "$out" | grep -E '^(Finding|File|Line|RuleID|Commit):' || printf '%s\n' "$out"
+      echo "Remove the secret, rotate it if it was ever valid, amend the commit and push again."
+      echo "If it was already pushed, follow the remediation steps in CONTRIBUTING.md."
+    } >&2
+    status=1
+  fi
+done
+
+exit "$status"

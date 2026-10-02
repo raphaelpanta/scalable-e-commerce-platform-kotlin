@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# Stateful fake `gh` for offline tests. Never contacts GitHub.
+#   GH_STUB_STATE        state directory (required): repo.json, calls.log, user, signed_out, scopes
+#   GH_STUB_REMOTE_URL   URL added as the remote by `repo create --source` (a local bare repository)
+#   GH_STUB_FAIL_ON      if set, any call whose arguments contain this text fails after being logged
+#   GH_STUB_NO_ACTIONS   if set, the Actions permission endpoints answer 404
+# calls.log lines start with READ or WRITE so tests can prove a dry run made no mutation.
+# Test-only dependency: jq.
+set -euo pipefail
+
+S="${GH_STUB_STATE:?GH_STUB_STATE must point to a state directory}"
+mkdir -p "$S"
+LOG="$S/calls.log"
+REPO="$S/repo.json"
+USER_LOGIN="$(cat "$S/user" 2>/dev/null || echo raphaelpanta)"
+
+not_found() { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+unauthenticated() { echo "To get started with GitHub CLI, please run:  gh auth login" >&2; exit 1; }
+
+record() { # KIND args...
+  local kind="$1"
+  shift
+  printf '%s gh %s\n' "$kind" "$*" >>"$LOG"
+  if [ -n "${GH_STUB_FAIL_ON:-}" ]; then
+    case "$*" in
+      *"$GH_STUB_FAIL_ON"*) echo "gh: injected failure (GH_STUB_FAIL_ON)" >&2; exit 1 ;;
+    esac
+  fi
+}
+
+emit() { # JSON [JQ_FILTER]
+  if [ -n "${2:-}" ]; then printf '%s' "$1" | jq -r "$2"; else printf '%s\n' "$1"; fi
+}
+
+signed_in_or_die() { [ ! -e "$S/signed_out" ] || unauthenticated; }
+
+repo_exists() { [ -f "$REPO" ] && [ "$(jq -r .full_name "$REPO")" = "$1" ]; }
+
+patch_repo() { # JSON-merge-expression-as-jq-filter
+  local tmp
+  tmp="$(mktemp "$S/.repo.XXXXXX")"
+  jq "$@" "$REPO" >"$tmp" && mv "$tmp" "$REPO"
+}
+
+new_repo_json() { # owner name visibility description
+  jq -n --arg o "$1" --arg n "$2" --arg v "$3" --arg d "$4" '{
+    name: $n, full_name: ($o + "/" + $n), owner: {login: $o},
+    private: ($v != "public"), visibility: $v, default_branch: "main",
+    description: $d, topics: [], size: 0, license: {spdx_id: "MIT"},
+    security_and_analysis: {secret_scanning: {status: "disabled"},
+                            secret_scanning_push_protection: {status: "disabled"}},
+    allow_squash_merge: true, allow_merge_commit: true, allow_rebase_merge: true,
+    delete_branch_on_merge: false, pvr: false, vulnerability_alerts: false,
+    community_pct: 100, open_alerts: 0}'
+}
+
+# ---------------------------------------------------------------------------------------------
+cmd_api() {
+  local method="" path="" jq_filter="" has_body=0 input="" fields="{}" a key val
+  while [ "$#" -gt 0 ]; do
+    a="$1"
+    case "$a" in
+      -X | --method) method="$2"; shift 2 ;;
+      -q | --jq) jq_filter="$2"; shift 2 ;;
+      --input) input="$2"; has_body=1; shift 2 ;;
+      -f | --raw-field)
+        key="${2%%=*}"; val="${2#*=}"; has_body=1
+        fields="$(jq -c --arg k "$key" --arg v "$val" '. + {($k): $v}' <<<"$fields")"
+        shift 2 ;;
+      -F | --field)
+        key="${2%%=*}"; val="${2#*=}"; has_body=1
+        fields="$(jq -c --arg k "$key" --arg v "$val" '. + {($k): ($v | try fromjson catch $v)}' <<<"$fields")"
+        shift 2 ;;
+      -H | --header | -t | --template | --hostname | --cache) shift 2 ;;
+      -*) shift ;;
+      *) [ -n "$path" ] || path="$1"; shift ;;
+    esac
+  done
+  [ -n "$method" ] || { [ "$has_body" = 1 ] && method=POST || method=GET; }
+  local kind=READ
+  [ "$method" = GET ] || kind=WRITE
+  record "$kind" "api -X $method $path${jq_filter:+ --jq $jq_filter}"
+  signed_in_or_die
+
+  local body="$fields"
+  if [ "$input" = "-" ]; then body="$(cat)"; elif [ -n "$input" ]; then body="$(cat "$input")"; fi
+
+  path="${path#/}"
+  local base="${path%%\?*}"
+  if [ "$base" = "user" ]; then emit "$(jq -n --arg l "$USER_LOGIN" '{login: $l}')" "$jq_filter"; return; fi
+
+  case "$base" in
+    repos/*/*) ;;
+    *) not_found ;;
+  esac
+  local rest="${base#repos/}" owner name sub=""
+  owner="${rest%%/*}"; rest="${rest#*/}"
+  name="${rest%%/*}"
+  [ "$rest" = "$name" ] || sub="${rest#*/}"
+  repo_exists "$owner/$name" || not_found
+
+  local out
+  case "$method $sub" in
+    "GET ") emit "$(cat "$REPO")" "$jq_filter" ;;
+    "PATCH ") patch_repo --argjson b "$body" '. * $b'; emit "$(cat "$REPO")" "" >/dev/null ;;
+    "PUT topics") patch_repo --argjson b "$body" '.topics = $b.names' ;;
+    "PUT vulnerability-alerts") patch_repo '.vulnerability_alerts = true' ;;
+    "PUT private-vulnerability-reporting") patch_repo '.pvr = true' ;;
+    "GET private-vulnerability-reporting")
+      emit "$(jq '{enabled: .pvr}' "$REPO")" "$jq_filter" ;;
+    "PUT branches/main/protection")
+      printf '%s' "$body" >"$S/protection_payload.json"
+      patch_repo --argjson b "$body" '.protection = $b' ;;
+    "GET branches/main/protection")
+      jq -e '.protection' "$REPO" >/dev/null 2>&1 || { echo "gh: Branch not protected (HTTP 404)" >&2; exit 1; }
+      out="$(jq '.protection | {
+        required_pull_request_reviews: {
+          required_approving_review_count: .required_pull_request_reviews.required_approving_review_count,
+          dismiss_stale_reviews: .required_pull_request_reviews.dismiss_stale_reviews},
+        required_conversation_resolution: {enabled: .required_conversation_resolution},
+        required_linear_history: {enabled: .required_linear_history},
+        allow_force_pushes: {enabled: .allow_force_pushes},
+        allow_deletions: {enabled: .allow_deletions},
+        enforce_admins: {enabled: .enforce_admins},
+        required_status_checks: (if .required_status_checks then
+          {strict: .required_status_checks.strict, contexts: .required_status_checks.contexts} else null end)}' "$REPO")"
+      emit "$out" "$jq_filter" ;;
+    "PUT actions/permissions/fork-pr-contributor-approval")
+      [ -z "${GH_STUB_NO_ACTIONS:-}" ] || not_found
+      patch_repo --argjson b "$body" '.actions_fork = $b' ;;
+    "PUT actions/permissions/workflow")
+      [ -z "${GH_STUB_NO_ACTIONS:-}" ] || not_found
+      patch_repo --argjson b "$body" '.actions_workflow = $b' ;;
+    "GET community/profile")
+      emit "$(jq '{health_percentage: .community_pct}' "$REPO")" "$jq_filter" ;;
+    "GET secret-scanning/alerts")
+      emit "$(jq '[range(0; .open_alerts) | {number: .}]' "$REPO")" "$jq_filter" ;;
+    "GET license") emit "$(jq '{license: .license}' "$REPO")" "$jq_filter" ;;
+    *) echo "gh stub: unsupported endpoint: $method $path" >&2; exit 1 ;;
+  esac
+}
+
+cmd_repo_create() {
+  local slug="" vis="" desc="" source="" remote="origin" a
+  while [ "$#" -gt 0 ]; do
+    a="$1"
+    case "$a" in
+      --public) vis=public; shift ;;
+      --private) vis=private; shift ;;
+      --internal) vis=internal; shift ;;
+      --description | -d) desc="$2"; shift 2 ;;
+      --source | -s) source="$2"; shift 2 ;;
+      --remote | -r) remote="$2"; shift 2 ;;
+      -*) shift ;;
+      *) slug="$a"; shift ;;
+    esac
+  done
+  signed_in_or_die
+  local owner="${slug%%/*}" name="${slug#*/}"
+  if repo_exists "$owner/$name"; then
+    echo "gh: Name already exists on this account (HTTP 422)" >&2; exit 1
+  fi
+  if [ -n "$source" ]; then
+    if git -C "$source" remote get-url "$remote" >/dev/null 2>&1; then
+      echo "gh: remote $remote already exists" >&2; exit 1
+    fi
+    git -C "$source" remote add "$remote" "${GH_STUB_REMOTE_URL:-https://github.com/$owner/$name.git}"
+  fi
+  new_repo_json "$owner" "$name" "${vis:-private}" "$desc" >"$REPO"
+  echo "https://github.com/$owner/$name"
+}
+
+cmd_repo_view() {
+  local slug="" jq_filter="" a
+  while [ "$#" -gt 0 ]; do
+    a="$1"
+    case "$a" in
+      --jq | -q) jq_filter="$2"; shift 2 ;;
+      --json) shift 2 ;;
+      -*) shift ;;
+      *) slug="$a"; shift ;;
+    esac
+  done
+  signed_in_or_die
+  repo_exists "$slug" || not_found
+  emit "$(cat "$REPO")" "$jq_filter"
+}
+
+cmd_repo_edit() {
+  local slug="" vis="" a
+  while [ "$#" -gt 0 ]; do
+    a="$1"
+    case "$a" in
+      --visibility) vis="$2"; shift 2 ;;
+      -*) shift ;;
+      *) slug="$a"; shift ;;
+    esac
+  done
+  signed_in_or_die
+  repo_exists "$slug" || not_found
+  [ -z "$vis" ] || patch_repo --arg v "$vis" '.visibility = $v | .private = ($v != "public")'
+}
+
+# ---------------------------------------------------------------------------------------------
+case "${1:-} ${2:-}" in
+  "auth status")
+    record READ "$*"
+    [ ! -e "$S/signed_out" ] || { echo "You are not logged into any GitHub hosts." >&2; exit 1; }
+    printf 'github.com\n  ✓ Logged in to github.com account %s (keyring)\n  - Token scopes: %s\n' \
+      "$USER_LOGIN" "$(cat "$S/scopes" 2>/dev/null || echo "'gist', 'read:org', 'repo', 'workflow'")"
+    ;;
+  "api "*) shift; cmd_api "$@" ;;
+  "repo create") record WRITE "$*"; shift 2; cmd_repo_create "$@" ;;
+  "repo view") record READ "$*"; shift 2; cmd_repo_view "$@" ;;
+  "repo edit") record WRITE "$*"; shift 2; cmd_repo_edit "$@" ;;
+  *) echo "gh stub: unsupported command: $*" >&2; exit 1 ;;
+esac

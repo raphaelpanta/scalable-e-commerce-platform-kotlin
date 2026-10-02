@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Fake npm/npx for the hook tests. Same contract as the fixture gradlew:
+# logs "<name> <args> #CI=.. #stdin=..", sleeps $FAKE_SLEEP, prints $FAKE_OUTPUT_LINES lines,
+# exits $FAKE_EXIT (only for calls matching $FAKE_FAIL_MATCH when that is set).
+name="$(basename "$0")"
+stdin_kind=other; [ /dev/stdin -ef /dev/null ] && stdin_kind=null
+echo "$name $* #CI=${CI:-} #stdin=$stdin_kind #cwd=$(basename "$PWD")" >>"${FIXTURE_LOG:-/dev/null}"
+args="$*"
+sleep "${FAKE_SLEEP:-0}"
+i=0
+while [ "$i" -lt "${FAKE_OUTPUT_LINES:-0}" ]; do i=$((i + 1)); echo "fake $name output line $i"; done
+if [ -n "${FAKE_FAIL_MATCH:-}" ]; then
+  # shellcheck disable=SC2254
+  case "$args" in $FAKE_FAIL_MATCH) exit "${FAKE_EXIT:-1}" ;; *) exit 0 ;; esac
+fi
+exit "${FAKE_EXIT:-0}"

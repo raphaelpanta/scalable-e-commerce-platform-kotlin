@@ -1,0 +1,16 @@
+diff --git a/services/demo/domain-ok/src/main/kotlin/com/ecommerce/demo/domain/Price.kt b/services/demo/domain-ok/src/main/kotlin/com/ecommerce/demo/domain/Price.kt
+index 1111111..2222222 100644
+--- a/services/demo/domain-ok/src/main/kotlin/com/ecommerce/demo/domain/Price.kt
++++ b/services/demo/domain-ok/src/main/kotlin/com/ecommerce/demo/domain/Price.kt
+@@ -11,0 +12,2 @@ data class Price(val cents: Long) {
++    fun discounted(percent: Int): Price = Price(cents - cents * percent / 100)
++
+@@ -13 +15 @@ data class Price(val cents: Long) {
+-    // pricing rules
++    // pricing rules live in the catalog service
+diff --git a/docs/notes.md b/docs/notes.md
+new file mode 100644
+--- /dev/null
++++ b/docs/notes.md
+@@ -0,0 +1 @@
++notes

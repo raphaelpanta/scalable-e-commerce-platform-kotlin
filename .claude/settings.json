@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "GRADLE_OPTS": "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=quiet -Dorg.gradle.warning.mode=none",
+    "NPM_CONFIG_LOGLEVEL": "error",
+    "NO_COLOR": "1"
+  },
+  "bashOutputMaxChars": 15000,
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew *)",
+      "Bash(rtk *)",
+      "Bash(npm run *)",
+      "Bash(npm test*)",
+      "Bash(npx eslint *)",
+      "Bash(npx vitest *)",
+      "Bash(npx tsc *)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/post-edit-check.sh",
+            "timeout": 330,
+            "statusMessage": "Lint + targeted tests for the edited file"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop-full-check.sh",
+            "timeout": 1230,
+            "statusMessage": "Full quality check (gradle verify, incremental pitest, frontend lint/test)"
+          }
+        ]
+      }
+    ]
+  }
+}

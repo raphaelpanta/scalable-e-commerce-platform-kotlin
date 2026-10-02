@@ -1,0 +1,134 @@
+# Pull-request gate (feature 001, specs/001-harness-quality-gates): one consolidated status, `pr-gate`, which is
+# the only status check branch protection requires (docs/harness.md, docs/ci-cd.md). Jobs:
+#   verify      the reusable .github/workflows/verify.yml (./gradlew -q verify, full Pitest included), which
+#               hands its Pitest XML reports over as the pitest-reports artifact
+#   mutation    .github/scripts/pr-gate.sh --skip-verify: per-module threshold and non-decreasing baseline,
+#               surviving mutants on changed lines against "## Mutant justifications", Stryker when configured
+#   hook-tests  the harness self-tests (.claude/hooks/tests, .github/scripts/tests)
+#   pr-gate     aggregates the three and requires the "## Gate bypasses" section in the description
+#
+# Safeguards (specs/004-ecommerce-platform-mvp/research.md section 4): `pull_request` only (never
+# pull_request_target), read-only token, no secrets, actions pinned by commit SHA, ephemeral self-hosted runner,
+# and fork pull requests never run code here: every job that checks out code is skipped for them, which makes
+# `pr-gate` fail (a maintainer pushes the branch to this repository instead). The description is edited to add
+# justifications, so `edited` re-runs the gate with the new text (a re-run of an old run keeps the old text).
+# HOOK_BYPASS has no meaning here: the hooks ignore it in CI.
+name: pr-gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify
+    uses: ./.github/workflows/verify.yml
+    with:
+      mutation-reports: true
+
+  mutation:
+    name: mutation
+    needs: verify
+    runs-on: [self-hosted, linux, ecommerce]
+    timeout-minutes: 30
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Check out the repository with history (diff against the base)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download the Pitest reports of the verify job
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: pitest-reports
+
+      - name: Unpack the Pitest reports
+        run: tar -xf pitest-reports.tar && rm -f pitest-reports.tar
+
+      # Stryker is deferred until a frontend package with a stryker.config.* exists (docs/harness.md).
+      - name: Install frontend dependencies for Stryker
+        if: hashFiles('frontend/stryker.config.*', 'frontend/*/stryker.config.*') != ''
+        run: for p in frontend frontend/*/; do [ -f "$p/package-lock.json" ] && npm ci --prefix "$p"; done; true
+
+      - name: Mutation threshold, baseline ratchet, surviving mutants
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: .github/scripts/pr-gate.sh --skip-verify
+
+  hook-tests:
+    name: hook-tests
+    runs-on: [self-hosted, linux, ecommerce]
+    timeout-minutes: 10
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Harness hook tests
+        run: .claude/hooks/tests/run-all.sh
+
+      - name: Pull-request gate script tests
+        run: .github/scripts/tests/run-all.sh
+
+  pr-gate:
+    name: pr-gate
+    needs: [verify, mutation, hook-tests]
+    if: always()
+    runs-on: [self-hosted, linux, ecommerce]
+    timeout-minutes: 5
+    steps:
+      # No checkout: this job runs for every pull request, forks included, and executes no pull request code.
+      - name: Gate bypasses section
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          section="$(printf '%s\n' "$PR_BODY" | tr -d '\r' |
+            awk '/^##[ \t]+Gate bypasses[ \t]*$/ { f = 1; print "#"; next } f && /^##[ \t]/ { exit } f { print }' |
+            sed 's/<!--.*-->//g' | awk '/<!--/ { c = 1 } !c { print } /-->/ { c = 0 }')"
+          if [ -z "$section" ]; then
+            echo "::error::The pull request description lacks the \"## Gate bypasses\" section (see .github/PULL_REQUEST_TEMPLATE.md)."
+            exit 1
+          fi
+          if ! printf '%s\n' "$section" | sed 1d | grep -q '[^[:space:]]'; then
+            echo "::error::\"## Gate bypasses\" is empty: write none, or paste the lines of .claude/.cache/bypass.log."
+            exit 1
+          fi
+
+      - name: Aggregate the gate jobs
+        if: always()
+        env:
+          FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          VERIFY: ${{ needs.verify.result }}
+          MUTATION: ${{ needs.mutation.result }}
+          HOOK_TESTS: ${{ needs.hook-tests.result }}
+        run: |
+          fail=0
+          {
+            echo "### pr-gate"
+            echo
+            echo "| job | result |"
+            echo "| --- | --- |"
+            for j in "verify=$VERIFY" "mutation=$MUTATION" "hook-tests=$HOOK_TESTS"; do
+              echo "| ${j%%=*} | ${j#*=} |"
+              [ "${j#*=}" = success ] || fail=1
+            done
+            if [ "$FORK" = true ]; then
+              echo
+              echo "Pull requests from forks are not built on the self-hosted runner; a maintainer pushes the branch here."
+            fi
+          } >>"$GITHUB_STEP_SUMMARY"
+          [ "$FORK" = true ] && echo "::error::Fork pull requests are not built on the self-hosted runner."
+          [ "$fail" -eq 0 ] || echo "::error::pr-gate failed: verify=$VERIFY mutation=$MUTATION hook-tests=$HOOK_TESTS"
+          exit "$fail"

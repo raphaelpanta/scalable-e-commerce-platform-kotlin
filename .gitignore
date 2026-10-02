@@ -1,0 +1,43 @@
+# Ignore rules for the public repository. Nothing here may ever be published (FR-002).
+# Verified by scripts/tests/test_ignore_rules.sh.
+
+# --- Build outputs and dependency caches -------------------------------------------------
+build/
+out/
+dist/
+bin/
+.gradle/
+.kotlin/
+node_modules/
+
+# --- IDE and editor files ------------------------------------------------------------------
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# --- OS artefacts --------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+
+# --- Agent, harness and local tooling state (machine-local, never shared) ---------------
+.claude/.cache/
+.claude/settings.local.json
+.tokensave/
+.rtk/
+
+# --- Harness hook test fixtures (feature 001): the fake monorepo and tool shims must be committed -----
+!.claude/hooks/tests/fixtures/bin/
+!.claude/hooks/tests/fixtures/**/build/
+
+# --- Logs and temporary files ----------------------------------------------------------------
+*.log
+*.tmp
+
+# --- Secrets and credentials -----------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key

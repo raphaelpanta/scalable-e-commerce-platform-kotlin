@@ -1,0 +1,6 @@
+{
+  "name": "fixture-web",
+  "private": true,
+  "scripts": { "lint": "eslint .", "test": "vitest run" },
+  "devDependencies": { "vitest": "*", "eslint": "*", "typescript": "*" }
+}

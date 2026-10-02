@@ -1,0 +1,662 @@
+openapi: 3.1.0
+info:
+  title: Identity API
+  version: 1.0.0
+  summary: Accounts, sessions, profile, addresses and notification preferences.
+  description: |
+    Public contract of the identity service as exposed through the gateway (spec 004, user story 3,
+    FR-004..FR-007, FR-020).
+
+    Conventions shared by all services: bearer JWT with roles `shopper` and `operator`; deny by
+    default; RFC 9457 `application/problem+json` errors; `X-Correlation-Id` accepted on every
+    request and echoed on every response; money as `{amountMinor, currency}`; UUID identifiers;
+    UTC `date-time` timestamps; pagination with `page` (default 0) and `size` (default 20, max 100).
+
+    Only registration, email verification, sign-in, token refresh and the two password-reset
+    operations are anonymous. Every other operation requires a bearer token.
+servers:
+  - url: http://localhost:8080
+    description: Local platform entry point (API gateway)
+tags:
+  - name: Registration
+  - name: Sessions
+  - name: Password reset
+  - name: Profile
+  - name: Addresses
+  - name: Notification preferences
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/identity/accounts:
+    post:
+      operationId: registerAccount
+      tags: [Registration]
+      summary: Register a new shopper account
+      description: |
+        Anonymous. Creates an unverified account with the `shopper` role and triggers a
+        verification notification. To avoid account enumeration the response is always the same
+        generic 202 body, whether or not the email was already registered; an already registered
+        email produces no new account. Password policy violations are reported as 422.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+            example: { email: ana@example.com, password: "S3cure-passphrase!", displayName: Ana Silva }
+      responses:
+        '202':
+          description: Registration accepted; a verification message is sent if the email is new.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GenericMessage' }
+              example: { message: If the address can be registered, a verification message has been sent. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/identity/accounts/verify-email:
+    post:
+      operationId: verifyEmail
+      tags: [Registration]
+      summary: Verify an email address with the emailed token
+      description: Anonymous. The token is single-use and time-limited.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TokenRequest' }
+            example: { token: 6f0c1d2e-verification-token }
+      responses:
+        '204':
+          description: Email verified; the account may now sign in.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/identity/sessions:
+    post:
+      operationId: signIn
+      tags: [Sessions]
+      summary: Sign in with email and password
+      description: |
+        Anonymous. Returns an access token and a refresh token. After 5 consecutive failed
+        sign-ins for the same account or source the service answers 429 with `Retry-After`,
+        even if the next credentials are correct, until the throttling window ends. Accounts with
+        an unverified email are refused with 403.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignInRequest' }
+            example: { email: ana@example.com, password: "S3cure-passphrase!" }
+      responses:
+        '200':
+          description: Signed in.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+              example:
+                accessToken: eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIuLi4ifQ.signature
+                refreshToken: 9b8d6c1a-opaque-refresh-token
+                tokenType: Bearer
+                expiresIn: 900
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/identity/sessions/refresh:
+    post:
+      operationId: refreshSession
+      tags: [Sessions]
+      summary: Exchange a refresh token for a new token pair
+      description: Anonymous (the refresh token is the credential). The refresh token is rotated; reuse of a spent token revokes the session.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: New token pair.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/identity/sessions/current:
+    delete:
+      operationId: signOut
+      tags: [Sessions]
+      summary: Sign out the current session
+      description: Requires role shopper or operator. Revokes the session of the presented access token and its refresh token.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '204':
+          description: Session revoked.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/identity/password-resets:
+    post:
+      operationId: requestPasswordReset
+      tags: [Password reset]
+      summary: Request a password reset
+      description: Anonymous. Always answers 202 with a generic body so existence of the email is not revealed. The emailed token is single-use and time-limited.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordResetRequest' }
+            example: { email: ana@example.com }
+      responses:
+        '202':
+          description: Request accepted.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GenericMessage' }
+              example: { message: If the address is registered, a reset message has been sent. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/identity/password-resets/complete:
+    post:
+      operationId: completePasswordReset
+      tags: [Password reset]
+      summary: Complete a password reset with the emailed token
+      description: Anonymous. On success the old password stops working and all existing sessions are revoked.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordResetCompletion' }
+      responses:
+        '204':
+          description: Password changed.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/identity/accounts/me:
+    get:
+      operationId: getOwnProfile
+      tags: [Profile]
+      summary: Get the signed-in account profile
+      description: Requires role shopper or operator. Returns only the caller's own account.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The profile.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Account' }
+              example:
+                id: 3f2b8c0e-5d41-4a39-9c1e-0a7f6b2d4e11
+                email: ana@example.com
+                displayName: Ana Silva
+                emailVerified: true
+                roles: [shopper]
+                createdAt: '2026-10-02T09:15:00Z'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      operationId: updateOwnProfile
+      tags: [Profile]
+      summary: Update the signed-in account profile
+      description: Requires role shopper or operator. Email and roles cannot be changed through this operation.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProfileUpdate' }
+            example: { displayName: Ana M. Silva }
+      responses:
+        '200':
+          description: The updated profile.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Account' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+    delete:
+      operationId: deleteOwnAccount
+      tags: [Profile]
+      summary: Delete (anonymise) the signed-in account
+      description: |
+        Requires role shopper. Personal data is anonymised; open orders are kept under a pseudonym
+        for fulfilment and financial record, all sessions are revoked and notifications stop.
+        Operator accounts cannot self-delete (403).
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '204':
+          description: Account anonymised.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/identity/accounts/me/addresses:
+    get:
+      operationId: listOwnAddresses
+      tags: [Addresses]
+      summary: List own delivery addresses
+      description: Requires role shopper or operator.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+      responses:
+        '200':
+          description: A page of addresses.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AddressPage' }
+              example:
+                items:
+                  - id: 7a1c4e52-90b3-4d6f-8e21-5c3d9f0a1b22
+                    label: Home
+                    recipientName: Ana Silva
+                    line1: Rua das Flores 12
+                    city: Lisboa
+                    postalCode: 1000-001
+                    countryCode: PT
+                    isDefault: true
+                page: 0
+                size: 20
+                totalItems: 1
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: addOwnAddress
+      tags: [Addresses]
+      summary: Add a delivery address
+      description: Requires role shopper or operator.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddressInput' }
+      responses:
+        '201':
+          description: Address created.
+          headers:
+            X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+            Location: { description: URL of the new address., schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Address' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+  /api/v1/identity/accounts/me/addresses/{addressId}:
+    parameters:
+      - $ref: '#/components/parameters/AddressId'
+      - $ref: '#/components/parameters/CorrelationId'
+    put:
+      operationId: updateOwnAddress
+      tags: [Addresses]
+      summary: Replace a delivery address
+      description: Requires role shopper or operator. Another account's address answers 404.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddressInput' }
+      responses:
+        '200':
+          description: The updated address.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Address' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+    delete:
+      operationId: deleteOwnAddress
+      tags: [Addresses]
+      summary: Delete a delivery address
+      description: Requires role shopper or operator. Orders keep their frozen address copy.
+      responses:
+        '204':
+          description: Address removed.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/identity/accounts/me/notification-preferences:
+    get:
+      operationId: getOwnNotificationPreferences
+      tags: [Notification preferences]
+      summary: Get own notification preferences
+      description: Requires role shopper or operator.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The preferences.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferences' }
+              example: { channels: [email, sms], phoneNumber: '+351912345678', phoneVerified: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      operationId: updateOwnNotificationPreferences
+      tags: [Notification preferences]
+      summary: Update own notification preferences
+      description: |
+        Requires role shopper or operator. Email is always on by default; `sms` may only be listed
+        when a verified phone number exists, otherwise 422.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationPreferencesUpdate' }
+            example: { channels: [email, sms] }
+      responses:
+        '200':
+          description: The updated preferences.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferences' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+  /api/v1/identity/accounts/me/phone-verifications:
+    post:
+      operationId: requestPhoneVerification
+      tags: [Notification preferences]
+      summary: Send a verification code to a phone number
+      description: Requires role shopper or operator. Sends a one-time code by SMS; the number becomes verified once confirmed.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PhoneVerificationRequest' }
+      responses:
+        '202':
+          description: Code sent.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/identity/accounts/me/phone-verifications/confirm:
+    post:
+      operationId: confirmPhoneVerification
+      tags: [Notification preferences]
+      summary: Confirm the phone verification code
+      description: Requires role shopper or operator.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PhoneVerificationConfirmation' }
+      responses:
+        '204':
+          description: Phone number verified.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from `signIn`. Roles are carried in the `roles` claim (`shopper`, `operator`).
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: Optional correlation identifier; a malformed value is replaced by the gateway.
+      schema: { type: string, maxLength: 64 }
+    AddressId:
+      name: addressId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+    Size:
+      name: size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+  headers:
+    CorrelationId:
+      description: Correlation identifier echoed from the request, or generated when absent or malformed.
+      schema: { type: string }
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      schema: { type: integer, minimum: 0 }
+  responses:
+    BadRequest:
+      description: Malformed request (400).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'https://errors.example.test/bad-request', title: Bad request, status: 400, detail: Request body is not valid JSON., instance: /api/v1/identity/accounts }
+    Unauthorized:
+      description: Missing, invalid or expired credentials (401).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'https://errors.example.test/unauthorized', title: Unauthorized, status: 401, detail: Invalid credentials., instance: /api/v1/identity/sessions }
+    Forbidden:
+      description: Authenticated but not permitted (403).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'https://errors.example.test/forbidden', title: Forbidden, status: 403, detail: Email address is not verified., instance: /api/v1/identity/sessions }
+    NotFound:
+      description: Resource not found, or not owned by the caller (404).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Conflict:
+      description: State conflict (409).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    UnprocessableEntity:
+      description: Well-formed but semantically invalid (422), with per-field errors.
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: https://errors.example.test/validation
+            title: Validation failed
+            status: 422
+            detail: Password does not meet the policy.
+            instance: /api/v1/identity/accounts
+            errors: [{ field: password, message: must be at least 12 characters }]
+    TooManyRequests:
+      description: Throttled (429), for example after 5 failed sign-ins.
+      headers:
+        X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'https://errors.example.test/too-many-requests', title: Too many requests, status: 429, detail: Too many failed sign-in attempts. Try again later., instance: /api/v1/identity/sessions }
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string }
+              message: { type: string }
+    GenericMessage:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, format: password, minLength: 12, maxLength: 128 }
+        displayName: { type: string, maxLength: 100 }
+    TokenRequest:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string }
+    SignInRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string }
+    TokenPair:
+      type: object
+      required: [accessToken, refreshToken, tokenType, expiresIn]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        tokenType: { type: string, enum: [Bearer] }
+        expiresIn: { type: integer, description: Access token lifetime in seconds. }
+    PasswordResetRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+    PasswordResetCompletion:
+      type: object
+      required: [token, newPassword]
+      properties:
+        token: { type: string }
+        newPassword: { type: string, format: password, minLength: 12, maxLength: 128 }
+    Role:
+      type: string
+      enum: [shopper, operator]
+    Account:
+      type: object
+      required: [id, email, emailVerified, roles, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        emailVerified: { type: boolean }
+        roles: { type: array, items: { $ref: '#/components/schemas/Role' } }
+        createdAt: { type: string, format: date-time }
+    ProfileUpdate:
+      type: object
+      required: [displayName]
+      properties:
+        displayName: { type: string, maxLength: 100 }
+    AddressInput:
+      type: object
+      required: [recipientName, line1, city, postalCode, countryCode]
+      properties:
+        label: { type: string, maxLength: 50 }
+        recipientName: { type: string, maxLength: 100 }
+        line1: { type: string, maxLength: 150 }
+        line2: { type: string, maxLength: 150 }
+        city: { type: string, maxLength: 100 }
+        region: { type: string, maxLength: 100 }
+        postalCode: { type: string, maxLength: 20 }
+        countryCode: { type: string, pattern: '^[A-Z]{2}$', description: ISO 3166-1 alpha-2. }
+        isDefault: { type: boolean, default: false }
+    Address:
+      allOf:
+        - $ref: '#/components/schemas/AddressInput'
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+    AddressPage:
+      type: object
+      required: [items, page, size, totalItems]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Address' } }
+        page: { type: integer }
+        size: { type: integer }
+        totalItems: { type: integer, format: int64 }
+    NotificationChannel:
+      type: string
+      enum: [email, sms]
+    NotificationPreferences:
+      type: object
+      required: [channels, phoneVerified]
+      properties:
+        channels: { type: array, items: { $ref: '#/components/schemas/NotificationChannel' }, uniqueItems: true }
+        phoneNumber: { type: string, description: E.164 number; absent when none registered. }
+        phoneVerified: { type: boolean }
+    NotificationPreferencesUpdate:
+      type: object
+      required: [channels]
+      properties:
+        channels: { type: array, items: { $ref: '#/components/schemas/NotificationChannel' }, uniqueItems: true, minItems: 1 }
+    PhoneVerificationRequest:
+      type: object
+      required: [phoneNumber]
+      properties:
+        phoneNumber: { type: string, pattern: '^\+[1-9][0-9]{7,14}$' }
+    PhoneVerificationConfirmation:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, pattern: '^[0-9]{6}$' }

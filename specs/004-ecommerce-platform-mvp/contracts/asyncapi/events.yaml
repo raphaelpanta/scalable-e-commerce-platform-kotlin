@@ -1,0 +1,483 @@
+asyncapi: 3.0.0
+info:
+  title: E-Commerce Platform MVP - Domain Events
+  version: 1.0.0
+  description: |
+    Asynchronous contract between the six bounded-context services (identity, catalog, cart, order,
+    payment, notification). Implements FR-021, FR-022 and FR-019 of spec 004.
+
+    Broker: Apache Kafka (KRaft). Topics are named `<context>.<aggregate>.v1`. The Kafka message key
+    is the envelope `aggregateId` (uuid, string-encoded); payloads are JSON (UTF-8).
+
+    Delivery semantics (binding on every producer and consumer):
+    - At-least-once delivery. Duplicates and redelivery after rebalance MUST be expected.
+    - Producers write the event and the state change in one local transaction to an outbox table;
+      a relay publishes outbox rows to Kafka (no dual write).
+    - Consumers are idempotent by `eventId`: they record processed ids in a processed-event table
+      (7-day retention) and skip repeats.
+    - Ordering is guaranteed per message key (partition) only. Consumers MUST NOT assume ordering
+      across keys or across topics.
+    - Schema evolution: additive only within v1 (new optional fields, new enum values tolerated by
+      consumers that ignore unknown values). Any breaking change publishes to a new topic suffix
+      (`.v2`) and runs in parallel with `.v1` until all consumers have migrated.
+    - Poison messages go to `<topic>.dlt` after bounded retries with increasing delay.
+
+    Conventions: ids are UUIDs; money is `{amountMinor: int64, currency: ISO-4217}` in minor units;
+    timestamps are RFC 3339 UTC (`date-time`). `correlationId` is propagated from the originating
+    `X-Correlation-Id` and MUST be copied to every derived event and log line.
+
+    Order statuses (FR-015): an order carries two independent statuses. `orderStatus` is one of
+    placed, preparing, shipped, delivered, cancelled (cancelled only from placed or preparing).
+    `paymentStatus` is one of pending, approved, failed. An order moves to preparing only while
+    `paymentStatus` is approved. A failed payment, or a payment pending for more than 30 minutes,
+    cancels the order with `cancellationReason` PAYMENT_FAILED or PAYMENT_EXPIRED and releases
+    stock. Events never carry a single combined order status.
+
+    Stock (FR-012): stock is reserved synchronously at checkout (order to catalog request, before
+    any payment attempt); the reservation is committed on payment approval and released on payment
+    failure, cancellation or expiry of a pending payment.
+defaultContentType: application/json
+servers:
+  local:
+    host: kafka:9092
+    protocol: kafka
+    description: Single-node KRaft broker started by the Docker Compose `core` profile.
+
+channels:
+  identityAccount:
+    address: identity.account.v1
+    description: Account lifecycle events. Key = account id. Producer identity.
+    messages:
+      AccountRegistered: {$ref: '#/components/messages/AccountRegistered'}
+      AccountVerified: {$ref: '#/components/messages/AccountVerified'}
+      AccountDeleted: {$ref: '#/components/messages/AccountDeleted'}
+      PasswordResetRequested: {$ref: '#/components/messages/PasswordResetRequested'}
+    bindings:
+      kafka: {topic: identity.account.v1, partitions: 3, replicas: 1}
+  cartCart:
+    address: cart.cart.v1
+    description: Cart events. Key = account cart id. Producer cart. Informational in the MVP.
+    messages:
+      CartMerged: {$ref: '#/components/messages/CartMerged'}
+    bindings:
+      kafka: {topic: cart.cart.v1, partitions: 3, replicas: 1}
+  catalogStock:
+    address: catalog.stock.v1
+    description: Stock reservation outcomes (reserved synchronously at checkout, committed on payment approval, released on failure, cancellation or expiry). Key = reservation id (one reservation per order). Producer catalog.
+    messages:
+      StockReserved: {$ref: '#/components/messages/StockReserved'}
+      StockReservationReleased: {$ref: '#/components/messages/StockReservationReleased'}
+      StockCommitted: {$ref: '#/components/messages/StockCommitted'}
+    bindings:
+      kafka: {topic: catalog.stock.v1, partitions: 6, replicas: 1}
+  orderOrder:
+    address: order.order.v1
+    description: Order lifecycle events (FR-015). Every payload states orderStatus and paymentStatus. Key = order id, so all events of one order are ordered. Producer order.
+    messages:
+      OrderPlaced: {$ref: '#/components/messages/OrderPlaced'}
+      OrderPaid: {$ref: '#/components/messages/OrderPaid'}
+      OrderPaymentFailed: {$ref: '#/components/messages/OrderPaymentFailed'}
+      OrderPreparing: {$ref: '#/components/messages/OrderPreparing'}
+      OrderShipped: {$ref: '#/components/messages/OrderShipped'}
+      OrderDelivered: {$ref: '#/components/messages/OrderDelivered'}
+      OrderCancelled: {$ref: '#/components/messages/OrderCancelled'}
+    bindings:
+      kafka: {topic: order.order.v1, partitions: 6, replicas: 1}
+  paymentPayment:
+    address: payment.payment.v1
+    description: Payment attempt and refund outcomes. Key = payment id. Producer payment.
+    messages:
+      PaymentPending: {$ref: '#/components/messages/PaymentPending'}
+      PaymentApproved: {$ref: '#/components/messages/PaymentApproved'}
+      PaymentDeclined: {$ref: '#/components/messages/PaymentDeclined'}
+      RefundRecorded: {$ref: '#/components/messages/RefundRecorded'}
+    bindings:
+      kafka: {topic: payment.payment.v1, partitions: 6, replicas: 1}
+  notificationNotification:
+    address: notification.notification.v1
+    description: Delivery outcomes for operator observability. Key = notification id. Producer notification.
+    messages:
+      NotificationSent: {$ref: '#/components/messages/NotificationSent'}
+      NotificationFailed: {$ref: '#/components/messages/NotificationFailed'}
+    bindings:
+      kafka: {topic: notification.notification.v1, partitions: 3, replicas: 1}
+
+operations:
+  identityPublishes:
+    {action: send, channel: {$ref: '#/channels/identityAccount'}, summary: 'identity publishes account events via outbox.'}
+  notificationConsumesAccount:
+    {action: receive, channel: {$ref: '#/channels/identityAccount'}, summary: 'notification sends verification, reset and welcome messages and stops messaging deleted accounts.', bindings: {kafka: {groupId: {type: string, enum: [notification]}}}}
+  cartConsumesAccount:
+    {action: receive, channel: {$ref: '#/channels/identityAccount'}, messages: [{$ref: '#/channels/identityAccount/messages/AccountDeleted'}], summary: 'cart discards the carts of a deleted account.', bindings: {kafka: {groupId: {type: string, enum: [cart]}}}}
+  orderConsumesAccount:
+    {action: receive, channel: {$ref: '#/channels/identityAccount'}, messages: [{$ref: '#/channels/identityAccount/messages/AccountDeleted'}], summary: 'order anonymises the account reference on retained orders (FR-007).', bindings: {kafka: {groupId: {type: string, enum: [order]}}}}
+  cartPublishes:
+    {action: send, channel: {$ref: '#/channels/cartCart'}, summary: 'cart publishes CartMerged after sign-in merge. No consumers in the MVP.'}
+  catalogPublishes:
+    {action: send, channel: {$ref: '#/channels/catalogStock'}, summary: 'catalog publishes stock reservation outcomes via outbox.'}
+  orderConsumesStock:
+    {action: receive, channel: {$ref: '#/channels/catalogStock'}, summary: 'order records stock commit and release outcomes; the reservation itself is made synchronously at checkout, before payment.', bindings: {kafka: {groupId: {type: string, enum: [order]}}}}
+  orderPublishes:
+    {action: send, channel: {$ref: '#/channels/orderOrder'}, summary: 'order publishes lifecycle events via outbox.'}
+  paymentConsumesOrder:
+    {action: receive, channel: {$ref: '#/channels/orderOrder'}, summary: 'payment charges on placement (stock already reserved) and refunds on cancellation of an order whose paymentStatus is approved.', messages: [{$ref: '#/channels/orderOrder/messages/OrderPlaced'}, {$ref: '#/channels/orderOrder/messages/OrderCancelled'}], bindings: {kafka: {groupId: {type: string, enum: [payment]}}}}
+  catalogConsumesOrder:
+    {action: receive, channel: {$ref: '#/channels/orderOrder'}, summary: 'catalog commits the reservation on OrderPaid and releases it on OrderPaymentFailed or OrderCancelled (the reservation was made synchronously at checkout).', messages: [{$ref: '#/channels/orderOrder/messages/OrderPaid'}, {$ref: '#/channels/orderOrder/messages/OrderPaymentFailed'}, {$ref: '#/channels/orderOrder/messages/OrderCancelled'}], bindings: {kafka: {groupId: {type: string, enum: [catalog]}}}}
+  notificationConsumesOrder:
+    {action: receive, channel: {$ref: '#/channels/orderOrder'}, summary: 'notification informs the shopper of payment, shipping, delivery and cancellation.', messages: [{$ref: '#/channels/orderOrder/messages/OrderPaid'}, {$ref: '#/channels/orderOrder/messages/OrderPaymentFailed'}, {$ref: '#/channels/orderOrder/messages/OrderShipped'}, {$ref: '#/channels/orderOrder/messages/OrderDelivered'}, {$ref: '#/channels/orderOrder/messages/OrderCancelled'}], bindings: {kafka: {groupId: {type: string, enum: [notification]}}}}
+  paymentPublishes:
+    {action: send, channel: {$ref: '#/channels/paymentPayment'}, summary: 'payment publishes attempt and refund outcomes via outbox.'}
+  orderConsumesPayment:
+    {action: receive, channel: {$ref: '#/channels/paymentPayment'}, summary: 'order sets paymentStatus to pending, approved or failed (a failed or expired payment cancels the order) and records refunds.', bindings: {kafka: {groupId: {type: string, enum: [order]}}}}
+  notificationConsumesPayment:
+    {action: receive, channel: {$ref: '#/channels/paymentPayment'}, messages: [{$ref: '#/channels/paymentPayment/messages/RefundRecorded'}], summary: 'notification confirms refunds to the shopper.', bindings: {kafka: {groupId: {type: string, enum: [notification]}}}}
+  notificationPublishes:
+    {action: send, channel: {$ref: '#/channels/notificationNotification'}, summary: 'notification publishes delivery outcomes. No consumers in the MVP (operator observability).'}
+
+components:
+  correlationIds:
+    default:
+      description: Propagated from the originating request header X-Correlation-Id.
+      location: $message.payload#/correlationId
+  messageTraits:
+    keyed:
+      bindings:
+        kafka: {key: {type: string, format: uuid, description: Equals envelope aggregateId.}}
+      correlationId: {$ref: '#/components/correlationIds/default'}
+  messages:
+    AccountRegistered:
+      summary: Account created in unverified state; carries the verification token for the email.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: AccountRegistered}, producer: {const: identity}, payload: {$ref: '#/components/schemas/AccountRegisteredPayload'}}}]}
+    AccountVerified:
+      summary: Email verified; account may sign in.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: AccountVerified}, producer: {const: identity}, payload: {$ref: '#/components/schemas/AccountVerifiedPayload'}}}]}
+    AccountDeleted:
+      summary: Account anonymised. Consumers MUST drop personal data and stop messaging the account.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: AccountDeleted}, producer: {const: identity}, payload: {$ref: '#/components/schemas/AccountDeletedPayload'}}}]}
+    PasswordResetRequested:
+      summary: Single-use, time-limited reset requested; carries the reset token for the email.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: PasswordResetRequested}, producer: {const: identity}, payload: {$ref: '#/components/schemas/PasswordResetRequestedPayload'}}}]}
+    CartMerged:
+      summary: Anonymous cart(s) merged into the account cart at sign-in.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: CartMerged}, producer: {const: cart}, payload: {$ref: '#/components/schemas/CartMergedPayload'}}}]}
+    StockReserved:
+      summary: Stock held for an order until commit, release or expiry.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: StockReserved}, producer: {const: catalog}, payload: {$ref: '#/components/schemas/StockReservationPayload'}}}]}
+    StockReservationReleased:
+      summary: Reserved stock returned to available (failure, cancellation or expiry).
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: StockReservationReleased}, producer: {const: catalog}, payload: {$ref: '#/components/schemas/StockReleasedPayload'}}}]}
+    StockCommitted:
+      summary: Reserved stock permanently deducted after payment approval.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: StockCommitted}, producer: {const: catalog}, payload: {$ref: '#/components/schemas/StockReservationPayload'}}}]}
+    OrderPlaced:
+      summary: Order placed at current catalogue prices with stock already reserved; orderStatus placed, paymentStatus pending; triggers the payment attempt.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: OrderPlaced}, producer: {const: order}, payload: {$ref: '#/components/schemas/OrderPlacedPayload'}}}]}
+    OrderPaid:
+      summary: Payment approved; the order stays placed with paymentStatus approved (it may now move to preparing); stock is committed and the order confirmation is sent.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: OrderPaid}, producer: {const: order}, payload: {$ref: '#/components/schemas/OrderPaidPayload'}}}]}
+    OrderPaymentFailed:
+      summary: Payment failed; the order is cancelled with cancellationReason PAYMENT_FAILED (orderStatus cancelled, paymentStatus failed) and reserved stock must be released.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: OrderPaymentFailed}, producer: {const: order}, payload: {$ref: '#/components/schemas/OrderPaymentFailedPayload'}}}]}
+    OrderPreparing:
+      summary: Operator moved the order to preparing (only allowed while paymentStatus is approved); shopper cancellation is no longer allowed.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: OrderPreparing}, producer: {const: order}, payload: {$ref: '#/components/schemas/OrderStatusChangedPayload'}}}]}
+    OrderShipped:
+      summary: Operator marked the order shipped.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: OrderShipped}, producer: {const: order}, payload: {$ref: '#/components/schemas/OrderStatusChangedPayload'}}}]}
+    OrderDelivered:
+      summary: Operator marked the order delivered.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: OrderDelivered}, producer: {const: order}, payload: {$ref: '#/components/schemas/OrderStatusChangedPayload'}}}]}
+    OrderCancelled:
+      summary: Order cancelled (orderStatus cancelled; reason SHOPPER_REQUEST, OPERATOR, PAYMENT_FAILED or PAYMENT_EXPIRED); stock returns and a refund follows when paymentStatus was approved.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: OrderCancelled}, producer: {const: order}, payload: {$ref: '#/components/schemas/OrderCancelledPayload'}}}]}
+    PaymentPending:
+      summary: Provider unreachable; the order stays placed with paymentStatus pending (cancelled with PAYMENT_EXPIRED after 30 minutes).
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: PaymentPending}, producer: {const: payment}, payload: {$ref: '#/components/schemas/PaymentOutcomePayload'}}}]}
+    PaymentApproved:
+      summary: Provider approved the charge; order sets paymentStatus approved.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: PaymentApproved}, producer: {const: payment}, payload: {$ref: '#/components/schemas/PaymentOutcomePayload'}}}]}
+    PaymentDeclined:
+      summary: Provider declined the charge (order sets paymentStatus failed and cancels); `reasonCategory` is required.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: PaymentDeclined}, producer: {const: payment}, payload: {$ref: '#/components/schemas/PaymentOutcomePayload'}}}]}
+    RefundRecorded:
+      summary: Refund recorded with the provider after cancellation of an order whose paymentStatus was approved.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: RefundRecorded}, producer: {const: payment}, payload: {$ref: '#/components/schemas/RefundRecordedPayload'}}}]}
+    NotificationSent:
+      summary: A message was handed to the outbound channel successfully.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: NotificationSent}, producer: {const: notification}, payload: {$ref: '#/components/schemas/NotificationOutcomePayload'}}}]}
+    NotificationFailed:
+      summary: Delivery failed after the retry limit; visible on the operator failed-delivery view.
+      traits: [{$ref: '#/components/messageTraits/keyed'}]
+      payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: NotificationFailed}, producer: {const: notification}, payload: {$ref: '#/components/schemas/NotificationOutcomePayload'}}}]}
+
+  schemas:
+    Envelope:
+      type: object
+      description: Common envelope shared by every event. `payload` is refined per message.
+      required: [eventId, type, version, occurredAt, aggregateId, correlationId, producer, payload]
+      properties:
+        eventId: {type: string, format: uuid, description: Unique per event; the idempotency key for consumers.}
+        type: {type: string, description: 'Event name, e.g. OrderPlaced.'}
+        version: {type: integer, const: 1, description: Schema version; equals the topic suffix.}
+        occurredAt: {type: string, format: date-time, description: UTC time the state change committed.}
+        aggregateId: {type: string, format: uuid, description: Aggregate identifier; also the Kafka message key.}
+        correlationId: {type: string, maxLength: 64, description: Request correlation identifier propagated across services.}
+        producer: {type: string, enum: [identity, catalog, cart, order, payment, notification]}
+        payload: {type: object}
+    Money:
+      type: object
+      required: [amountMinor, currency]
+      properties:
+        amountMinor: {type: integer, format: int64, minimum: 0, description: Amount in minor units (no floats).}
+        currency: {type: string, pattern: '^[A-Z]{3}$', description: ISO-4217 code; one currency in the MVP.}
+    Channel: {type: string, enum: [email, sms]}
+    OrderStatus:
+      type: string
+      description: Fulfilment status of the order. `cancelled` is reachable only from placed or preparing.
+      enum: [placed, preparing, shipped, delivered, cancelled]
+    PaymentStatus:
+      type: string
+      description: Payment status of the order. Preparing requires approved; failed (or pending for more than 30 minutes) cancels the order.
+      enum: [pending, approved, failed]
+    CancellationReason:
+      type: string
+      enum: [SHOPPER_REQUEST, OPERATOR, PAYMENT_FAILED, PAYMENT_EXPIRED]
+    RecipientSnapshot:
+      type: object
+      description: Point-in-time contact data so notification never calls identity synchronously. Personal data; never log.
+      required: [accountId, email, preferredChannels]
+      properties:
+        accountId: {type: string, format: uuid}
+        email: {type: string, format: email}
+        phone: {type: [string, 'null'], description: 'E.164, present only when verified and opted in to SMS.'}
+        preferredChannels: {type: array, minItems: 1, uniqueItems: true, items: {$ref: '#/components/schemas/Channel'}}
+    OrderLine:
+      type: object
+      required: [productId, name, quantity, unitPrice]
+      properties:
+        productId: {type: string, format: uuid}
+        name: {type: string, description: Name frozen at confirmation.}
+        quantity: {type: integer, minimum: 1}
+        unitPrice: {$ref: '#/components/schemas/Money'}
+    StockLine:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId: {type: string, format: uuid}
+        quantity: {type: integer, minimum: 1}
+    DeliveryAddress:
+      type: object
+      description: Address snapshot frozen at confirmation.
+      required: [recipientName, line1, city, postalCode, country]
+      properties:
+        recipientName: {type: string}
+        line1: {type: string}
+        line2: {type: [string, 'null']}
+        city: {type: string}
+        postalCode: {type: string}
+        country: {type: string, pattern: '^[A-Z]{2}$'}
+    OrderSummary:
+      type: object
+      description: Frozen order content reused by order events.
+      required: [orderId, orderNumber, accountId, lines, total]
+      properties:
+        orderId: {type: string, format: uuid}
+        orderNumber: {type: string}
+        accountId: {type: string, format: uuid}
+        lines: {type: array, minItems: 1, items: {$ref: '#/components/schemas/OrderLine'}}
+        total: {$ref: '#/components/schemas/Money'}
+    AccountRegisteredPayload:
+      type: object
+      required: [accountId, recipient, verificationToken, tokenExpiresAt]
+      properties:
+        accountId: {type: string, format: uuid}
+        recipient: {$ref: '#/components/schemas/RecipientSnapshot'}
+        verificationToken: {type: string, description: Opaque single-use token. Sensitive - restrict topic ACL to notification and never log.}
+        tokenExpiresAt: {type: string, format: date-time}
+    AccountVerifiedPayload:
+      type: object
+      required: [accountId, recipient, verifiedAt]
+      properties:
+        accountId: {type: string, format: uuid}
+        recipient: {$ref: '#/components/schemas/RecipientSnapshot'}
+        verifiedAt: {type: string, format: date-time}
+    AccountDeletedPayload:
+      type: object
+      required: [accountId, pseudonym, deletedAt]
+      properties:
+        accountId: {type: string, format: uuid}
+        pseudonym: {type: string, description: Stable pseudonym that replaces the account in retained order and financial records.}
+        deletedAt: {type: string, format: date-time}
+    PasswordResetRequestedPayload:
+      type: object
+      required: [accountId, recipient, resetToken, tokenExpiresAt]
+      properties:
+        accountId: {type: string, format: uuid}
+        recipient: {$ref: '#/components/schemas/RecipientSnapshot'}
+        resetToken: {type: string, description: Opaque single-use token. Sensitive - restrict topic ACL to notification and never log.}
+        tokenExpiresAt: {type: string, format: date-time}
+    CartMergedPayload:
+      type: object
+      required: [accountId, cartId, mergedCartCount, lineCount]
+      properties:
+        accountId: {type: string, format: uuid}
+        cartId: {type: string, format: uuid, description: Resulting account cart.}
+        mergedCartCount: {type: integer, minimum: 1, description: Anonymous carts merged (several devices possible).}
+        lineCount: {type: integer, minimum: 0}
+        cappedLines:
+          type: array
+          description: Lines whose summed quantity was capped at available stock.
+          items:
+            type: object
+            required: [productId, requestedQuantity, appliedQuantity]
+            properties:
+              productId: {type: string, format: uuid}
+              requestedQuantity: {type: integer, minimum: 1}
+              appliedQuantity: {type: integer, minimum: 0}
+    StockReservationPayload:
+      type: object
+      description: Used by StockReserved and StockCommitted.
+      required: [reservationId, orderId, lines]
+      properties:
+        reservationId: {type: string, format: uuid, description: Equals the envelope aggregateId.}
+        orderId: {type: string, format: uuid}
+        lines: {type: array, minItems: 1, items: {$ref: '#/components/schemas/StockLine'}}
+        expiresAt: {type: string, format: date-time, description: StockReserved only; reservation lapses at this time.}
+    StockReleasedPayload:
+      type: object
+      description: Stock-level reason (CANCELLED covers shopper and operator cancellation; EXPIRED corresponds to order cancellationReason PAYMENT_EXPIRED).
+      required: [reservationId, orderId, lines, reason]
+      properties:
+        reservationId: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+        lines: {type: array, minItems: 1, items: {$ref: '#/components/schemas/StockLine'}}
+        reason: {type: string, enum: [PAYMENT_FAILED, CANCELLED, EXPIRED]}
+    OrderPlacedPayload:
+      allOf:
+        - $ref: '#/components/schemas/OrderSummary'
+        - type: object
+          required: [orderStatus, paymentStatus, deliveryAddress, paymentMethodRef, idempotencyKey, recipient]
+          properties:
+            orderStatus: {type: string, const: placed}
+            paymentStatus: {type: string, const: pending}
+            deliveryAddress: {$ref: '#/components/schemas/DeliveryAddress'}
+            paymentMethodRef: {type: string, description: Opaque simulated-provider payment method reference; never a card number.}
+            idempotencyKey: {type: string, description: Checkout Idempotency-Key reused for the payment attempt.}
+            recipient: {$ref: '#/components/schemas/RecipientSnapshot'}
+    OrderPaidPayload:
+      allOf:
+        - $ref: '#/components/schemas/OrderSummary'
+        - type: object
+          required: [orderStatus, paymentStatus, deliveryAddress, paymentId, paidAt, recipient]
+          properties:
+            orderStatus: {type: string, const: placed, description: The order stays placed after approval.}
+            paymentStatus: {type: string, const: approved}
+            deliveryAddress: {$ref: '#/components/schemas/DeliveryAddress'}
+            paymentId: {type: string, format: uuid}
+            paidAt: {type: string, format: date-time}
+            recipient: {$ref: '#/components/schemas/RecipientSnapshot'}
+    OrderPaymentFailedPayload:
+      type: object
+      required: [orderId, orderNumber, accountId, total, orderStatus, paymentStatus, cancellationReason, reasonCategory, recipient]
+      properties:
+        orderId: {type: string, format: uuid}
+        orderNumber: {type: string}
+        accountId: {type: string, format: uuid}
+        total: {$ref: '#/components/schemas/Money'}
+        orderStatus: {type: string, const: cancelled}
+        paymentStatus: {type: string, const: failed}
+        cancellationReason: {type: string, const: PAYMENT_FAILED}
+        reasonCategory: {$ref: '#/components/schemas/DeclineCategory'}
+        recipient: {$ref: '#/components/schemas/RecipientSnapshot'}
+    OrderStatusChangedPayload:
+      type: object
+      description: Used by OrderPreparing, OrderShipped and OrderDelivered.
+      required: [orderId, orderNumber, accountId, orderStatus, paymentStatus, changedAt, changedBy, recipient]
+      properties:
+        orderId: {type: string, format: uuid}
+        orderNumber: {type: string}
+        accountId: {type: string, format: uuid}
+        orderStatus: {type: string, enum: [preparing, shipped, delivered]}
+        paymentStatus: {type: string, const: approved, description: Always approved; an order cannot leave placed otherwise.}
+        changedAt: {type: string, format: date-time}
+        changedBy: {type: string, format: uuid, description: Operator account id (audit attribution).}
+        recipient: {$ref: '#/components/schemas/RecipientSnapshot'}
+    OrderCancelledPayload:
+      type: object
+      required: [orderId, orderNumber, accountId, lines, total, orderStatus, paymentStatus, reason, refundRequired, cancelledAt, recipient]
+      properties:
+        orderId: {type: string, format: uuid}
+        orderNumber: {type: string}
+        accountId: {type: string, format: uuid}
+        lines: {type: array, minItems: 1, items: {$ref: '#/components/schemas/StockLine'}}
+        total: {$ref: '#/components/schemas/Money'}
+        orderStatus: {type: string, const: cancelled}
+        paymentStatus: {$ref: '#/components/schemas/PaymentStatus', description: Payment status at cancellation; approved means a refund is required.}
+        reason: {$ref: '#/components/schemas/CancellationReason'}
+        refundRequired: {type: boolean, description: True when paymentStatus was approved at cancellation.}
+        paymentId: {type: [string, 'null'], format: uuid}
+        cancelledAt: {type: string, format: date-time}
+        recipient: {$ref: '#/components/schemas/RecipientSnapshot'}
+    DeclineCategory:
+      type: string
+      description: Decline reason category shown to the shopper; values are documented with the simulator rules.
+      enum: [insufficient_funds, card_expired, card_rejected, suspected_fraud, invalid_payment_method]
+    PaymentOutcomePayload:
+      type: object
+      description: Used by PaymentPending, PaymentApproved and PaymentDeclined. `status` is the payment attempt outcome (declined maps to order paymentStatus failed), not an order status.
+      required: [paymentId, orderId, accountId, amount, status, idempotencyKey]
+      properties:
+        paymentId: {type: string, format: uuid, description: Equals the envelope aggregateId.}
+        orderId: {type: string, format: uuid}
+        accountId: {type: string, format: uuid}
+        amount: {$ref: '#/components/schemas/Money'}
+        status: {type: string, enum: [pending, approved, declined]}
+        idempotencyKey: {type: string}
+        providerReference: {type: [string, 'null'], description: Absent while pending.}
+        reasonCategory: {$ref: '#/components/schemas/DeclineCategory'}
+        pendingReason: {type: string, enum: [PROVIDER_UNAVAILABLE, PROVIDER_TIMEOUT], description: PaymentPending only.}
+    RefundRecordedPayload:
+      type: object
+      required: [refundId, paymentId, orderId, accountId, amount, providerReference, recipient]
+      properties:
+        refundId: {type: string, format: uuid}
+        paymentId: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+        accountId: {type: string, format: uuid}
+        amount: {$ref: '#/components/schemas/Money'}
+        providerReference: {type: string}
+        recipient: {$ref: '#/components/schemas/RecipientSnapshot'}
+    NotificationOutcomePayload:
+      type: object
+      description: Used by NotificationSent and NotificationFailed.
+      required: [notificationId, accountId, channel, template, sourceEventId, attempts]
+      properties:
+        notificationId: {type: string, format: uuid}
+        accountId: {type: string, format: uuid}
+        channel: {$ref: '#/components/schemas/Channel'}
+        template: {type: string, description: 'Template key, e.g. order-confirmation.'}
+        sourceEventId: {type: string, format: uuid, description: eventId of the event that triggered the message.}
+        attempts: {type: integer, minimum: 1}
+        sentAt: {type: string, format: date-time, description: NotificationSent only.}
+        failedAt: {type: string, format: date-time, description: NotificationFailed only.}
+        lastErrorCategory: {type: string, enum: [CHANNEL_UNAVAILABLE, REJECTED_BY_PROVIDER, INVALID_RECIPIENT], description: NotificationFailed only.}
