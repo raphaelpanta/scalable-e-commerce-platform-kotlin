@@ -32,6 +32,18 @@ x-app: &app
   restart: unless-stopped
   stop_grace_period: 30s
   profiles: [core]
+  # Probe the actuator health endpoint on the management port (the JRE image has no curl; bash's /dev/tcp is enough).
+  # Declared here so it also applies to images built before the Dockerfile carried the same check.
+  healthcheck:
+    test:
+      - CMD
+      - bash
+      - -c
+      - "exec 3<>/dev/tcp/127.0.0.1/8081 && printf 'GET /actuator/health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '\"status\":\"UP\"' <&3"
+    interval: 15s
+    timeout: 5s
+    retries: 8
+    start_period: 90s
 
 x-db: &db
   image: postgres:18-alpine

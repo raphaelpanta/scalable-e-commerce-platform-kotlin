@@ -10,3 +10,12 @@ frontend/node_modules
 
 # Agent worktrees are nested checkouts, never part of the build context or the repository
 .claude/worktrees/
+
+# Not needed to build a service jar; keeping them out of the context keeps image layers cacheable
+platform/
+docs/
+specs/
+.github/
+.specify/
+scripts/
+.claude/
