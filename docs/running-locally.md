@@ -78,3 +78,12 @@ docker compose --profile core --profile observability --profile ci down -v    # 
 - Full validation journey with expected results: `specs/004-ecommerce-platform-mvp/quickstart.md`.
 - Compose details, environment and observability data flow: `platform/compose/README.md`.
 - Image recipe: `platform/docker/README.md`. Conventions (ports, variables): `docs/service-conventions.md`.
+
+## Performance suite
+
+`platform/perf` holds the k6 load test for SC-002 (catalogue browse and search p95 under 1 s at 10,000 products) and
+SC-003 (1,000 concurrent browsing shoppers, 100 concurrent checkouts). Start the stack with the rate-limit override
+(`docker compose -f docker-compose.yml -f ../perf/compose.perf.yml --profile core up -d --build` in `platform/compose`),
+then `platform/perf/run.sh`: it loads the 10,000-product dataset, runs k6 in a container and writes
+`platform/perf/results/summary.json`. Prerequisites, thresholds, how to read the summary and the known limits are in
+[platform/perf/README.md](../platform/perf/README.md).

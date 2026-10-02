@@ -1,0 +1,19 @@
+# Compose override for the performance run (T115). LOCAL MEASUREMENT ONLY: it lifts the gateway's per-source-address
+# rate limits, because the load generator reaches the gateway from ONE address while production traffic comes from many.
+#
+#   cd platform/compose
+#   docker compose -f docker-compose.yml -f ../perf/compose.perf.yml --profile core up -d --build
+#
+# Tiers (docs/gateway.md, "Rate limiting"), defaults per minute and what the suite needs:
+#   auth      10   sign-in of 100 checkout shoppers during the ramp (keyed by source address)
+#   browse   600   1,000 anonymous browsing VUs (keyed by source address)
+#   standard 120   registration and verification of 100 shoppers (anonymous, keyed by source address)
+# The checkout (20/min) and operator tiers are keyed by account and stay at their defaults: the suite paces each
+# shopper below them, so what is measured is the real per-account policy.
+# Override values with PERF_RATELIMIT_AUTH, PERF_RATELIMIT_BROWSE and PERF_RATELIMIT_STANDARD in the shell or .env.
+services:
+  gateway:
+    environment:
+      GATEWAY_RATELIMIT_REQUESTSPERMINUTE_AUTH: ${PERF_RATELIMIT_AUTH:-100000}
+      GATEWAY_RATELIMIT_REQUESTSPERMINUTE_BROWSE: ${PERF_RATELIMIT_BROWSE:-10000000}
+      GATEWAY_RATELIMIT_REQUESTSPERMINUTE_STANDARD: ${PERF_RATELIMIT_STANDARD:-100000}
