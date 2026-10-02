@@ -59,7 +59,8 @@ Kafka are reachable only on the internal network (FR-023).
   `https://ecommerce.example/problems/<slug>` with slugs `validation`, `not-found`, `conflict`, `throttled`,
   `insufficient-stock`, `price-changed`, `stale-revision`, `unauthorized`, `forbidden`, `unavailable` (503), and the
   order-specific `payment-declined` (422), `order-not-cancellable` (409), `invalid-transition` (409),
-  `idempotency-key-reuse` (422) exactly as `contracts/openapi/order.yaml` uses them. Every error
+  `idempotency-key-reuse` (422) exactly as `contracts/openapi/order.yaml` uses them; gateway-only `payload-too-large`
+  (413) and `internal` (500). Every error
   carries `correlationId`. The public OpenAPI copies use the same host.
 - `X-Correlation-Id` is read, sanitised, echoed and logged by the `CorrelationIdWebFilter` of `platform-core`
   (rules in `contracts/gateway-routes.md`); clients copy it to downstream calls and events.
