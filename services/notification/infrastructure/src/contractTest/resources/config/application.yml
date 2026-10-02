@@ -3,6 +3,8 @@
 logging:
   level:
     org.springframework.boot.reactor.netty.GracefulShutdown: warn
+    # The delivery job may be mid-poll when Testcontainers stops the database at shutdown
+    org.springframework.transaction.reactive.TransactionalOperatorImpl: off
     io.r2dbc.postgresql.client.ReactorNettyClient: "off"
     com.ecommerce.platform.messaging.PeriodicJob: error
     org.apache.kafka: error
@@ -45,5 +47,3 @@ notification:
   delivery:
     # The consumer pacts assert what an event produces; nothing is delivered in this layer.
     enabled: false
-    # The delivery job may be mid-poll when Testcontainers stops the database at shutdown
-    org.springframework.transaction.reactive.TransactionalOperatorImpl: off
