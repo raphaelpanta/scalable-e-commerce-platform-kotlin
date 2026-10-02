@@ -1,0 +1,58 @@
+{
+  "eventId": "ee000005-0000-4000-8000-000000000005",
+  "type": "OrderPlaced",
+  "version": 1,
+  "occurredAt": "2026-10-02T10:15:00Z",
+  "aggregateId": "0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10",
+  "correlationId": "3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13",
+  "producer": "order",
+  "payload": {
+    "orderId": "0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10",
+    "orderNumber": "ORD-20261002-0001",
+    "accountId": "7c1d4f3e-0a52-4c0b-8d3a-1e2f3a4b5c6d",
+    "lines": [
+      {
+        "productId": "9a4f1e0e-6c2d-4a17-8d3b-0c7e5f2a1b01",
+        "name": "Espresso Machine",
+        "quantity": 1,
+        "unitPrice": {
+          "amountMinor": 14900,
+          "currency": "BRL"
+        }
+      },
+      {
+        "productId": "3d7c2b9a-1f44-4c8e-9a52-6b0e7d3c4f02",
+        "name": "Coffee Beans 1kg",
+        "quantity": 2,
+        "unitPrice": {
+          "amountMinor": 2450,
+          "currency": "BRL"
+        }
+      }
+    ],
+    "total": {
+      "amountMinor": 19800,
+      "currency": "BRL"
+    },
+    "orderStatus": "placed",
+    "paymentStatus": "pending",
+    "deliveryAddress": {
+      "recipientName": "Ada Lovelace",
+      "line1": "12 Analytical Street",
+      "line2": "Flat 2",
+      "city": "London",
+      "postalCode": "N1 9GU",
+      "country": "GB"
+    },
+    "paymentMethodRef": "tok_sim_approve_4242",
+    "idempotencyKey": "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+    "recipient": {
+      "accountId": "7c1d4f3e-0a52-4c0b-8d3a-1e2f3a4b5c6d",
+      "email": "ada@example.test",
+      "phone": null,
+      "preferredChannels": [
+        "email"
+      ]
+    }
+  }
+}

@@ -3,7 +3,11 @@ package com.ecommerce.order.infrastructure
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
 
-/** Service for the bounded context "order": health, metrics and logs, no business logic yet. */
+/**
+ * The order service (bounded context "order", FR-011..FR-017): checkout with synchronous stock reservation and
+ * idempotency, order history, cancellation and operator transitions, payment and account event consumers, and the
+ * payment expiry job.
+ */
 @SpringBootApplication
 class OrderApplication
 
