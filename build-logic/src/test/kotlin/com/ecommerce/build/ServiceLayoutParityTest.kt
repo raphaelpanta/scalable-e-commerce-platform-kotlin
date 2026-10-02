@@ -2,7 +2,6 @@ package com.ecommerce.build
 
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainAll
-import io.kotest.matchers.shouldBe
 import java.io.File
 
 private val ROOTS =
@@ -37,13 +36,15 @@ private fun String.capitalised(): String = replaceFirstChar(Char::uppercaseChar)
 
 class ServiceLayoutParityTest :
     FunSpec({
+        // Feature 004 grew the catalogue in place (persistence, web, messaging, ... packages and db/seed), so the
+        // reference service now holds the scaffolded layout plus its own packages.
         test("a scaffolded service has the directory layout of services/catalog (AC 4.3)") {
             val catalog = File(requireNotNull(System.getProperty("repo.root"))).resolve("services/catalog")
             val fixture = FixtureProject.prepare("scaffold-repo")
             fixture.run("newService", "-Pname=orders")
             val orders = fixture.file("services/orders")
 
-            layout(orders, "orders") shouldBe layout(catalog, "catalog")
+            layout(catalog, "catalog") shouldContainAll layout(orders, "orders")
             val essentials =
                 listOf(
                     "domain/build.gradle.kts",

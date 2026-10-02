@@ -1,5 +1,7 @@
 package com.ecommerce.catalog.infrastructure
 
+import com.ecommerce.platform.testing.KafkaTestConfig
+import com.ecommerce.platform.testing.PostgresTestConfig
 import io.cucumber.java.After
 import io.cucumber.java.en.Given
 import io.cucumber.java.en.Then
@@ -27,7 +29,7 @@ private val http: HttpClient = HttpClient.newBuilder().connectTimeout(Duration.o
  */
 @CucumberContextConfiguration
 @SpringBootTest(webEnvironment = RANDOM_PORT, properties = ["management.server.port="])
-@Import(PostgresContainerConfig::class)
+@Import(PostgresTestConfig::class, KafkaTestConfig::class)
 class ServiceStatusSteps(
     @LocalServerPort private val port: Int,
     private val context: ConfigurableApplicationContext,

@@ -12,9 +12,32 @@ spring:
     url: jdbc:postgresql://${CATALOG_DB_HOST:localhost}:5432/catalog
     user: ${CATALOG_DB_USER}
     password: ${CATALOG_DB_PASSWORD}
+    # The service schema plus the outbox and processed_event tables of libs/platform-messaging.
+    locations: classpath:db/migration,classpath:db/messaging
+  profiles:
+    # SEED=true activates the profile `seed` (service conventions section 2): the profile `seed-true` is a group
+    # that expands to `seed`; `seed-false` (the default) matches nothing.
+    include: seed-${SEED:false}
+    group:
+      seed-true: seed
   reactor:
     # Restores thread locals (MDC correlationId) on Reactor operators, also when started without main().
     context-propagation: auto
+
+platform:
+  security:
+    # Catalogue reads are anonymous (catalog.yaml `security: [{}, bearerAuth]`); a bearer token that is present is
+    # still validated (operators see quantities and withdrawn products). Writes need a token, /internal/** the
+    # X-Internal-Token (INTERNAL_API_TOKEN).
+    public-paths:
+      - GET /api/v1/catalog/**
+
+catalog:
+  currency: ${PLATFORM_CURRENCY:BRL}
+  # Reservations lapse 45 minutes after creation, always later than the 30-minute payment expiry (conventions 8).
+  reservation-ttl: 45m
+  expiry-interval: 1m
+  expiry-batch-size: 100
 
 management:
   server:
@@ -39,3 +62,12 @@ logging:
   structured:
     format:
       console: ecs
+
+---
+# Seed data (T028): 3 categories and 20 products with stock (services/catalog/README.md), as a repeatable migration.
+spring:
+  config:
+    activate:
+      on-profile: seed
+  flyway:
+    locations: classpath:db/migration,classpath:db/messaging,classpath:db/seed

@@ -206,8 +206,8 @@ A new service (bounded context) is generated from the layout of the reference se
 
 The generated service passes `./gradlew -q verify` as it is (SC-004); the only existing file that changes is
 `settings.gradle.kts`. The templates live in `build-logic/src/main/resources/service-template/` (placeholders
-`__name__`, `__Name__`, `__NAME__`, listed in `index.txt`); `ServiceLayoutParityTest` keeps their directory
-layout identical to `services/catalog`. To discard a generated service, delete `services/<name>` and its
+`__name__`, `__Name__`, `__NAME__`, listed in `index.txt`); `ServiceLayoutParityTest` checks that every directory
+of their layout exists in `services/catalog` (which grew its own packages in feature 004). To discard a generated service, delete `services/<name>` and its
 `includeService` line.
 
 Manual equivalent: register the service with `includeService("<name>")` below the comment and create the three

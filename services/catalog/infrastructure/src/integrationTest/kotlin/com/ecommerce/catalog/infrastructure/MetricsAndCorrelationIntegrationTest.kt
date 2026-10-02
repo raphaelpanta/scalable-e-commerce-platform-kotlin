@@ -7,27 +7,15 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
-import org.springframework.boot.test.web.server.LocalServerPort
-import org.springframework.context.annotation.Import
-import org.springframework.test.web.reactive.server.WebTestClient
 import java.util.UUID
 
 private const val CORRELATION_HEADER = "X-Correlation-Id"
 
-@SpringBootTest(webEnvironment = RANDOM_PORT, properties = ["management.server.port="])
-@Import(PostgresContainerConfig::class)
+/** Prometheus metrics, and the correlation id of platform-core's `CorrelationIdWebFilter`: echoed and logged. */
 @ExtendWith(OutputCaptureExtension::class)
-class MetricsAndCorrelationIntegrationTest(
-    @LocalServerPort private val port: Int,
-) {
-    private val client: WebTestClient by lazy {
-        WebTestClient.bindToServer().baseUrl("http://localhost:$port").build()
-    }
-
+class MetricsAndCorrelationIntegrationTest : CatalogIntegrationTest() {
     @Test
     fun prometheusMetricsAreExposed() {
         val body =
