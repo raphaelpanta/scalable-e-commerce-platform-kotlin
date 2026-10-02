@@ -77,6 +77,7 @@ spring-boot-starter-webflux-test = { module = "org.springframework.boot:spring-b
 spring-boot-testcontainers = { module = "org.springframework.boot:spring-boot-testcontainers" }
 jackson-module-kotlin = { module = "tools.jackson.module:jackson-module-kotlin" }
 micrometer-registry-prometheus = { module = "io.micrometer:micrometer-registry-prometheus" }
+micrometer-core = { module = "io.micrometer:micrometer-core" }
 context-propagation = { module = "io.micrometer:context-propagation" }
 postgresql = { module = "org.postgresql:postgresql" }
 r2dbc-postgresql = { module = "org.postgresql:r2dbc-postgresql" }

@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: messaging-it
+  main:
+    # The library needs no web server; it keeps platform-core's web and security configuration out of the way.
+    web-application-type: none
+  flyway:
+    # A service lists classpath:db/migration,classpath:db/messaging; this test has only the messaging tables.
+    locations: classpath:db/messaging
+
+platform:
+  messaging:
+    outbox:
+      poll-interval: 100ms
+    consumer:
+      # Small and fast retries so that the dead-letter test finishes in well under a second.
+      max-attempts: 3
+      initial-interval: 50ms
+      max-interval: 200ms
+
+management:
+  otlp:
+    metrics:
+      export:
+        # No collector in tests; the exporter would warn when the context closes.
+        enabled: false
+
+# Spring's test context cache closes the application in a JVM shutdown hook, after Gradle stops capturing test
+# output. Without Ryuk (Podman) Testcontainers stops the containers in a concurrent hook, so the relay may still
+# poll a database that is already gone: keep that shutdown quiet.
+logging:
+  level:
+    org.apache.kafka: error
+    org.springframework.kafka: warn
+    com.ecommerce.platform.messaging.PeriodicJob: error
