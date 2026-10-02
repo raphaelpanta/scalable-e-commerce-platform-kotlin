@@ -17,17 +17,18 @@ import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.annotation.Import
 
 /**
- * Provider side: replays every pact of the repository root `build/pacts` (`pact.folder`) against the running
- * notification service. Tagged `provider`, so it runs in `contractVerify`, after every consumer test of the build; with
- * no pact for this provider yet the verification is skipped, not failed.
+ * Provider side: replays every pact of the repository root `build/pacts` (`pact.folder`) whose provider is
+ * `notification` against the running service. Today that is the platform probe's health pact (no other service
+ * calls notification over HTTP). Tagged `provider`, so it runs in `contractVerify`, after every consumer test of the
+ * build; with no pact for this provider the verification is skipped, not failed.
  */
 @Tag("provider")
 @Provider("notification")
 @PactFolder("\${pact.folder}")
 @IgnoreNoPactsToVerify
 @SpringBootTest(webEnvironment = RANDOM_PORT, properties = ["management.server.port="])
-@Import(PostgresContainerConfig::class)
-class HealthProviderVerificationTest(
+@Import(PostgresContainerConfig::class, ContractTestConfig::class)
+class NotificationProviderVerificationTest(
     @LocalServerPort private val port: Int,
 ) {
     @BeforeEach
