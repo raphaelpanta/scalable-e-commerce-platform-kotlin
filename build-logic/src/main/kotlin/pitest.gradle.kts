@@ -48,7 +48,8 @@ pitest.apply {
     // enabling it aborts the run, so every run is a full analysis until that follow-up lands.
     enableDefaultIncrementalAnalysis.set(false)
     excludedClasses.set(setOf("*\$WhenMappings", "*\$DefaultImpls", "*Kt\$*\$1"))
-    avoidCallsTo.set(setOf("kotlin.jvm.internal", "kotlin.Intrinsics", "kotlinx.coroutines"))
+    // kotlin.ResultKt: coroutine resume paths (Result.throwOnFailure) yield mutants no test can kill
+    avoidCallsTo.set(setOf("kotlin.jvm.internal", "kotlin.Intrinsics", "kotlinx.coroutines", "kotlin.ResultKt"))
     excludedMethods.set(setOf("toString", "hashCode", "equals", "copy", "component*"))
 }
 

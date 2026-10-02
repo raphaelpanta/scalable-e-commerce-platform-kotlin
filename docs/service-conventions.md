@@ -142,3 +142,5 @@ Where the design documents disagree, the implementation follows these rules.
 | Simulated SMS | The notification service's SMS simulator records each message and also mirrors it to Mailpit as an email to `sms-<E.164 digits>@sms.ecommerce.invalid` with subject `SMS to <phone>` and the SMS text as body, so tests and the acceptance suite read codes by searching Mailpit for the phone number. |
 | Mailpit chaos | Compose starts Mailpit with `MP_ENABLE_CHAOS=true`; the acceptance suite uses the chaos API to make deliveries fail (US6 scenario 3). |
 | Order number | Orders carry `orderNumber` (`ORD-<yyyyMMdd>-<sequence>`); confirmation messages include both the order id and the order number. |
+| WebClient in Boot 4 | `WebClient.Builder` is only auto-configured with `spring-boot-starter-webclient`; an infrastructure module that calls another service adds `implementation(libs.spring.boot.starter.webclient)` (alias in the catalogue). |
+| Coroutine mutants | The `pitest` convention excludes calls to `kotlin.ResultKt`; application tests' fake ports should `yield()` so resume paths execute. |
