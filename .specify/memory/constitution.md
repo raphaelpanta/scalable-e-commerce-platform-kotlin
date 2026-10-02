@@ -194,7 +194,8 @@ fast and affordable across a large monorepo.
 
 Backend (per service):
 
-- Kotlin (latest stable), JVM LTS, Spring Boot 3.x with WebFlux and coroutine support.
+- Kotlin (latest stable), JVM LTS, Spring Boot on the latest GA major line (4.1 at the time of this
+  amendment; versions pinned in `gradle/libs.versions.toml`) with WebFlux and coroutine support.
 - Gradle with Kotlin DSL, version catalog and `build-logic/` convention plugins.
 - kotlinx-coroutines, kotlinx-serialization (or Jackson Kotlin module when required by Spring).
 - Persistence: R2DBC with Flyway or Liquibase migrations; reactive Redis; reactive Kafka client.
@@ -264,4 +265,4 @@ again after Phase 1 design. Every pull request review MUST verify compliance wit
 Complexity or deviations MUST be justified in the plan's Complexity Tracking table; unjustified
 deviations are rejected. Runtime development guidance for agents lives in `CLAUDE.md`.
 
-**Version**: 1.1.0 | **Ratified**: 2026-10-02 | **Last Amended**: 2026-10-02
+**Version**: 1.1.1 | **Ratified**: 2026-10-02 | **Last Amended**: 2026-10-02

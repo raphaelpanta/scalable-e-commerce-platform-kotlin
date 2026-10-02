@@ -142,6 +142,11 @@ Repository configuration used by the pipelines (Settings > Secrets and variables
 
 ### Required status checks and merge policy (T113, for the maintainer)
 
+**Decision (2026-10-02, T113):** `pr-gate` stays the only required status check on `main`. The seven `service-ci / <ctx>`
+checks and `platform` are path-filtered, so requiring them would block every pull request that does not touch all of
+them (see the warning below); they run as informational checks and publish images on pushes to `main`. Revisit when a
+path-neutral aggregate job exists. The commands below are kept for that moment.
+
 Feature 003 configured branch protection through `scripts/bootstrap-repo.sh` (`required_status_checks`, `strict: true`);
 the context names are the check names above. To ADD the new contexts and keep `pr-gate` (run once, as repository admin;
 nothing in this repository does it):

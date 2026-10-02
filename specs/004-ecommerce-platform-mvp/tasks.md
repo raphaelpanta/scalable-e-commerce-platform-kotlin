@@ -293,7 +293,7 @@
 - [X] T110 [P] [US9] Create the reusable workflow `.github/workflows/service-ci.yml` (inputs: service name; steps: checkout, JDK 25, Gradle quiet `check` for the service modules, `pitest`, Pact publish + `can-i-deploy`, Docker build from the service Dockerfile, push `<registry>/<service>:<sha>` and `:<branch>`) targeting `runs-on: [self-hosted, ecommerce]`
 - [X] T111 [P] [US9] Create per-service caller workflows `.github/workflows/<ctx>.yml` for gateway, identity, catalog, cart, order, payment, notification with `paths:` filters on `services/<ctx>/**`, `libs/**`, `build-logic/**`, `gradle/**`, `contracts/**`
 - [X] T112 [P] [US9] Create `.github/workflows/platform.yml` (compose config validation, acceptance suite against a `core` stack on the runner, observability config lint) with filters on `platform/**` and `acceptance/**`
-- [ ] T113 [US9] Register the required status checks (`service-ci / <ctx>`, `platform`) in the branch protection configured by feature 003 and document the merge policy in `docs/ci-cd.md`
+- [X] T113 [US9] Register the required status checks (`service-ci / <ctx>`, `platform`) in the branch protection configured by feature 003 and document the merge policy in `docs/ci-cd.md`
 
 **Checkpoint**: A single-service change builds, tests and publishes only that service within 15 min (SC-009).
 
@@ -305,11 +305,11 @@
 
 - [X] T114 [P] Authorisation sweep test: every operator operation as shopper → 403 and every protected operation anonymously → 401 across all six contracts in `acceptance/src/test/resources/features/authorisation-sweep.feature` (SC-010)
 - [ ] T115 [P] Load test with k6 or Gatling: 1,000 concurrent browsing shoppers and 100 concurrent checkouts, p95 catalogue < 1 s at 10,000 products, in `platform/perf/browse-and-checkout.js` with a seeded 10k-product dataset generator `platform/perf/seed-10k.sql` (SC-002, SC-003)
-- [ ] T116 [P] Dependency vulnerability scanning and image scanning steps added to `.github/workflows/service-ci.yml`; SBOM generation task in `build-logic`
+- [X] T116 [P] Dependency vulnerability scanning and image scanning steps added to `.github/workflows/service-ci.yml`; SBOM generation task in `build-logic`
 - [X] T117 [P] PII audit: assert no `Email`, `PhoneNumber`, `PostalAddress` or token values reach logs (log-capture test) in `libs/platform-core/src/test/kotlin/com/ecommerce/platform/observability/PiiMaskingSpec.kt`
-- [ ] T118 [P] Mutation thresholds: enable Pitest with the Kotlin plugin (Arcmutate licence per research §14, or documented exclusions fallback) at 80 % for every `domain` and `application` module in `build-logic/src/main/kotlin/pitest.gradle.kts`
+- [X] T118 [P] Mutation thresholds: enable Pitest with the Kotlin plugin (Arcmutate licence per research §14, or documented exclusions fallback) at 80 % for every `domain` and `application` module in `build-logic/src/main/kotlin/pitest.gradle.kts`
 - [X] T119 [P] Write `docs/architecture.md` (bounded contexts, layers, event flows, status model) and `docs/adr/0001-two-status-order-model.md`, `docs/adr/0002-synchronous-stock-reservation.md`, `docs/adr/0003-cart-revision-checkout.md`
-- [ ] T120 Propose the constitution PATCH amendment ("Spring Boot, latest GA major") via `/speckit-constitution` and record the Flyway blocking-at-boot exception in `docs/architecture.md`
+- [X] T120 Propose the constitution PATCH amendment ("Spring Boot, latest GA major") via `/speckit-constitution` and record the Flyway blocking-at-boot exception in `docs/architecture.md`
 - [ ] T121 Run the full `specs/004-ecommerce-platform-mvp/quickstart.md` on a clean machine and record results in `docs/validation/2026-10-quickstart-run.md`
 
 ---
