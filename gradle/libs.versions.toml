@@ -95,6 +95,8 @@ spring-kafka = { module = "org.springframework.kafka:spring-kafka" }
 spring-kafka-test = { module = "org.springframework.kafka:spring-kafka-test" }
 awaitility = { module = "org.awaitility:awaitility" }
 spring-security-oauth2-jose = { module = "org.springframework.security:spring-security-oauth2-jose" }
+# WebClient.Builder auto-configuration (Boot 4 moved it out of WebFlux); the cart service's catalog client
+spring-boot-starter-webclient = { module = "org.springframework.boot:spring-boot-starter-webclient" }
 
 # Managed by the Spring Cloud BOM (imported where used: the gateway and the internal HTTP clients)
 spring-cloud-bom = { module = "org.springframework.cloud:spring-cloud-dependencies", version.ref = "spring-cloud" }

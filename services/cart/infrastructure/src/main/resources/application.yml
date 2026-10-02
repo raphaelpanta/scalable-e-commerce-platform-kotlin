@@ -12,9 +12,30 @@ spring:
     url: jdbc:postgresql://${CART_DB_HOST:localhost}:5432/cart
     user: ${CART_DB_USER}
     password: ${CART_DB_PASSWORD}
+    # The service schema plus the outbox and processed_event tables of libs/platform-messaging.
+    locations: classpath:db/migration,classpath:db/messaging
   reactor:
     # Restores thread locals (such as an MDC correlation id) on Reactor operators.
     context-propagation: auto
+
+platform:
+  security:
+    # Every cart operation except mergeCart is open to anonymous callers (cart.yaml `security: [{}, bearerAuth]`);
+    # a bearer token that is present is still validated, and /internal/** is guarded by X-Internal-Token.
+    public-paths:
+      - GET /api/v1/cart
+      - DELETE /api/v1/cart
+      - POST /api/v1/cart/lines
+      - PUT /api/v1/cart/lines/{lineId}
+      - DELETE /api/v1/cart/lines/{lineId}
+
+cart:
+  # Internal pricing API of the catalog service (catalog-internal.yaml); Compose sets http://catalog:8080.
+  catalog-url: ${CATALOG_URL:http://localhost:8080}
+  currency: ${PLATFORM_CURRENCY:BRL}
+  # Anonymous carts untouched for this long are deleted (data-model section 5), checked every purge-interval.
+  anonymous-idle-timeout: 30d
+  purge-interval: 1h
 
 management:
   server:
