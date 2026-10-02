@@ -1,5 +1,42 @@
 # Test-only overrides, loaded on top of the main application.yml. Spring's test context cache closes the
-# application in a JVM shutdown hook, after Gradle stops capturing test output; keep that shutdown quiet.
+# application in a JVM shutdown hook, after Gradle stops capturing test output; keep that shutdown quiet. Without
+# Ryuk (Podman) Testcontainers stops the containers in a concurrent hook, so the outbox relay and the delivery
+# scheduler may still poll a database or an SMTP server that is already gone.
 logging:
   level:
     org.springframework.boot.reactor.netty.GracefulShutdown: warn
+    io.r2dbc.postgresql.client.ReactorNettyClient: "off"
+    com.ecommerce.platform.messaging.PeriodicJob: error
+    org.apache.kafka: error
+    org.springframework.kafka: warn
+    com.ecommerce.notification.infrastructure: error
+
+management:
+  # No collector in tests: the OTLP exporters of platform-core's defaults stay off.
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  tracing:
+    export:
+      enabled: false
+  logging:
+    export:
+      otlp:
+        enabled: false
+
+platform:
+  security:
+    internal-token: pact-internal-token
+  messaging:
+    outbox:
+      poll-interval: 100ms
+
+notification:
+  internal-token: pact-internal-token
+  delivery:
+    # The real schedule (5 attempts, 30 s doubling, capped at 10 min) shortened for the tests.
+    poll-interval: 100ms
+    initial-delay: 200ms
+    max-delay: 800ms
+    max-attempts: 5

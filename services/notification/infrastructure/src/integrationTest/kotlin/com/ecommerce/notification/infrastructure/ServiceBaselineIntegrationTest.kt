@@ -1,5 +1,8 @@
 package com.ecommerce.notification.infrastructure
 
+import com.ecommerce.platform.messaging.testing.RecordedEventsConfig
+import com.ecommerce.platform.testing.KafkaTestConfig
+import com.ecommerce.platform.testing.PostgresTestConfig
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -15,7 +18,7 @@ import java.time.Duration
 private val TIMEOUT: Duration = Duration.ofSeconds(10)
 
 @SpringBootTest(webEnvironment = RANDOM_PORT, properties = ["management.server.port="])
-@Import(PostgresContainerConfig::class)
+@Import(PostgresTestConfig::class, KafkaTestConfig::class, RecordedEventsConfig::class, DeliveryTestConfig::class)
 class ServiceBaselineIntegrationTest(
     @LocalServerPort private val port: Int,
     @Autowired private val database: DatabaseClient,

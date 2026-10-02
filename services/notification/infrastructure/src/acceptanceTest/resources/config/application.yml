@@ -3,3 +3,41 @@
 logging:
   level:
     org.springframework.boot.reactor.netty.GracefulShutdown: warn
+    io.r2dbc.postgresql.client.ReactorNettyClient: "off"
+    com.ecommerce.platform.messaging.PeriodicJob: error
+    org.apache.kafka: error
+    org.springframework.kafka: warn
+    com.ecommerce.notification.infrastructure: error
+
+management:
+  # No collector in tests: the OTLP exporters of platform-core's defaults stay off.
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  tracing:
+    export:
+      enabled: false
+  logging:
+    export:
+      otlp:
+        enabled: false
+
+spring:
+  kafka:
+    # The service-status feature needs no broker; the delivery journeys run in :acceptance against Compose.
+    listener:
+      auto-startup: false
+    admin:
+      auto-create: false
+
+platform:
+  messaging:
+    outbox:
+      relay-enabled: false
+    topics:
+      create: false
+
+notification:
+  delivery:
+    enabled: false

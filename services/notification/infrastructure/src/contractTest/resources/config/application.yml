@@ -3,3 +3,45 @@
 logging:
   level:
     org.springframework.boot.reactor.netty.GracefulShutdown: warn
+    io.r2dbc.postgresql.client.ReactorNettyClient: "off"
+    com.ecommerce.platform.messaging.PeriodicJob: error
+    org.apache.kafka: error
+    org.springframework.kafka: warn
+    com.ecommerce.notification.infrastructure: error
+
+management:
+  # No collector in tests: the OTLP exporters of platform-core's defaults stay off.
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  tracing:
+    export:
+      enabled: false
+  logging:
+    export:
+      otlp:
+        enabled: false
+
+spring:
+  kafka:
+    # The contract layer has no broker: the message pacts drive the listener directly.
+    listener:
+      auto-startup: false
+    admin:
+      auto-create: false
+
+platform:
+  security:
+    internal-token: pact-internal-token
+  messaging:
+    outbox:
+      relay-enabled: false
+    topics:
+      create: false
+
+notification:
+  internal-token: pact-internal-token
+  delivery:
+    # The consumer pacts assert what an event produces; nothing is delivered in this layer.
+    enabled: false

@@ -12,9 +12,39 @@ spring:
     url: jdbc:postgresql://${NOTIFICATION_DB_HOST:localhost}:5432/notification
     user: ${NOTIFICATION_DB_USER}
     password: ${NOTIFICATION_DB_PASSWORD}
+    # The service schema (V2__) after the generator baseline and platform-messaging's outbox/processed_event.
+    locations: classpath:db/migration,classpath:db/messaging
+  mail:
+    # Mailpit locally (docs/service-conventions.md §2). JavaMailSender blocks: every send runs on
+    # Dispatchers.IO (documented exception, services/notification/README.md "Blocking exception").
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1025}
+    properties:
+      mail:
+        smtp:
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
   reactor:
     # Restores thread locals (such as an MDC correlation id) on Reactor operators.
     context-propagation: auto
+
+notification:
+  # Base of the links in verification and password-reset messages.
+  public-base-url: ${PUBLIC_BASE_URL:http://localhost:8080}
+  identity-url: ${IDENTITY_URL:http://localhost:8080}
+  internal-token: ${INTERNAL_API_TOKEN:}
+  mail-from: notifications@ecommerce.example
+  delivery:
+    enabled: true
+    poll-interval: 1s
+    batch-size: 20
+    # A claimed notification is invisible to other instances for this long (longer than any send).
+    lease: 2m
+    # FR-019 / data-model §1: 5 attempts, exponential from 30 s, capped at 10 min, then failed.
+    max-attempts: 5
+    initial-delay: 30s
+    max-delay: 10m
 
 management:
   server:
@@ -33,6 +63,9 @@ management:
     # The built-in R2DBC indicator has no timeout and hangs while the database is unreachable; database
     # health belongs in a HealthProbe adapter with a timeout, as in services/catalog (DatabaseHealthProbe).
     r2dbc:
+      enabled: false
+    # An unreachable SMTP server is handled by the retry schedule (FR-019); it must not take the service down.
+    mail:
       enabled: false
 
 logging:
