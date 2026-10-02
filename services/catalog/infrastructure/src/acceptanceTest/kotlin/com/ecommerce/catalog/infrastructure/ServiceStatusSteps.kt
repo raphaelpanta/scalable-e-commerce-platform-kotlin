@@ -1,5 +1,6 @@
 package com.ecommerce.catalog.infrastructure
 
+import com.ecommerce.platform.testing.ContainerControl
 import com.ecommerce.platform.testing.KafkaTestConfig
 import com.ecommerce.platform.testing.PostgresTestConfig
 import io.cucumber.java.After
@@ -44,7 +45,7 @@ class ServiceStatusSteps(
 
     @Given("its storage becomes unreachable")
     fun itsStorageBecomesUnreachable() {
-        postgres.dockerClient.pauseContainerCmd(postgres.containerId).exec()
+        ContainerControl.pause(postgres)
     }
 
     @When("an operator asks whether the service is healthy")
@@ -72,9 +73,7 @@ class ServiceStatusSteps(
 
     @After
     fun resumeStorage() {
-        if (postgres.currentContainerInfo.state.paused == true) {
-            postgres.dockerClient.unpauseContainerCmd(postgres.containerId).exec()
-        }
+        ContainerControl.unpauseIfPaused(postgres)
     }
 
     private companion object {

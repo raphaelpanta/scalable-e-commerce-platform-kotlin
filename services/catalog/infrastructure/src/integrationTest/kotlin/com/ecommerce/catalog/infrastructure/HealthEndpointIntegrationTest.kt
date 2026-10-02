@@ -1,5 +1,6 @@
 package com.ecommerce.catalog.infrastructure
 
+import com.ecommerce.platform.testing.ContainerControl
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -12,9 +13,7 @@ class HealthEndpointIntegrationTest(
 ) : CatalogIntegrationTest() {
     @AfterEach
     fun resumeStorage() {
-        if (postgres.currentContainerInfo.state.paused == true) {
-            postgres.dockerClient.unpauseContainerCmd(postgres.containerId).exec()
-        }
+        ContainerControl.unpauseIfPaused(postgres)
     }
 
     @Test
@@ -31,7 +30,7 @@ class HealthEndpointIntegrationTest(
 
     @Test
     fun healthIsDownWithinFiveSecondsWhenTheDatabaseIsUnreachable() {
-        postgres.dockerClient.pauseContainerCmd(postgres.containerId).exec()
+        ContainerControl.pause(postgres)
 
         client
             .get()
