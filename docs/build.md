@@ -20,8 +20,9 @@ config/
   detekt/detekt.yml             # detekt rules on top of the defaults, zero findings allowed
   architecture/                 # Konsist rules, written once and run inside every service
 build-logic/                    # included build with the convention plugins and their TestKit tests
-  src/main/kotlin/*.gradle.kts  # kotlin-domain, kotlin-application, kotlin-service, quality, pitest,
-                                #   pact, docker-image, plus the internal kotlin-base and repository-root
+  src/main/kotlin/*.gradle.kts  # kotlin-domain, kotlin-application, kotlin-service, kotlin-boot-app,
+                                #   kotlin-library, quality, pitest, pact, docker-image, plus the internal
+                                #   kotlin-base and repository-root
   src/main/kotlin/com/ecommerce/build/   # task classes and helpers used by the conventions
   src/main/resources/service-template/  # source of ./gradlew newService -Pname=<context>
 services/
@@ -46,6 +47,32 @@ mandatory reason in the root `build.gradle.kts`:
 ```kotlin
 monorepo {
     exempt(":path:to:module", "reason it may skip the conventions")
+}
+```
+
+## Convention plugins
+
+| Convention | For | What it sets up |
+| --- | --- | --- |
+| `kotlin-domain` | `:services:<ctx>:domain` | pure Kotlin, unit tests, `pitest`; no project or framework dependency |
+| `kotlin-application` | `:services:<ctx>:application` | its sibling `domain`, coroutines, MockK, `pitest`; no Spring |
+| `kotlin-service` | `:services:<ctx>:infrastructure` | `kotlin-boot-app` plus the sibling `domain` and `application`, R2DBC, Flyway, PostgreSQL, Testcontainers and the Konsist rules of `config/architecture`; the module must be named `infrastructure` |
+| `kotlin-boot-app` | a standalone Spring Boot WebFlux application, `:services:gateway` | Boot and Kotlin Spring plugins, Boot BOM, WebFlux, actuator, coroutines, Jackson Kotlin, Prometheus, context propagation, `springBoot { buildInfo() }`; layers `test`, `integrationTest`, `contractTest` and `contractVerify` (`pact`), `acceptanceTest` (Cucumber); WebTestClient, WireMock, MockK, Konsist; `dockerImage` |
+| `kotlin-library` | `:libs:platform-core`, `:libs:platform-messaging`, `:acceptance` | Kotlin Spring plugin, the Boot BOM as a platform (Spring, Jackson and Kafka artifacts need no version), `java-test-fixtures` (`src/testFixtures/kotlin`, consumed with `testImplementation(testFixtures(project(":libs:platform-core")))`), layers `test` and `integrationTest` with MockK, WebTestClient, Spring Boot Testcontainers, Testcontainers PostgreSQL/JUnit/R2DBC and WireMock; no `pitest` unless the module applies it |
+
+`dockerImage` names the image after the service: the parent directory of an `infrastructure` module
+(`:services:catalog:infrastructure` builds `catalog:<version>`), otherwise the module itself (`:services:gateway`
+builds `gateway:<version>`); the `SERVICE_MODULE` build argument is always the module path. A shared library
+that is mutation tested applies `pitest` next to its convention and names its package (see "Mutation testing"):
+
+```kotlin
+plugins {
+    id("kotlin-library")
+    id("pitest")
+}
+
+mutation {
+    targetPackage.set("com.ecommerce.platform")
 }
 ```
 
@@ -77,13 +104,15 @@ minutes.
 
 ## Running a test layer
 
-The infrastructure module of a service has four layers, each its own task and source set. Domain and
-application modules have the unit layer (`test`) only.
+The infrastructure module of a service has four layers, each its own source set; the contract layer has two
+tasks (see "Contract tests"). Domain and application modules have the unit layer (`test`) only; shared libraries
+have `test` and `integrationTest`.
 
 ```bash
 ./gradlew -q :services:catalog:infrastructure:test              # unit, architecture rules (JDK only)
 ./gradlew -q :services:catalog:infrastructure:integrationTest   # Testcontainers PostgreSQL (needs Docker)
-./gradlew -q :services:catalog:infrastructure:contractTest      # Pact consumer and provider (needs Docker)
+./gradlew -q :services:catalog:infrastructure:contractTest      # Pact consumers: write build/pacts
+./gradlew -q :services:catalog:infrastructure:contractVerify    # Pact providers: verify build/pacts (needs Docker)
 ./gradlew -q :services:catalog:infrastructure:acceptanceTest    # Cucumber features (needs Docker)
 ```
 
@@ -92,7 +121,50 @@ layer in every module of the repository:
 
 ```bash
 ./gradlew -q integrationTest
+./gradlew -q contractTest contractVerify   # every pact of the repository, written and verified
 ```
+
+## Contract tests
+
+Pact JVM consumer and provider tests share one source set, `src/contractTest/kotlin`, and two tasks of the `pact`
+convention (applied by `kotlin-boot-app`, hence by `kotlin-service`):
+
+1. `contractTest` runs every test except those tagged `provider`: the consumer tests. They write their pact files
+   (`<consumer>-<provider>.json`) to the repository root `build/pacts`, one folder shared by every module (system
+   property `pact.rootDir`, `pact.writer.overwrite=true`).
+2. `contractVerify` runs only the JUnit Jupiter classes tagged `provider`, after every `contractTest` task of the
+   build (`mustRunAfter`), and reads the same folder (system property `pact.folder`). `check`, and so `verify`,
+   depends on it; its inputs include the pact files, so a changed pact re-runs the verification.
+
+A provider verification class carries these annotations (Pact expands `${pact.folder}` from the system property;
+in Kotlin the `$` is escaped):
+
+```kotlin
+@Tag("provider")
+@Provider("catalog")
+@PactFolder("\${pact.folder}")
+@IgnoreNoPactsToVerify
+class HealthProviderVerificationTest { /* @BeforeEach and @TestTemplate take a nullable PactVerificationContext */ }
+```
+
+`@IgnoreNoPactsToVerify` keeps a provider green while no consumer has written a pact for it; the context is then
+`null`, so the template uses `context?.verifyInteraction()`. Consumer tests need no ordering annotation. Because
+the pact files live outside the task outputs, `contractTest` is never taken from the build cache and is re-run when
+`build/pacts` is missing.
+
+Pact broker (optional, environment variables read when the test JVM starts):
+
+| Variable | Effect on both contract tasks |
+| --- | --- |
+| `PACT_BROKER_URL` | `-Dpactbroker.url`; enables everything below; `contractVerify` is then never up to date or cached |
+| `PACT_BROKER_TOKEN` | `-Dpactbroker.auth.token` |
+| `PACT_BROKER_USERNAME`, `PACT_BROKER_PASSWORD` | `-Dpactbroker.auth.username`, `-Dpactbroker.auth.password` |
+| `GITHUB_SHA` (else `git rev-parse HEAD`) | `-Dpact.provider.version`, only with a broker URL |
+| `PACT_PUBLISH_RESULTS=true` | `-Dpact.verifier.publishResults=true`, only with a broker URL; otherwise always `false` |
+
+Credentials are not task inputs, so they never reach a cache key. Pacts loaded with `@PactFolder` are never
+published; a provider that verifies broker pacts adds a class with `@PactBroker` (it reads `pactbroker.url` and the
+credentials) guarded by `@EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")`.
 
 Unit tests of a single module, for example the application module of the catalogue:
 
@@ -190,16 +262,21 @@ Required harness change (recorded here instead of editing feature 001): both hoo
 repository root, and the per-file hook runs the command in the table. The end-of-task hook
 (`.claude/hooks/stop-full-check.sh`) still runs `./gradlew -q check` plus `<module>:pitest
 -Pharness.mutation.classes=<globs>`; it should run `./gradlew -q verify`, because root `check` skips
-`checkToolchain`, `checkVersionLiterals` and the `build-logic` TestKit suite, and the `pitest` convention does
-not read `harness.mutation.classes` (every Pitest run is a full analysis of the module).
+`checkToolchain`, `checkVersionLiterals` and the `build-logic` TestKit suite.
 
 ## Mutation testing
 
-Domain and application modules apply the `pitest` convention, and `pitest` is part of their `check`.
+Domain and application modules apply the `pitest` convention (shared libraries may apply it too), and `pitest`
+is part of their `check`.
 
 - Threshold: the mutation score must be at least 80 %; the floor is `QualityThresholds` in `build-logic`
   and a module that sets a lower `mutationThreshold` fails at configuration time.
-- Target classes: `com.ecommerce.<service>.<layer>.*`.
+- Target classes, the first that applies:
+  1. `-Pharness.mutation.classes=<glob>[,<glob>...]` (the hooks pass the classes of the changed files);
+  2. `mutation { targetPackage.set("com.ecommerce.platform") }` in the module's build script, which mutates
+     `com.ecommerce.platform.*`; a module outside `services/` must set it, or it fails at configuration with
+     `Module <path> applies pitest outside services/`;
+  3. for `:services:<service>:<layer>`, `com.ecommerce.<service>.<layer>.*`.
 - Exclusions for Kotlin-synthetic code: `*$WhenMappings`, `*$DefaultImpls`, `*Kt$*$1`; calls to
   `kotlin.jvm.internal`, `kotlin.Intrinsics` and `kotlinx.coroutines` are not mutated; the methods
   `toString`, `hashCode`, `equals`, `copy` and `component*` are skipped.

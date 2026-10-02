@@ -1,24 +1,25 @@
+import com.ecommerce.build.MutationExtension
 import com.ecommerce.build.QualityThresholds
+import com.ecommerce.build.servicePackage
 import info.solidsoft.gradle.pitest.PitestPluginExtension
 
-// Mutation testing for domain and application modules (Principle VIII). Pitest with the JUnit 5 plugin and
-// exclusions for Kotlin-synthetic code (the default). Two project properties (specs/001-harness-quality-gates):
-//  - harness.mutation.classes=<glob>[,<glob>...] narrows targetClasses; the Stop hook passes the classes of the
-//    changed files (incremental mutation). Without it every class of the module is mutated (CI, verify).
-//  - harness.pitest.arcmutate=true adds the commercial Arcmutate Kotlin plugin; it needs an Arcmutate licence
-//    file and stays false in gradle.properties (research.md, "Arcmutate licence outcome").
+// Mutation testing (Principle VIII). Pitest with the JUnit 5 plugin and exclusions for Kotlin-synthetic code (the
+// default). Target classes, the first setting that applies:
+//  1. -Pharness.mutation.classes=<glob>[,<glob>...] narrows the run; the Stop hook passes the classes of the
+//     changed files (incremental mutation). It always wins.
+//  2. mutation { targetPackage.set("com.ecommerce.platform") } in the module's build script mutates
+//     `<targetPackage>.*`; modules outside services/ (shared libraries) must set it.
+//  3. The default of a service module :services:<ctx>:<layer> is com.ecommerce.<ctx>.<layer>.*.
+// harness.pitest.arcmutate=true adds the commercial Arcmutate Kotlin plugin; it needs an Arcmutate licence file and
+// stays false in gradle.properties (specs/001-harness-quality-gates research.md, "Arcmutate licence outcome").
 plugins {
     id("info.solidsoft.pitest")
 }
 
 val catalog = the<VersionCatalogsExtension>().named("libs")
 
-// :services:<service>:<layer> -> com.ecommerce.<service>.<layer>
-val targetPackage: String =
-    path
-        .removePrefix(":services:")
-        .split(':')
-        .joinToString(separator = ".", prefix = "com.ecommerce.")
+val mutation = extensions.create<MutationExtension>("mutation")
+servicePackage(path)?.let { mutation.targetPackage.convention(it) }
 
 /** "a.B*, c.D*" -> {"a.B*", "c.D*"}: the value of -Pharness.mutation.classes. */
 fun classGlobs(property: String): Set<String> =
@@ -28,17 +29,14 @@ fun classGlobs(property: String): Set<String> =
         .filter(String::isNotEmpty)
         .toSet()
 
+val harnessClasses: Provider<Set<String>> = providers.gradleProperty("harness.mutation.classes").map(::classGlobs)
+
 val pitest = the<PitestPluginExtension>()
 
 pitest.apply {
     pitestVersion.set(catalog.findVersion("pitest").get().requiredVersion)
     junit5PluginVersion.set(catalog.findVersion("pitest-junit5-plugin").get().requiredVersion)
-    targetClasses.set(
-        providers
-            .gradleProperty("harness.mutation.classes")
-            .map(::classGlobs)
-            .orElse(setOf("$targetPackage.*")),
-    )
+    targetClasses.set(harnessClasses.orElse(mutation.targetPackage.map { setOf("$it.*") }))
     mutationThreshold.convention(QualityThresholds.MINIMUM_MUTATION_THRESHOLD)
     threads.set(Runtime.getRuntime().availableProcessors())
     outputFormats.set(setOf("XML", "HTML"))
@@ -61,6 +59,12 @@ if (providers.gradleProperty("harness.pitest.arcmutate").orNull.toBoolean()) {
 }
 
 afterEvaluate {
+    if (!mutation.targetPackage.isPresent && !harnessClasses.isPresent) {
+        throw GradleException(
+            "Module $path applies pitest outside services/; set the package to mutate with " +
+                "mutation { targetPackage.set(\"com.ecommerce.<package>\") }",
+        )
+    }
     val threshold = pitest.mutationThreshold.get()
     if (threshold < QualityThresholds.MINIMUM_MUTATION_THRESHOLD) {
         throw GradleException(

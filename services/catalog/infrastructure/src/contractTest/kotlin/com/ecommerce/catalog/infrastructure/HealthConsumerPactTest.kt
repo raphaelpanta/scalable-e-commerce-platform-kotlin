@@ -9,7 +9,6 @@ import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.V4Pact
 import au.com.dius.pact.core.model.annotations.Pact
 import io.kotest.matchers.shouldBe
-import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import java.net.URI
@@ -23,9 +22,9 @@ private const val JSON = "application/json"
 
 /**
  * Consumer side of the health edge: the platform's probe expects `GET /actuator/health` to answer 200 with
- * `{"status":"UP"}`. Runs before [HealthProviderVerificationTest], which verifies the pact it writes.
+ * `{"status":"UP"}`. Runs in `contractTest` and writes the pact to the repository root `build/pacts`
+ * (`pact.rootDir`); [HealthProviderVerificationTest] verifies it in `contractVerify`.
  */
-@Order(1)
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(providerName = "catalog", pactVersion = PactSpecVersion.V4)
 class HealthConsumerPactTest {

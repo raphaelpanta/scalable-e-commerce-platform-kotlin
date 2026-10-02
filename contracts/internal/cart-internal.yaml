@@ -1,0 +1,182 @@
+openapi: 3.1.0
+info:
+  title: Cart Internal API
+  version: 1.0.0
+  summary: Service-to-service cart endpoints used by the order service.
+  description: |
+    Internal contract of the cart service (spec 004, user stories 2 and 4, FR-008..FR-011).
+    Complements `contracts/openapi/cart.yaml` (public, anonymous or bearer, cart addressed by caller
+    or `X-Cart-Token`). Here the order service addresses an account cart by account id, because the
+    shopper's identity was already authenticated at the gateway and the order service must read and
+    clear the cart on the shopper's behalf. Never routed by the gateway.
+
+    Rules shared by every operation:
+    - Header `X-Internal-Token` is mandatory (apiKey security scheme `internalToken`).
+    - `X-Correlation-Id` is propagated by callers and echoed in every response.
+    - Errors are RFC 9457 `application/problem+json` with `type` `https://ecommerce.example/problems/<slug>`.
+    - Ids are UUIDs, money is `{amountMinor, currency}`, timestamps are UTC `date-time`.
+    - Evolution is additive within v1; consumers ignore unknown fields.
+
+    Order flow (data-model section 3.4): order reads the cart, compares `revision` with the
+    `cartRevision` the shopper sent (different: 409 `price-changed`, nothing reserved), freezes
+    prices from the catalog pricing endpoint, and clears the cart only after the payment is approved.
+servers:
+  - url: http://cart:8080
+    description: Compose DNS name of the cart service (internal network only, port 8080).
+tags:
+  - {name: Account carts, description: Read and clear the cart of an account}
+security:
+  - internalToken: []
+paths:
+  /internal/carts/by-account/{accountId}:
+    get:
+      operationId: getCartByAccount
+      tags: [Account carts]
+      summary: Read the cart of an account
+      description: |
+        Returns the account's cart with the current `revision` (recomputed on every call from the cart
+        version and the live catalog prices, exactly as in the public `GET /api/v1/cart`). A cart that
+        exists but has no lines is a 200 with `lines: []` and a zero `total`. An account that never
+        had a cart, or whose cart was discarded when the account was deleted, answers 404 `not-found`.
+
+        `total` is the sum of `quantity x priceAtAdd` of the lines and is informational: the order
+        service never uses it, because the order freezes the current catalog prices at confirmation
+        (FR-011). The shopper-facing total with current prices is only in the public cart.
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The account cart.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountCart'}
+              example:
+                cartId: 8d3b7a10-4c52-4e96-b1a7-2f5e9c0d6b34
+                revision: rev-7f3a9c21
+                lines:
+                  - {lineId: c1a9e2f4-6b07-4d3a-8e51-0b7d4a9c2f18, productId: 9a4f1e0e-6c2d-4a17-8d3b-0c7e5f2a1b01, sku: ESP-MACH-01, name: Espresso Machine, quantity: 1, priceAtAdd: {amountMinor: 14900, currency: BRL}}
+                  - {lineId: e2b0f3a5-7c18-4e4b-9f62-1c8e5b0d3a29, productId: 3d7c2b9a-1f44-4c8e-9a52-6b0e7d3c4f02, sku: CB-1KG, name: Coffee Beans 1kg, quantity: 2, priceAtAdd: {amountMinor: 2450, currency: BRL}}
+                total: {amountMinor: 19800, currency: BRL}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /internal/carts/by-account/{accountId}/clear:
+    post:
+      operationId: clearCartByAccount
+      tags: [Account carts]
+      summary: Remove every line from the cart of an account
+      description: |
+        Called by order after a payment is approved (the cart is never cleared on a refused checkout,
+        a payment failure or a cancellation). Idempotent: answers 204 also when the cart is already
+        empty and when the account has no cart. The cart itself and its id survive; only the lines
+        are removed and the revision changes. The `OrderPaid` event consumer of the cart service
+        reaches the same end state, so calling both is harmless.
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '204':
+          description: The cart has no lines (now or before). No body.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+components:
+  securitySchemes:
+    internalToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Token
+      description: |
+        Shared secret of the platform network, sent by every internal client and checked by every
+        operation of this document before anything else. The value comes from the environment
+        variable `INTERNAL_API_TOKEN` of both caller and callee; there is no committed default.
+        A missing or wrong value is answered with 401 `unauthorized` and nothing is executed.
+        Internal endpoints are never routed by the gateway and never exposed publicly.
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: |
+        Correlation identifier of the originating request. Internal clients MUST copy the value they
+        received (or generated) to every downstream call and into every event they emit; the service
+        logs it and echoes it in the response header of the same name. 1 to 64 characters of
+        `[A-Za-z0-9-]`; a missing or malformed value is replaced by a generated one.
+      schema: {type: string, pattern: '^[A-Za-z0-9-]{1,64}$'}
+    AccountId: {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+  headers:
+    CorrelationId:
+      description: Correlation identifier of the request, echoed on every response (including errors).
+      schema: {type: string, pattern: '^[A-Za-z0-9-]{1,64}$'}
+  responses:
+    BadRequest:
+      description: Malformed request, or a path, header or body field violates its documented constraint (400, problem type `validation`).
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example: {type: 'https://ecommerce.example/problems/validation', title: Validation failed, status: 400, detail: Request validation failed., correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13, errors: [{field: orderId, message: must be a UUID}]}
+    Unauthorized:
+      description: Header `X-Internal-Token` is missing or wrong (401, problem type `unauthorized`).
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example: {type: 'https://ecommerce.example/problems/unauthorized', title: Unauthorized, status: 401, detail: Internal token missing or invalid., correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13}
+    NotFound:
+      description: The addressed resource does not exist (404, problem type `not-found`).
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example: {type: 'https://ecommerce.example/problems/not-found', title: Not found, status: 404, detail: Resource not found., correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13}
+  schemas:
+    Problem:
+      type: object
+      description: |
+        RFC 9457 problem details, identical in shape to the public contracts plus the mandatory
+        `correlationId`. `type` is `https://ecommerce.example/problems/<slug>` with a slug from
+        docs/service-conventions.md section 3. Operations that add extension members say so.
+      required: [type, title, status, correlationId]
+      properties:
+        type: {type: string, format: uri}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string}
+        correlationId: {type: string, maxLength: 64, description: Same value as the X-Correlation-Id response header.}
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: {type: string}
+              message: {type: string}
+    Money:
+      type: object
+      description: Same shape as every public contract. Minor units, never floats.
+      required: [amountMinor, currency]
+      properties:
+        amountMinor: {type: integer, format: int64, minimum: 0, description: Amount in minor units (for example centavos).}
+        currency: {type: string, pattern: '^[A-Z]{3}$', description: ISO-4217 code; the platform currency (BRL in the MVP).}
+    AccountCartLine:
+      type: object
+      required: [lineId, productId, sku, name, quantity, priceAtAdd]
+      properties:
+        lineId: {type: string, format: uuid, description: Equals the `id` of the line in the public cart.}
+        productId: {type: string, format: uuid}
+        sku: {type: string, pattern: '^[A-Z0-9-]{3,32}$', description: Snapshot taken when the line was added.}
+        name: {type: string, minLength: 1, maxLength: 120, description: Product name snapshot (the public cart calls it `productName`).}
+        quantity: {type: integer, minimum: 1, maximum: 99}
+        priceAtAdd: {$ref: '#/components/schemas/Money'}
+    AccountCart:
+      type: object
+      required: [cartId, revision, lines, total]
+      properties:
+        cartId: {type: string, format: uuid, description: Equals the `id` of the public cart.}
+        revision: {type: string, minLength: 1, maxLength: 128, description: 'Opaque, printable ASCII. Changes whenever any line, quantity or current price changes; compared for equality only, never parsed. Same value the public cart reports.'}
+        lines: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AccountCartLine'}}
+        total: {$ref: '#/components/schemas/Money'}

@@ -32,9 +32,17 @@ dependencyResolutionManagement {
     }
 }
 
+// Shared libraries, the gateway and the cross-service acceptance suite (feature 004).
+include(":libs:platform-core", ":libs:platform-messaging", ":services:gateway", ":acceptance")
+
 fun includeService(name: String) {
     include(":services:$name:domain", ":services:$name:application", ":services:$name:infrastructure")
 }
 
 // --- includeService registry (the newService task appends below this line) ---
 includeService("catalog")
+includeService("identity")
+includeService("cart")
+includeService("order")
+includeService("payment")
+includeService("notification")

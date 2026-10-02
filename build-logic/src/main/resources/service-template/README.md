@@ -11,7 +11,7 @@ Package root: `com.ecommerce.__name__`.
 |---|---|---|
 | unit | `domain/src/test`, `application/src/test`, architecture rules in `infrastructure` | `./gradlew -q :services:__name__:domain:test` |
 | integration | `infrastructure/src/integrationTest` (Testcontainers PostgreSQL) | `./gradlew -q :services:__name__:infrastructure:integrationTest` |
-| contract | `infrastructure/src/contractTest` (Pact consumer and provider) | `./gradlew -q :services:__name__:infrastructure:contractTest` |
+| contract | `infrastructure/src/contractTest` (Pact consumer in `contractTest`, provider tagged `provider` in `contractVerify`) | `./gradlew -q :services:__name__:infrastructure:contractTest :services:__name__:infrastructure:contractVerify` |
 | acceptance | `infrastructure/src/acceptanceTest` (Cucumber) | `./gradlew -q :services:__name__:infrastructure:acceptanceTest` |
 
 Running: `__NAME___DB_HOST` (default `localhost`), `__NAME___DB_USER` and `__NAME___DB_PASSWORD`, then

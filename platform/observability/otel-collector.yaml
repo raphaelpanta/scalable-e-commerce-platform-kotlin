@@ -1,0 +1,77 @@
+# OpenTelemetry Collector (contrib). Every service exports OTLP/HTTP to http://otel-collector:4318
+# (OTEL_EXPORTER_OTLP_ENDPOINT). One coherent flow per signal:
+#   logs    OTLP -> Loki native OTLP endpoint (http://loki:3100/otlp)
+#   traces  OTLP -> Tempo (OTLP gRPC, tempo:4317)
+#   metrics OTLP -> `prometheus` exporter on :8889, which Prometheus PULLS (job `otel-collector`).
+# Micrometer HTTP/JVM metrics are not routed through the collector: Prometheus scrapes /actuator/prometheus on port 8081 of
+# every service directly (see prometheus.yml), so that scaled replicas are individually visible.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+  batch: {}
+  # Loki indexes a small set of resource attributes (service.name becomes the label service_name). The dashboards use the
+  # shorter label `service`, which loki.yaml also declares as an index label, so it is copied here.
+  transform/logs:
+    error_mode: ignore
+    log_statements:
+      - context: resource
+        statements:
+          - set(attributes["service"], attributes["service.name"]) where attributes["service"] == nil
+      - context: log
+        statements:
+          # Services log ECS JSON (fields service, traceId, spanId, correlationId). When the record body is such a JSON
+          # document, lift the correlation fields into attributes (Loki structured metadata) so they are filterable
+          # without parsing, and keep the body untouched for `| json`.
+          - set(cache, ParseJSON(body)) where IsString(body) and IsMatch(body, "^[ ]*[{]")
+          - set(attributes["correlationId"], cache["correlationId"]) where cache["correlationId"] != nil
+          - set(attributes["traceId"], cache["traceId"]) where cache["traceId"] != nil
+          - set(attributes["spanId"], cache["spanId"]) where cache["spanId"] != nil
+          # Records emitted with an active span carry the trace context natively.
+          - set(attributes["traceId"], trace_id.string) where attributes["traceId"] == nil and trace_id.string != "00000000000000000000000000000000"
+          - set(attributes["spanId"], span_id.string) where attributes["spanId"] == nil and span_id.string != "0000000000000000"
+
+exporters:
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/logs, batch]
+      exporters: [otlphttp/loki]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/tempo]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+  telemetry:
+    metrics:
+      level: basic

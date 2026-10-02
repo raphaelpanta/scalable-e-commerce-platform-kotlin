@@ -1,0 +1,41 @@
+spring:
+  application:
+    name: payment
+  r2dbc:
+    url: r2dbc:postgresql://${PAYMENT_DB_HOST:localhost}:5432/payment
+    # No committed defaults: credentials come from the environment only.
+    username: ${PAYMENT_DB_USER}
+    password: ${PAYMENT_DB_PASSWORD}
+  flyway:
+    # Documented blocking exception (constitution Principle IV, plan Complexity Tracking): Flyway migrates
+    # over JDBC once at start-up, before the service reports ready; every request path stays non-blocking.
+    url: jdbc:postgresql://${PAYMENT_DB_HOST:localhost}:5432/payment
+    user: ${PAYMENT_DB_USER}
+    password: ${PAYMENT_DB_PASSWORD}
+  reactor:
+    # Restores thread locals (such as an MDC correlation id) on Reactor operators.
+    context-propagation: auto
+
+management:
+  server:
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: never
+      # The body stays exactly {"status":"..."}; liveness/readiness groups can be enabled per environment.
+      probes:
+        enabled: false
+  health:
+    # The built-in R2DBC indicator has no timeout and hangs while the database is unreachable; database
+    # health belongs in a HealthProbe adapter with a timeout, as in services/catalog (DatabaseHealthProbe).
+    r2dbc:
+      enabled: false
+
+logging:
+  structured:
+    format:
+      console: ecs

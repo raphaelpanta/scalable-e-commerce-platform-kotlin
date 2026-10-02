@@ -1,0 +1,365 @@
+openapi: 3.1.0
+info:
+  title: Catalog Internal API
+  version: 1.0.0
+  summary: Service-to-service stock reservation and pricing endpoints of the catalog service.
+  description: |
+    Internal contract of the catalog service (spec 004, FR-012, FR-010, user story 4). Complements
+    `contracts/openapi/catalog.yaml`, which describes only the public surface. Callers: the order
+    service (reservations, pricing to freeze order lines) and the cart service (pricing and
+    availability). Never routed by the gateway; see docs/service-conventions.md sections 3 and 6.
+
+    Rules shared by every operation:
+    - Header `X-Internal-Token` is mandatory (apiKey security scheme `internalToken`).
+    - `X-Correlation-Id` is propagated by callers and echoed in every response.
+    - Errors are RFC 9457 `application/problem+json` with `type` `https://ecommerce.example/problems/<slug>`.
+    - Ids are UUIDs, money is `{amountMinor, currency}`, timestamps are UTC `date-time`.
+    - Evolution is additive within v1 (new optional response fields); consumers ignore unknown fields.
+
+    Stock model (data-model section 3.2): `available = onHand - reserved`. A reservation is keyed by
+    `orderId` (one per order), is all-or-nothing across its lines and moves
+    `reserved -> committed` (payment approved) or `reserved -> released` (payment failed, cancelled,
+    expired). The same transitions also happen asynchronously from the `OrderPaid`,
+    `OrderPaymentFailed` and `OrderCancelled` events; both paths are idempotent and converge.
+
+    Decision on unknown and withdrawn products: reserving a product that is unknown or withdrawn is
+    reported exactly like a shortage, as a 409 `insufficient-stock` whose `unavailableLines` entry has
+    `available: 0`. The reserve operation never answers 404 for a product, so the caller handles one
+    refusal shape and ids cannot be probed. (Pricing lookups are different: see below.)
+servers:
+  - url: http://catalog:8080
+    description: Compose DNS name of the catalog service (internal network only, port 8080).
+tags:
+  - {name: Reservations, description: Stock reservations keyed by order}
+  - {name: Pricing, description: Current price, name and availability of products}
+security:
+  - internalToken: []
+paths:
+  /internal/reservations:
+    post:
+      operationId: reserveStock
+      tags: [Reservations]
+      summary: Reserve stock for every line of an order, all or nothing
+      description: |
+        Called by order at checkout, after the cart revision check and before any payment attempt.
+        In one unit of work every line is reserved with a conditional update (`available >= quantity`);
+        if any line cannot be reserved nothing is reserved and 409 `insufficient-stock` lists every
+        short line (not only the first) in `unavailableLines`, in request order. Unknown and withdrawn
+        products count as `available: 0`.
+
+        Idempotent per `orderId`: when a reservation for the order already exists it is returned
+        unchanged with 200, whatever its `state` (`reserved`, `committed` or `released`) and without
+        comparing the request lines (an order's lines are frozen at placement). The first successful
+        call answers 201 and publishes `StockReserved` through the outbox.
+
+        `expiresAt` is set by the catalog (MVP default: 45 minutes after creation, configurable, always
+        later than the order's 30-minute payment expiry). It is a safety net: the order service's
+        release call or the order events normally end the reservation first.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReserveStockRequest'}
+            example:
+              orderId: 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10
+              lines:
+                - {productId: 9a4f1e0e-6c2d-4a17-8d3b-0c7e5f2a1b01, quantity: 1}
+                - {productId: 3d7c2b9a-1f44-4c8e-9a52-6b0e7d3c4f02, quantity: 2}
+      responses:
+        '201':
+          description: Stock reserved for every line; the reservation is in state `reserved`.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Reservation'}
+              example:
+                reservationId: 4a8f2c60-9d13-4b7e-a5c1-3e6d0b9f7a15
+                orderId: 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10
+                state: reserved
+                lines:
+                  - {productId: 9a4f1e0e-6c2d-4a17-8d3b-0c7e5f2a1b01, quantity: 1}
+                  - {productId: 3d7c2b9a-1f44-4c8e-9a52-6b0e7d3c4f02, quantity: 2}
+                expiresAt: '2026-10-02T11:00:00Z'
+        '200':
+          description: A reservation for this `orderId` already exists; returned unchanged (replay).
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Reservation'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409':
+          description: |
+            At least one line cannot be reserved (problem type `insufficient-stock`). Nothing was
+            reserved. Withdrawn and unknown products appear with `available: 0`.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/problem+json:
+              schema: {$ref: '#/components/schemas/InsufficientStockProblem'}
+              example:
+                type: https://ecommerce.example/problems/insufficient-stock
+                title: Insufficient stock
+                status: 409
+                detail: One or more products cannot be reserved in the requested quantity.
+                instance: /internal/reservations
+                correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13
+                unavailableLines:
+                  - {productId: 3d7c2b9a-1f44-4c8e-9a52-6b0e7d3c4f02, requested: 2, available: 1}
+  /internal/reservations/{reservationId}/commit:
+    post:
+      operationId: commitReservation
+      tags: [Reservations]
+      summary: Commit a reservation after payment approval
+      description: |
+        `onHand -= quantity` and `reserved -= quantity` for every line, once. Idempotent: committing an
+        already committed reservation answers 204 again and changes nothing. Committing a reservation
+        that was released answers 409 `conflict`; an unknown reservation answers 404 `not-found`.
+        Publishes `StockCommitted` on the first transition only.
+      parameters:
+        - $ref: '#/components/parameters/ReservationId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '204':
+          description: The reservation is committed (now or before). No body.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /internal/reservations/{reservationId}/release:
+    post:
+      operationId: releaseReservation
+      tags: [Reservations]
+      summary: Release a reservation after payment failure, cancellation or expiry
+      description: |
+        `reserved -= quantity` for every line, once. Idempotent: releasing an already released
+        reservation answers 204 again and changes nothing. Releasing a reservation that was already
+        committed answers 409 `conflict`: restocking after a committed reservation is driven by the
+        `OrderCancelled` event, not by this call. An unknown reservation answers 404 `not-found`.
+        Publishes `StockReservationReleased` on the first transition only.
+      parameters:
+        - $ref: '#/components/parameters/ReservationId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '204':
+          description: The reservation is released (now or before). No body.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+  /internal/products/{productId}/pricing:
+    get:
+      operationId: getProductPricing
+      tags: [Pricing]
+      summary: Current price, name and availability of one product
+      description: |
+        Used by cart (live price and stock on every cart view, stock cap on add) and by order. A
+        withdrawn product is still answered (200 with `saleState: withdrawn`) so callers can tell
+        withdrawn from unknown; `available` always reports `onHand - reserved`. Only an unknown
+        product id answers 404 `not-found`.
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The product pricing.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProductPricing'}
+              example:
+                productId: 0b4e6d1c-2a57-4c83-9f10-6d8a3e5b7c21
+                sku: TRS-001
+                name: Trail Running Shoes
+                price: {amountMinor: 9490, currency: BRL}
+                available: 5
+                saleState: active
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /internal/products/pricing:
+    post:
+      operationId: getProductsPricing
+      tags: [Pricing]
+      summary: Current price, name and availability of several products in one call
+      description: |
+        Same data as `getProductPricing` for up to 100 distinct ids. Unknown ids are omitted from
+        `items` (the call never answers 404); withdrawn products are included with
+        `saleState: withdrawn`. Items follow the order of the requested ids. Read-only despite POST
+        (the id list does not fit a query string).
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProductsPricingRequest'}
+            example:
+              productIds: [9a4f1e0e-6c2d-4a17-8d3b-0c7e5f2a1b01, 3d7c2b9a-1f44-4c8e-9a52-6b0e7d3c4f02, d4c3b2a1-9f8e-4d7c-8b6a-5f4e3d2c1b0a]
+      responses:
+        '200':
+          description: Pricing of the known products.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProductsPricing'}
+              example:
+                items:
+                  - {productId: 9a4f1e0e-6c2d-4a17-8d3b-0c7e5f2a1b01, sku: ESP-MACH-01, name: Espresso Machine, price: {amountMinor: 14900, currency: BRL}, available: 5, saleState: active}
+                  - {productId: 3d7c2b9a-1f44-4c8e-9a52-6b0e7d3c4f02, sku: CB-1KG, name: Coffee Beans 1kg, price: {amountMinor: 2450, currency: BRL}, available: 10, saleState: active}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+components:
+  securitySchemes:
+    internalToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Token
+      description: |
+        Shared secret of the platform network, sent by every internal client and checked by every
+        operation of this document before anything else. The value comes from the environment
+        variable `INTERNAL_API_TOKEN` of both caller and callee; there is no committed default.
+        A missing or wrong value is answered with 401 `unauthorized` and nothing is executed.
+        Internal endpoints are never routed by the gateway and never exposed publicly.
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: |
+        Correlation identifier of the originating request. Internal clients MUST copy the value they
+        received (or generated) to every downstream call and into every event they emit; the service
+        logs it and echoes it in the response header of the same name. 1 to 64 characters of
+        `[A-Za-z0-9-]`; a missing or malformed value is replaced by a generated one.
+      schema: {type: string, pattern: '^[A-Za-z0-9-]{1,64}$'}
+    ReservationId: {name: reservationId, in: path, required: true, schema: {type: string, format: uuid}}
+    ProductId: {name: productId, in: path, required: true, schema: {type: string, format: uuid}}
+  headers:
+    CorrelationId:
+      description: Correlation identifier of the request, echoed on every response (including errors).
+      schema: {type: string, pattern: '^[A-Za-z0-9-]{1,64}$'}
+  responses:
+    BadRequest:
+      description: Malformed request, or a path, header or body field violates its documented constraint (400, problem type `validation`).
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example: {type: 'https://ecommerce.example/problems/validation', title: Validation failed, status: 400, detail: Request validation failed., correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13, errors: [{field: orderId, message: must be a UUID}]}
+    Unauthorized:
+      description: Header `X-Internal-Token` is missing or wrong (401, problem type `unauthorized`).
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example: {type: 'https://ecommerce.example/problems/unauthorized', title: Unauthorized, status: 401, detail: Internal token missing or invalid., correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13}
+    NotFound:
+      description: The addressed resource does not exist (404, problem type `not-found`).
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example: {type: 'https://ecommerce.example/problems/not-found', title: Not found, status: 404, detail: Resource not found., correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13}
+    Conflict:
+      description: The operation is not legal in the current state of the resource (409, problem type `conflict`).
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example: {type: 'https://ecommerce.example/problems/conflict', title: Conflict, status: 409, detail: The resource is in a state that does not allow this operation., correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13}
+  schemas:
+    Problem:
+      type: object
+      description: |
+        RFC 9457 problem details, identical in shape to the public contracts plus the mandatory
+        `correlationId`. `type` is `https://ecommerce.example/problems/<slug>` with a slug from
+        docs/service-conventions.md section 3. Operations that add extension members say so.
+      required: [type, title, status, correlationId]
+      properties:
+        type: {type: string, format: uri}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string}
+        correlationId: {type: string, maxLength: 64, description: Same value as the X-Correlation-Id response header.}
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: {type: string}
+              message: {type: string}
+    Money:
+      type: object
+      description: Same shape as every public contract. Minor units, never floats.
+      required: [amountMinor, currency]
+      properties:
+        amountMinor: {type: integer, format: int64, minimum: 0, description: Amount in minor units (for example centavos).}
+        currency: {type: string, pattern: '^[A-Z]{3}$', description: ISO-4217 code; the platform currency (BRL in the MVP).}
+    StockLine:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId: {type: string, format: uuid}
+        quantity: {type: integer, minimum: 1, maximum: 99, description: Quantity per line, 1..99 as in the cart and order.}
+    ReserveStockRequest:
+      type: object
+      required: [orderId, lines]
+      additionalProperties: false
+      properties:
+        orderId: {type: string, format: uuid, description: Order the stock is reserved for; the reservation key.}
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: One entry per product; a repeated productId is refused with 400.
+          items: {$ref: '#/components/schemas/StockLine'}
+    Reservation:
+      type: object
+      required: [reservationId, orderId, state, lines, expiresAt]
+      properties:
+        reservationId: {type: string, format: uuid, description: Generated by catalog; equals the aggregateId of the stock events.}
+        orderId: {type: string, format: uuid}
+        state: {type: string, enum: [reserved, committed, released], description: 201 always carries `reserved`; a replay carries the current state.}
+        lines: {type: array, minItems: 1, items: {$ref: '#/components/schemas/StockLine'}}
+        expiresAt: {type: string, format: date-time, description: UTC time at which an unresolved reservation lapses.}
+    UnavailableLine:
+      type: object
+      required: [productId, requested, available]
+      properties:
+        productId: {type: string, format: uuid}
+        requested: {type: integer, minimum: 1, description: Quantity asked for in the request.}
+        available: {type: integer, minimum: 0, description: Quantity that could be reserved now; 0 for withdrawn and unknown products.}
+    InsufficientStockProblem:
+      description: 409 problem with `type` `https://ecommerce.example/problems/insufficient-stock`.
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          required: [unavailableLines]
+          properties:
+            unavailableLines: {type: array, minItems: 1, items: {$ref: '#/components/schemas/UnavailableLine'}}
+    ProductPricing:
+      type: object
+      required: [productId, sku, name, price, available, saleState]
+      properties:
+        productId: {type: string, format: uuid}
+        sku: {type: string, pattern: '^[A-Z0-9-]{3,32}$'}
+        name: {type: string, minLength: 1, maxLength: 120}
+        price: {$ref: '#/components/schemas/Money'}
+        available: {type: integer, minimum: 0, description: 'onHand - reserved, whatever the saleState.'}
+        saleState: {type: string, enum: [active, withdrawn], description: Callers must not sell or reserve a `withdrawn` product.}
+    ProductsPricingRequest:
+      type: object
+      required: [productIds]
+      additionalProperties: false
+      properties:
+        productIds: {type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: {type: string, format: uuid}}
+    ProductsPricing:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/ProductPricing'}, description: Known products only, in request order.}

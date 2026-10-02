@@ -1,0 +1,304 @@
+openapi: 3.1.0
+info:
+  title: Payment API
+  version: 1.0.0
+  summary: Read-only view of payment attempts and refunds, plus the simulated provider rules.
+  description: |
+    Public contract of the payment service as exposed through the gateway under `/api/v1/payments`.
+    Covers FR-013, FR-014 and the payment parts of FR-012 and FR-016.
+
+    Charges and refunds are created only by the order service over the internal network (see
+    pact-matrix.md); they are deliberately not exposed publicly. This API lets operators, and the
+    shopper who owns the order, inspect what happened, and publishes the deterministic rules of the
+    simulated provider (FR-014).
+
+    All operations require a bearer JWT. Roles: `shopper` (own payments only) and `operator`
+    (any payment). A shopper asking for another shopper's payment receives 404. Money is in minor
+    units, timestamps are UTC.
+servers:
+  - {url: 'https://localhost:8443', description: Local gateway (the only public entry point)}
+security:
+  - bearerAuth: []
+tags:
+  - {name: Attempts, description: Charge attempts recorded against orders}
+  - {name: Refunds, description: Refunds recorded against approved charges}
+  - {name: Simulator, description: Documented behaviour of the simulated provider}
+paths:
+  /api/v1/payments/attempts/{attemptId}:
+    get:
+      tags: [Attempts]
+      operationId: getPaymentAttempt
+      summary: Get a payment attempt by id
+      description: Required role - `operator`, or the `shopper` who owns the order. Other shoppers receive 404.
+      parameters:
+        - $ref: '#/components/parameters/AttemptId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The payment attempt.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentAttempt'}
+              example:
+                id: c2f1d0a9-5b3e-4e7a-9a60-8d1b2c3e4f50
+                orderId: 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10
+                amount: {amountMinor: 19800, currency: BRL}
+                outcome: approved
+                providerReference: sim_ch_000123
+                idempotencyKey: 6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f
+                createdAt: '2026-10-02T10:15:01Z'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /api/v1/payments/attempts:
+    get:
+      tags: [Attempts]
+      operationId: listPaymentAttemptsForOrder
+      summary: List the payment attempts of an order
+      description: |
+        Required role - `operator`, or the `shopper` who owns the order. Attempts are returned
+        newest first. A retry of a `pending` payment adds a new attempt to the same order.
+      parameters:
+        - $ref: '#/components/parameters/OrderIdQuery'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: A page of payment attempts.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PaymentAttemptPage'}
+              example:
+                items:
+                  - {id: 8e0d1c2b-3a4f-4b5c-9d6e-7f8a9b0c1d2e, orderId: 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a12, amount: {amountMinor: 4913, currency: BRL}, outcome: declined, declineReason: insufficient_funds, providerReference: sim_ch_000124, idempotencyKey: 2b3c4d5e-6f70-4a81-92b3-c4d5e6f70a81, createdAt: '2026-10-02T10:30:00Z'}
+                page: 0
+                size: 20
+                totalItems: 1
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /api/v1/payments/refunds:
+    get:
+      tags: [Refunds]
+      operationId: listRefundsForOrder
+      summary: List the refunds of an order
+      description: |
+        Required role - `operator`, or the `shopper` who owns the order. A refund is recorded when
+        an order with an approved charge is cancelled (FR-016).
+      parameters:
+        - $ref: '#/components/parameters/OrderIdQuery'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Size'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: A page of refunds.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RefundPage'}
+              example:
+                items:
+                  - {id: 4d5e6f70-8192-4a3b-8c4d-5e6f70819203, orderId: 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10, refundOf: c2f1d0a9-5b3e-4e7a-9a60-8d1b2c3e4f50, amount: {amountMinor: 19800, currency: BRL}, outcome: approved, providerReference: sim_rf_000045, idempotencyKey: 9c8b7a69-5847-4362-9d1e-0f1a2b3c4d5e, createdAt: '2026-10-02T11:00:00Z'}
+                page: 0
+                size: 20
+                totalItems: 1
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /api/v1/payments/refunds/{refundId}:
+    get:
+      tags: [Refunds]
+      operationId: getRefund
+      summary: Get a refund by id
+      description: Required role - `operator`, or the `shopper` who owns the order. Other shoppers receive 404.
+      parameters:
+        - {name: refundId, in: path, required: true, schema: {type: string, format: uuid}}
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The refund.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Refund'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+  /api/v1/payments/simulator/rules:
+    get:
+      tags: [Simulator]
+      operationId: getSimulatorRules
+      summary: Read the deterministic rules of the simulated provider (operator)
+      description: |
+        Required role - `operator`; shoppers receive 403. Returns the documented rule set the
+        simulated provider uses to approve, decline or leave a charge pending (FR-014). Rules
+        are evaluated in `order`; the first match wins, otherwise `defaultOutcome` applies. The
+        document is read-only; changing rules is a code change, not an API call.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The active rule document.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SimulatorRules'}
+              example:
+                version: 1
+                defaultOutcome: approved
+                rules:
+                  - {order: 1, id: provider-unreachable, description: Token marks the provider as unreachable., match: {field: token, operator: equals, value: tok_sim_unreachable}, outcome: pending}
+                  - {order: 2, id: insufficient-funds, description: Amounts whose last two minor digits are 13 are declined., match: {field: amountMinor, operator: endsWith, value: '13'}, outcome: declined, declineReason: insufficient_funds}
+                  - {order: 3, id: card-expired, description: Amounts whose last two minor digits are 14 are declined., match: {field: amountMinor, operator: endsWith, value: '14'}, outcome: declined, declineReason: card_expired}
+                  - {order: 4, id: card-rejected, description: Tokens starting tok_sim_decline are declined., match: {field: token, operator: startsWith, value: tok_sim_decline}, outcome: declined, declineReason: card_rejected}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '429': {$ref: '#/components/responses/TooManyRequests'}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT issued by the identity service; carries the `shopper` or `operator` role.
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: Optional correlation id; a malformed value is replaced by the gateway.
+      schema: {type: string, maxLength: 64}
+    AttemptId: {name: attemptId, in: path, required: true, schema: {type: string, format: uuid}}
+    OrderIdQuery: {name: orderId, in: query, required: true, description: Order whose payments are listed., schema: {type: string, format: uuid}}
+    Page: {name: page, in: query, schema: {type: integer, minimum: 0, default: 0}}
+    Size: {name: size, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+  headers:
+    CorrelationId:
+      description: Correlation id of the request, echoed on every response.
+      schema: {type: string}
+  responses:
+    BadRequest:
+      description: Malformed request.
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    Unauthorized:
+      description: Missing, expired or invalid bearer token.
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    Forbidden:
+      description: Authenticated but the role is not allowed.
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    NotFound:
+      description: Resource does not exist or is not visible to the caller.
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    TooManyRequests:
+      description: Rate limit exceeded.
+      headers:
+        X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}
+        Retry-After: {description: Seconds to wait., schema: {type: integer}}
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+    ServiceUnavailable:
+      description: Service or a dependency is temporarily unavailable.
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content: {application/problem+json: {schema: {$ref: '#/components/schemas/Problem'}}}
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status]
+      properties:
+        type: {type: string, format: uri}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string}
+        errors:
+          type: array
+          items: {type: object, required: [field, message], properties: {field: {type: string}, message: {type: string}}}
+    Money:
+      type: object
+      required: [amountMinor, currency]
+      properties: {amountMinor: {type: integer, format: int64, minimum: 0}, currency: {type: string, pattern: '^[A-Z]{3}$', description: ISO-4217 code.}}
+    Outcome:
+      type: string
+      description: approved and declined are final; pending means the provider was unreachable and a retry is expected.
+      enum: [approved, declined, pending]
+    DeclineReason:
+      type: string
+      description: Decline category (no provider internals).
+      enum: [insufficient_funds, card_expired, card_rejected, suspected_fraud, invalid_payment_method]
+    PaymentAttempt:
+      type: object
+      required: [id, orderId, amount, outcome, providerReference, idempotencyKey, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+        amount: {$ref: '#/components/schemas/Money'}
+        outcome: {$ref: '#/components/schemas/Outcome'}
+        declineReason: {$ref: '#/components/schemas/DeclineReason', description: Present only when outcome is declined.}
+        providerReference: {type: string, description: Reference issued by the (simulated) provider.}
+        idempotencyKey: {type: string, format: uuid, description: Key that guarantees one attempt per checkout request.}
+        createdAt: {type: string, format: date-time}
+    Refund:
+      type: object
+      required: [id, orderId, refundOf, amount, outcome, providerReference, idempotencyKey, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+        refundOf: {type: string, format: uuid, description: Id of the approved payment attempt being refunded.}
+        amount: {$ref: '#/components/schemas/Money'}
+        outcome: {$ref: '#/components/schemas/Outcome'}
+        declineReason: {$ref: '#/components/schemas/DeclineReason'}
+        providerReference: {type: string}
+        idempotencyKey: {type: string, format: uuid}
+        createdAt: {type: string, format: date-time}
+    PaymentAttemptPage:
+      type: object
+      required: [items, page, size, totalItems]
+      properties: {items: {type: array, items: {$ref: '#/components/schemas/PaymentAttempt'}}, page: {type: integer, minimum: 0}, size: {type: integer, minimum: 1, maximum: 100}, totalItems: {type: integer, format: int64, minimum: 0}}
+    RefundPage:
+      type: object
+      required: [items, page, size, totalItems]
+      properties: {items: {type: array, items: {$ref: '#/components/schemas/Refund'}}, page: {type: integer, minimum: 0}, size: {type: integer, minimum: 1, maximum: 100}, totalItems: {type: integer, format: int64, minimum: 0}}
+    SimulatorRule:
+      type: object
+      required: [order, id, description, match, outcome]
+      properties:
+        order: {type: integer, minimum: 1, description: Evaluation position; lowest first.}
+        id: {type: string}
+        description: {type: string}
+        match:
+          type: object
+          required: [field, operator, value]
+          properties:
+            field: {type: string, enum: [amountMinor, token]}
+            operator: {type: string, enum: [equals, startsWith, endsWith]}
+            value: {type: string}
+        outcome: {$ref: '#/components/schemas/Outcome'}
+        declineReason: {$ref: '#/components/schemas/DeclineReason'}
+    SimulatorRules:
+      type: object
+      required: [version, defaultOutcome, rules]
+      properties:
+        version: {type: integer, minimum: 1}
+        defaultOutcome: {$ref: '#/components/schemas/Outcome'}
+        rules: {type: array, items: {$ref: '#/components/schemas/SimulatorRule'}}

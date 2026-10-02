@@ -18,5 +18,7 @@ Run everything from the repository root (details in `docs/build.md`):
 - One layer of one service module:
   `./gradlew -q :services:<name>:infrastructure:test`, `:integrationTest`, `:contractTest`, `:acceptanceTest`
   (unit tests of `domain`/`application`: `./gradlew -q :services:<name>:domain:test`).
+- Pacts: `contractTest` runs consumers and writes `build/pacts` at the root; `contractVerify` runs the classes tagged
+  `provider` after every consumer (`./gradlew -q contractTest contractVerify` for the whole repository).
 - New service: `./gradlew newService -Pname=<context>` (then `./gradlew -q verify`).
 - Versions live only in `gradle/libs.versions.toml`.

@@ -25,7 +25,7 @@ second.
 |---|---|---|---|
 | unit | `domain/src/test`, `application/src/test`, `infrastructure/src/test` (architecture rules) | Kotest property tests, MockK doubles of ports, Konsist | `./gradlew -q :services:catalog:domain:test` (same for `application`, `infrastructure`) |
 | integration | `infrastructure/src/integrationTest` | Testcontainers PostgreSQL: health up/down, Flyway baseline, Prometheus metrics, correlation id and JSON log line | `./gradlew -q :services:catalog:infrastructure:integrationTest` |
-| contract | `infrastructure/src/contractTest` | Pact: consumer `platform-probe` writes `build/pacts`, provider `catalog` verifies it | `./gradlew -q :services:catalog:infrastructure:contractTest` |
+| contract | `infrastructure/src/contractTest` | Pact: consumer `platform-probe` writes the repository root `build/pacts` (`contractTest`), provider `catalog` verifies it (`contractVerify`) | `./gradlew -q :services:catalog:infrastructure:contractTest :services:catalog:infrastructure:contractVerify` |
 | acceptance | `infrastructure/src/acceptanceTest` | Cucumber `features/service-status.feature` against the running application | `./gradlew -q :services:catalog:infrastructure:acceptanceTest` |
 
 Mutation testing (threshold 80): `./gradlew -q :services:catalog:domain:pitest :services:catalog:application:pitest`,

@@ -2,10 +2,17 @@ import com.ecommerce.build.DockerImageExtension
 
 // `dockerImage` builds the service image from the shared multi-stage platform/docker/Dockerfile, run from
 // the repository root with the module path as build argument. Deliberately not part of `check`/`verify`.
+// The image is named after the service: the parent directory of an `infrastructure` module
+// (:services:catalog:infrastructure -> catalog), otherwise the module itself (:services:gateway -> gateway).
 val docker = extensions.create<DockerImageExtension>("docker")
 docker.dockerExecutable.convention("docker")
 
-val serviceName: String = requireNotNull(project.parent) { "$path must live inside a service directory" }.name
+val serviceName: String =
+    if (name == "infrastructure") {
+        requireNotNull(project.parent) { "$path must live inside a service directory" }.name
+    } else {
+        name
+    }
 
 tasks.register<Exec>("dockerImage") {
     val repositoryRoot: Directory = isolated.rootProject.projectDirectory

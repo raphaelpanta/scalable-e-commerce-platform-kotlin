@@ -3,7 +3,8 @@
   "env": {
     "GRADLE_OPTS": "-Dorg.gradle.console=plain -Dorg.gradle.logging.level=quiet -Dorg.gradle.warning.mode=none",
     "NPM_CONFIG_LOGLEVEL": "error",
-    "NO_COLOR": "1"
+    "NO_COLOR": "1",
+    "HOOK_BUDGET_SECONDS": "3600"
   },
   "bashOutputMaxChars": 15000,
   "permissions": {
@@ -37,7 +38,7 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop-full-check.sh",
-            "timeout": 1230,
+            "timeout": 3630,
             "statusMessage": "Full quality check (gradle verify, incremental pitest, frontend lint/test)"
           }
         ]

@@ -1,0 +1,288 @@
+openapi: 3.1.0
+info:
+  title: Payment Internal API
+  version: 1.0.0
+  summary: Service-to-service charge and refund endpoints of the payment service.
+  description: |
+    Internal contract of the payment service (spec 004, FR-013, FR-014, FR-016, user story 4).
+    Complements `contracts/openapi/payment.yaml`, which is read-only and public; charges and refunds
+    are created only by the order service over the internal network and are deliberately not routed
+    by the gateway (pact-matrix.md, order -> payment).
+
+    Rules shared by every operation:
+    - Header `X-Internal-Token` is mandatory (apiKey security scheme `internalToken`).
+    - `X-Correlation-Id` is propagated by callers and echoed in every response.
+    - Header `Idempotency-Key` (UUID) is mandatory on both POST operations.
+    - Errors are RFC 9457 `application/problem+json` with `type` `https://ecommerce.example/problems/<slug>`.
+    - Ids are UUIDs, money is `{amountMinor, currency}`, timestamps are UTC `date-time`.
+    - Evolution is additive within v1; consumers ignore unknown fields.
+
+    Idempotency (both POST operations): the first request with a key creates the record and answers
+    201. A replay with the same key and an identical body answers 200 with the stored record
+    unchanged (its originally recorded outcome, not a fresh provider call). The same key with a
+    different body answers 422 `validation` and changes nothing. Keys are kept as long as the record.
+    The order service uses the checkout `Idempotency-Key` as the charge key (it is also carried in
+    `OrderPlaced.idempotencyKey`), so the synchronous charge call and the `OrderPlaced` consumer of
+    the payment service converge on one attempt per order and never create a second approved charge.
+
+    Simulated provider (FR-014): outcomes follow the rule document of `getSimulatorRules` in
+    payment.yaml; `paymentMethodRef` is the opaque provider token (never a card number).
+    `declineCategory` uses the one shared enum of all contracts. The attempt identifier is the
+    `paymentId` of the payment events.
+servers:
+  - url: http://payment:8080
+    description: Compose DNS name of the payment service (internal network only, port 8080).
+tags:
+  - {name: Charges, description: Charge attempts against an order}
+  - {name: Refunds, description: Refunds of approved charges}
+security:
+  - internalToken: []
+paths:
+  /internal/charges:
+    post:
+      operationId: createCharge
+      tags: [Charges]
+      summary: Charge the payment method of an order
+      description: |
+        Creates one charge attempt, runs it through the payment provider port and records the outcome.
+        `approved` and `declined` are final; `pending` means the provider was unreachable and the
+        payment service retries later (the order stays `placed` with `paymentStatus` pending and is
+        cancelled with `PAYMENT_EXPIRED` after 30 minutes). A provider outage is therefore a 201 with
+        `outcome: pending`, never a 5xx. Publishes `PaymentApproved`, `PaymentDeclined` or
+        `PaymentPending` through the outbox when the attempt is first created.
+
+        At most one `approved` charge exists per order: a new key for an order that already has an
+        approved charge answers 409 `conflict`.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ChargeRequest'}
+            example:
+              orderId: 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10
+              accountId: 7c1d4f3e-0a52-4c0b-8d3a-1e2f3a4b5c6d
+              amount: {amountMinor: 19800, currency: BRL}
+              paymentMethodRef: tok_sim_approve_4242
+      responses:
+        '201':
+          description: Charge attempt created; see `outcome`.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChargeAttempt'}
+              examples:
+                approved:
+                  summary: Provider approved
+                  value: {attemptId: c2f1d0a9-5b3e-4e7a-9a60-8d1b2c3e4f50, orderId: 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10, kind: charge, outcome: approved, providerReference: sim_ch_000123, createdAt: '2026-10-02T10:15:01Z'}
+                declined:
+                  summary: Provider declined (amount ending in 13)
+                  value: {attemptId: 8e0d1c2b-3a4f-4b5c-9d6e-7f8a9b0c1d2e, orderId: 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a12, kind: charge, outcome: declined, declineCategory: insufficient_funds, providerReference: sim_ch_000124, createdAt: '2026-10-02T10:30:00Z'}
+                pending:
+                  summary: Provider unreachable (token tok_sim_unreachable)
+                  value: {attemptId: d3e4f5a6-b7c8-4d9e-8f0a-1b2c3d4e5f60, orderId: 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a11, kind: charge, outcome: pending, createdAt: '2026-10-02T10:20:00Z'}
+        '200':
+          description: Replay of a request with the same `Idempotency-Key` and the same body; the stored attempt is returned unchanged.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ChargeAttempt'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+  /internal/refunds:
+    post:
+      operationId: createRefund
+      tags: [Refunds]
+      summary: Refund an approved charge
+      description: |
+        Records a full refund of an approved charge (MVP: full refunds only, so `amount` must equal the
+        charged amount, otherwise 422 `validation`). The simulated provider always accepts refunds.
+        Publishes `RefundRecorded` through the outbox when the refund is first created.
+
+        Errors: an unknown attempt, or an attempt that belongs to another order than `orderId`, answers
+        404 `not-found`; an attempt whose outcome is not `approved` (declined, pending or voided)
+        answers 409 `conflict`; a second refund of an already refunded attempt under a different key
+        also answers 409 `conflict` (one refund per cancellation).
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RefundRequest'}
+            example:
+              orderId: 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10
+              attemptId: c2f1d0a9-5b3e-4e7a-9a60-8d1b2c3e4f50
+              amount: {amountMinor: 19800, currency: BRL}
+      responses:
+        '201':
+          description: Refund recorded.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RefundRecord'}
+              example: {refundId: 4d5e6f70-8192-4a3b-8c4d-5e6f70819203, orderId: 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10, attemptId: c2f1d0a9-5b3e-4e7a-9a60-8d1b2c3e4f50, amount: {amountMinor: 19800, currency: BRL}, status: recorded, createdAt: '2026-10-02T11:00:00Z'}
+        '200':
+          description: Replay of a request with the same `Idempotency-Key` and the same body; the stored refund is returned unchanged.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RefundRecord'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '422': {$ref: '#/components/responses/Unprocessable'}
+components:
+  securitySchemes:
+    internalToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Token
+      description: |
+        Shared secret of the platform network, sent by every internal client and checked by every
+        operation of this document before anything else. The value comes from the environment
+        variable `INTERNAL_API_TOKEN` of both caller and callee; there is no committed default.
+        A missing or wrong value is answered with 401 `unauthorized` and nothing is executed.
+        Internal endpoints are never routed by the gateway and never exposed publicly.
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: |
+        Correlation identifier of the originating request. Internal clients MUST copy the value they
+        received (or generated) to every downstream call and into every event they emit; the service
+        logs it and echoes it in the response header of the same name. 1 to 64 characters of
+        `[A-Za-z0-9-]`; a missing or malformed value is replaced by a generated one.
+      schema: {type: string, pattern: '^[A-Za-z0-9-]{1,64}$'}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Client-generated UUID identifying one logical request; see the idempotency rules in the document description.
+      schema: {type: string, format: uuid}
+  headers:
+    CorrelationId:
+      description: Correlation identifier of the request, echoed on every response (including errors).
+      schema: {type: string, pattern: '^[A-Za-z0-9-]{1,64}$'}
+  responses:
+    BadRequest:
+      description: Malformed request, or a path, header or body field violates its documented constraint (400, problem type `validation`).
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example: {type: 'https://ecommerce.example/problems/validation', title: Validation failed, status: 400, detail: Request validation failed., correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13, errors: [{field: orderId, message: must be a UUID}]}
+    Unauthorized:
+      description: Header `X-Internal-Token` is missing or wrong (401, problem type `unauthorized`).
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example: {type: 'https://ecommerce.example/problems/unauthorized', title: Unauthorized, status: 401, detail: Internal token missing or invalid., correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13}
+    NotFound:
+      description: The addressed resource does not exist (404, problem type `not-found`).
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example: {type: 'https://ecommerce.example/problems/not-found', title: Not found, status: 404, detail: Resource not found., correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13}
+    Conflict:
+      description: The operation is not legal in the current state of the resource (409, problem type `conflict`).
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example: {type: 'https://ecommerce.example/problems/conflict', title: Conflict, status: 409, detail: The resource is in a state that does not allow this operation., correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13}
+    Unprocessable:
+      description: Well-formed request that is semantically invalid, or an `Idempotency-Key` reused with a different request body (422, problem type `validation`).
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example: {type: 'https://ecommerce.example/problems/validation', title: Validation failed, status: 422, detail: Idempotency-Key was already used with a different request., correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13, errors: [{field: Idempotency-Key, message: already used with a different request}]}
+  schemas:
+    Problem:
+      type: object
+      description: |
+        RFC 9457 problem details, identical in shape to the public contracts plus the mandatory
+        `correlationId`. `type` is `https://ecommerce.example/problems/<slug>` with a slug from
+        docs/service-conventions.md section 3. Operations that add extension members say so.
+      required: [type, title, status, correlationId]
+      properties:
+        type: {type: string, format: uri}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string}
+        correlationId: {type: string, maxLength: 64, description: Same value as the X-Correlation-Id response header.}
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: {type: string}
+              message: {type: string}
+    Money:
+      type: object
+      description: Same shape as every public contract. Minor units, never floats.
+      required: [amountMinor, currency]
+      properties:
+        amountMinor: {type: integer, format: int64, minimum: 0, description: Amount in minor units (for example centavos).}
+        currency: {type: string, pattern: '^[A-Z]{3}$', description: ISO-4217 code; the platform currency (BRL in the MVP).}
+    DeclineCategory:
+      type: string
+      description: The one decline category enum shared by payment.yaml (`declineReason`), order.yaml and events.yaml (`reasonCategory`).
+      enum: [insufficient_funds, card_expired, card_rejected, suspected_fraud, invalid_payment_method]
+    PositiveMoney:
+      description: Money whose amount is strictly positive.
+      allOf:
+        - $ref: '#/components/schemas/Money'
+        - type: object
+          properties:
+            amountMinor: {minimum: 1}
+    ChargeRequest:
+      type: object
+      required: [orderId, accountId, amount, paymentMethodRef]
+      additionalProperties: false
+      properties:
+        orderId: {type: string, format: uuid}
+        accountId: {type: string, format: uuid, description: Owner of the order.}
+        amount: {$ref: '#/components/schemas/PositiveMoney'}
+        paymentMethodRef: {type: string, minLength: 1, maxLength: 128, description: Opaque simulated-provider token; never a card number.}
+    ChargeAttempt:
+      type: object
+      required: [attemptId, orderId, kind, outcome, createdAt]
+      properties:
+        attemptId: {type: string, format: uuid, description: Generated by payment; the `paymentId` of the payment events.}
+        orderId: {type: string, format: uuid}
+        kind: {type: string, const: charge}
+        outcome: {type: string, enum: [approved, declined, pending], description: approved and declined are final; pending means provider unreachable.}
+        declineCategory: {$ref: '#/components/schemas/DeclineCategory', description: Present only when outcome is declined.}
+        providerReference: {type: string, minLength: 1, maxLength: 64, description: Reference issued by the provider; absent while pending.}
+        createdAt: {type: string, format: date-time}
+    RefundRequest:
+      type: object
+      required: [orderId, attemptId, amount]
+      additionalProperties: false
+      properties:
+        orderId: {type: string, format: uuid}
+        attemptId: {type: string, format: uuid, description: The approved charge attempt being refunded.}
+        amount: {$ref: '#/components/schemas/PositiveMoney'}
+    RefundRecord:
+      type: object
+      required: [refundId, orderId, attemptId, amount, status, createdAt]
+      properties:
+        refundId: {type: string, format: uuid}
+        orderId: {type: string, format: uuid}
+        attemptId: {type: string, format: uuid}
+        amount: {$ref: '#/components/schemas/Money'}
+        status: {type: string, const: recorded, description: The simulated provider always accepts refunds.}
+        createdAt: {type: string, format: date-time}

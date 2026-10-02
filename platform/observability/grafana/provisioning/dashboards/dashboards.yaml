@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: ecommerce-platform
+    orgId: 1
+    folder: E-commerce platform
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards

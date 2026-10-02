@@ -1,0 +1,395 @@
+# Local platform (feature 004). Run from this directory:
+#   cp .env.example .env
+#   docker compose --profile core --profile observability up -d --build
+# Profiles: core (gateway, six services, one PostgreSQL each, Kafka, Mailpit), observability (OpenTelemetry Collector,
+# Loki, Tempo, Prometheus, Grafana), ci (Pact Broker). See README.md and docs/running-locally.md.
+#
+# Isolation (FR-023): only gateway:8080, grafana:3000 and mailpit:8025 (and pact-broker:9292 in the ci profile) are
+# published, bound to ${BIND_ADDRESS:-127.0.0.1}. Services, databases and Kafka publish nothing. The gateway is the only
+# container attached to the `edge` network. Services carry no container_name, so `--scale <service>=N` works and the
+# Compose DNS name of a service resolves to all of its replicas (DNS discovery, research.md section 2).
+name: ecommerce-platform
+
+x-platform-env: &platform-env
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  JWKS_URI: http://identity:8080/.well-known/jwks.json
+  JWT_ISSUER: ${JWT_ISSUER:-https://identity.ecommerce.local}
+  JWT_AUDIENCE: ${JWT_AUDIENCE:-ecommerce-api}
+  PLATFORM_CURRENCY: BRL
+  IDENTITY_URL: http://identity:8080
+  CATALOG_URL: http://catalog:8080
+  CART_URL: http://cart:8080
+  ORDER_URL: http://order:8080
+  PAYMENT_URL: http://payment:8080
+  NOTIFICATION_URL: http://notification:8080
+
+x-service-env: &service-env
+  <<: *platform-env
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?copy .env.example to .env}
+
+x-app: &app
+  restart: unless-stopped
+  stop_grace_period: 30s
+  profiles: [core]
+
+x-db: &db
+  image: postgres:18-alpine
+  restart: unless-stopped
+  profiles: [core]
+  networks: [internal]
+  healthcheck:
+    test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+    interval: 5s
+    timeout: 3s
+    retries: 20
+    start_period: 5s
+
+services:
+  # ------------------------------------------------------------------ core: edge
+  gateway:
+    <<: *app
+    image: ecommerce-platform/gateway:local
+    build:
+      context: ../..
+      dockerfile: platform/docker/Dockerfile
+      args:
+        SERVICE_MODULE: :services:gateway
+    environment: *platform-env
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:8080:8080"
+    networks: [edge, internal]
+    depends_on:
+      identity:
+        condition: service_healthy
+
+
+  # ------------------------------------------------------------------ core: identity
+  identity:
+    <<: *app
+    image: ecommerce-platform/identity:local
+    build:
+      context: ../..
+      dockerfile: platform/docker/Dockerfile
+      args:
+        SERVICE_MODULE: :services:identity:infrastructure
+    env_file: env/identity.env
+    environment:
+      <<: *service-env
+      SEED: ${SEED:-true}
+    networks: [internal]
+    depends_on:
+      identity-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  identity-db:
+    <<: *db
+    env_file: env/identity.env
+    volumes:
+      - identity-db-data:/var/lib/postgresql
+
+  # ------------------------------------------------------------------ core: catalog
+  catalog:
+    <<: *app
+    image: ecommerce-platform/catalog:local
+    build:
+      context: ../..
+      dockerfile: platform/docker/Dockerfile
+      args:
+        SERVICE_MODULE: :services:catalog:infrastructure
+    env_file: env/catalog.env
+    environment:
+      <<: *service-env
+      SEED: ${SEED:-true}
+    networks: [internal]
+    depends_on:
+      catalog-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  catalog-db:
+    <<: *db
+    env_file: env/catalog.env
+    volumes:
+      - catalog-db-data:/var/lib/postgresql
+
+  # ------------------------------------------------------------------ core: cart
+  cart:
+    <<: *app
+    image: ecommerce-platform/cart:local
+    build:
+      context: ../..
+      dockerfile: platform/docker/Dockerfile
+      args:
+        SERVICE_MODULE: :services:cart:infrastructure
+    env_file: env/cart.env
+    environment:
+      <<: *service-env
+    networks: [internal]
+    depends_on:
+      cart-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  cart-db:
+    <<: *db
+    env_file: env/cart.env
+    volumes:
+      - cart-db-data:/var/lib/postgresql
+
+  # ------------------------------------------------------------------ core: order
+  order:
+    <<: *app
+    image: ecommerce-platform/order:local
+    build:
+      context: ../..
+      dockerfile: platform/docker/Dockerfile
+      args:
+        SERVICE_MODULE: :services:order:infrastructure
+    env_file: env/order.env
+    environment:
+      <<: *service-env
+    networks: [internal]
+    depends_on:
+      order-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  order-db:
+    <<: *db
+    env_file: env/order.env
+    volumes:
+      - order-db-data:/var/lib/postgresql
+
+  # ------------------------------------------------------------------ core: payment
+  payment:
+    <<: *app
+    image: ecommerce-platform/payment:local
+    build:
+      context: ../..
+      dockerfile: platform/docker/Dockerfile
+      args:
+        SERVICE_MODULE: :services:payment:infrastructure
+    env_file: env/payment.env
+    environment:
+      <<: *service-env
+    networks: [internal]
+    depends_on:
+      payment-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  payment-db:
+    <<: *db
+    env_file: env/payment.env
+    volumes:
+      - payment-db-data:/var/lib/postgresql
+
+  # ------------------------------------------------------------------ core: notification
+  notification:
+    <<: *app
+    image: ecommerce-platform/notification:local
+    build:
+      context: ../..
+      dockerfile: platform/docker/Dockerfile
+      args:
+        SERVICE_MODULE: :services:notification:infrastructure
+    env_file: env/notification.env
+    environment:
+      <<: *service-env
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      PUBLIC_BASE_URL: http://localhost:8080
+    networks: [internal]
+    depends_on:
+      notification-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+
+  notification-db:
+    <<: *db
+    env_file: env/notification.env
+    volumes:
+      - notification-db-data:/var/lib/postgresql
+
+  # ------------------------------------------------------------------ core: broker and mail sink
+  kafka:
+    image: apache/kafka:4.3.1
+    restart: unless-stopped
+    profiles: [core]
+    networks: [internal]
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: "3"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+
+  mailpit:
+    image: axllent/mailpit:v1.31.3
+    restart: unless-stopped
+    profiles: [core]
+    networks: [internal]
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+      MP_MAX_MESSAGES: "5000"
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:8025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # ------------------------------------------------------------------ observability
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.161.0
+    restart: unless-stopped
+    profiles: [observability]
+    networks: [internal]
+    volumes:
+      - ../observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    depends_on:
+      - loki
+      - tempo
+
+  loki:
+    image: grafana/loki:3.7.8
+    restart: unless-stopped
+    profiles: [observability]
+    networks: [internal]
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ../observability/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+
+  tempo:
+    image: grafana/tempo:3.1.0
+    restart: unless-stopped
+    profiles: [observability]
+    networks: [internal]
+    command: ["-target=all", "-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ../observability/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    restart: unless-stopped
+    profiles: [observability]
+    networks: [internal]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=3d
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
+    volumes:
+      - ../observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+  grafana:
+    image: grafana/grafana:12.4.12
+    restart: unless-stopped
+    profiles: [observability]
+    networks: [internal]
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?copy .env.example to .env}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:3000:3000"
+    volumes:
+      - ../observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - loki
+      - tempo
+      - prometheus
+
+  # ------------------------------------------------------------------ ci
+  # The SMS sink is an in-process simulator of the notification service: no container is needed.
+  pact-broker-db:
+    <<: *db
+    profiles: [ci]
+    environment:
+      POSTGRES_USER: pact_broker
+      POSTGRES_PASSWORD: ${PACT_BROKER_DB_PASSWORD:?copy .env.example to .env}
+      POSTGRES_DB: pact_broker
+    volumes:
+      - pact-broker-db-data:/var/lib/postgresql
+
+  pact-broker:
+    image: pactfoundation/pact-broker:3.0.0-pactbroker2.121.2
+    restart: unless-stopped
+    profiles: [ci]
+    networks: [internal]
+    environment:
+      PACT_BROKER_PORT: "9292"
+      PACT_BROKER_DATABASE_URL: postgres://pact_broker:${PACT_BROKER_DB_PASSWORD:?copy .env.example to .env}@pact-broker-db/pact_broker
+      PACT_BROKER_DATABASE_CONNECT_MAX_RETRIES: "10"
+      PACT_BROKER_BASIC_AUTH_USERNAME: ${PACT_BROKER_BASIC_AUTH_USERNAME:?copy .env.example to .env}
+      PACT_BROKER_BASIC_AUTH_PASSWORD: ${PACT_BROKER_BASIC_AUTH_PASSWORD:?copy .env.example to .env}
+      PACT_BROKER_ALLOW_PUBLIC_READ: "false"
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:9292:9292"
+    depends_on:
+      pact-broker-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--tries=1", "--timeout=5", "-O", "/dev/null", "http://localhost:9292/diagnostic/status/heartbeat"]
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 10s
+
+networks:
+  internal: {}
+  edge: {}
+
+volumes:
+  identity-db-data: {}
+  catalog-db-data: {}
+  cart-db-data: {}
+  order-db-data: {}
+  payment-db-data: {}
+  notification-db-data: {}
+  kafka-data: {}
+  loki-data: {}
+  tempo-data: {}
+  prometheus-data: {}
+  grafana-data: {}
+  pact-broker-db-data: {}

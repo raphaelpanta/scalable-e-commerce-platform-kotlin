@@ -1,8 +1,9 @@
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
 
-// Internal convention shared by kotlin-domain, kotlin-application and kotlin-service; modules never
-// apply it directly. Kotlin JVM on the catalogue's JDK toolchain, warnings as errors, Kotest on JUnit 5.
+// Internal convention shared by kotlin-domain, kotlin-application, kotlin-service, kotlin-boot-app and
+// kotlin-library; modules never apply it directly. Kotlin JVM on the catalogue's JDK toolchain, warnings as
+// errors, Kotest on JUnit 5.
 plugins {
     id("org.jetbrains.kotlin.jvm")
     id("quality")

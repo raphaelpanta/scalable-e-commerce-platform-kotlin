@@ -1,0 +1,249 @@
+openapi: 3.1.0
+info:
+  title: Identity Internal API
+  version: 1.0.0
+  summary: Service-to-service address and contact lookups, and the JWKS document, of the identity service.
+  description: |
+    Internal contract of the identity service (spec 004, FR-004..FR-007, FR-018..FR-020, user stories
+    3, 4 and 6). Complements `contracts/openapi/identity.yaml`, the public surface. Callers: the order
+    service (delivery address at checkout), the notification service (contact details and channel
+    permissions) and, for the JWKS document, the gateway and every service.
+
+    Rules shared by the `/internal/**` operations:
+    - Header `X-Internal-Token` is mandatory (apiKey security scheme `internalToken`).
+    - `X-Correlation-Id` is propagated by callers and echoed in every response.
+    - Errors are RFC 9457 `application/problem+json` with `type` `https://ecommerce.example/problems/<slug>`.
+    - Ids are UUIDs, timestamps are UTC `date-time`.
+    - Evolution is additive within v1; consumers ignore unknown fields.
+    - Personal data (addresses, email, phone) is returned only to authenticated internal callers and
+      must never be logged by either side.
+
+    `GET /.well-known/jwks.json` is the single exception: it is public by nature (a JWK Set holds
+    public keys only), needs no `X-Internal-Token`, is served by identity on port 8080 and is
+    deliberately not routed by the gateway (gateway-routes.md has no route for it). The gateway and
+    all services read it from `JWKS_URI` (default `http://localhost:8080/.well-known/jwks.json`,
+    Compose `http://identity:8080/.well-known/jwks.json`).
+servers:
+  - url: http://identity:8080
+    description: Compose DNS name of the identity service (internal network only, port 8080).
+tags:
+  - {name: Addresses, description: Delivery address lookup for checkout}
+  - {name: Contacts, description: Recipient contact details for notifications}
+  - {name: Keys, description: Public signing keys}
+security:
+  - internalToken: []
+paths:
+  /internal/accounts/{accountId}/addresses/{addressId}:
+    get:
+      operationId: getAccountAddress
+      tags: [Addresses]
+      summary: Read one delivery address of an account
+      description: |
+        Called by order at checkout with the `sub` of the authenticated shopper and the `addressId` of
+        the placement request; the result is copied into the order as a frozen snapshot. The address
+        must belong to `accountId`. An unknown address, an address that belongs to another account and
+        an address of an anonymised or deleted account all answer the same 404 `not-found`, so address
+        ids cannot be probed. Only the postal fields are returned (no label, no default flag, no phone).
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/AddressId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The address.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PostalAddress'}
+              example: {recipientName: Ada Lovelace, line1: 12 Analytical Street, line2: Flat 2, city: London, region: England, postalCode: N1 9GU, countryCode: GB}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /internal/accounts/{accountId}/contact:
+    get:
+      operationId: getAccountContact
+      tags: [Contacts]
+      summary: Read the contact details and permitted channels of an account
+      description: |
+        Called by notification to read current notification preferences when it processes an event
+        (preferences apply immediately, FR-020). `channels` lists the channels notifications may be
+        sent on right now: `email` while enabled, `sms` only when the account opted in and the phone
+        number is verified. For an anonymised (deleted) account the answer is still 200 with
+        `anonymised: true`, `email` set to the unusable placeholder `<pseudonym>@anonymised.invalid`,
+        no `phoneNumber`, `phoneVerified: false` and an empty `channels` array: the consumer then
+        suppresses every message (FR-007). An unknown account answers 404 `not-found`.
+      parameters:
+        - $ref: '#/components/parameters/AccountId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The contact details.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AccountContact'}
+              examples:
+                emailOnly:
+                  summary: Email only
+                  value: {accountId: 7c1d4f3e-0a52-4c0b-8d3a-1e2f3a4b5c6d, email: ada@example.test, phoneVerified: false, channels: [email], anonymised: false}
+                smsOptedIn:
+                  summary: SMS opted in with a verified number
+                  value: {accountId: 3b5d7f91-2c4e-4a68-9b0d-1f3a5c7e9b24, email: grace@example.test, phoneNumber: '+5511987654321', phoneVerified: true, channels: [email, sms], anonymised: false}
+                anonymised:
+                  summary: Anonymised account
+                  value: {accountId: c8a6e4d2-0b9f-4c71-8a35-6e2d4f8b1c07, email: anon-4f9c2d71@anonymised.invalid, phoneVerified: false, channels: [], anonymised: true}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {$ref: '#/components/responses/NotFound'}
+  /.well-known/jwks.json:
+    get:
+      operationId: getJwks
+      tags: [Keys]
+      summary: Public signing keys of the access tokens (JWK Set)
+      description: |
+        Public, unauthenticated (`security: []`), served by identity on 8080, not routed by the
+        gateway. Access tokens are JWTs signed with EdDSA (Ed25519); each token header carries the
+        `kid` of its key. Validators cache the set, refresh it when they meet an unknown `kid` or on a
+        schedule, and when the set cannot be fetched and no cached key matches they refuse the token
+        (the gateway answers 503 on protected routes) and never accept it unverified.
+
+        Rotation: the new key is published together with the previous one, and a rotated-out key stays
+        in the set for at least the access token lifetime (15 minutes), so tokens signed just before
+        rotation keep validating. While no signing key is available the endpoint answers 503.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The JWK Set.
+          headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JwkSet'}
+              example:
+                keys:
+                  - {kty: OKP, crv: Ed25519, kid: 2026-10-a1, x: 11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo, use: sig, alg: EdDSA}
+        '503': {$ref: '#/components/responses/ServiceUnavailable'}
+components:
+  securitySchemes:
+    internalToken:
+      type: apiKey
+      in: header
+      name: X-Internal-Token
+      description: |
+        Shared secret of the platform network, sent by every internal client and checked by every
+        operation of this document before anything else. The value comes from the environment
+        variable `INTERNAL_API_TOKEN` of both caller and callee; there is no committed default.
+        A missing or wrong value is answered with 401 `unauthorized` and nothing is executed.
+        Internal endpoints are never routed by the gateway and never exposed publicly.
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: |
+        Correlation identifier of the originating request. Internal clients MUST copy the value they
+        received (or generated) to every downstream call and into every event they emit; the service
+        logs it and echoes it in the response header of the same name. 1 to 64 characters of
+        `[A-Za-z0-9-]`; a missing or malformed value is replaced by a generated one.
+      schema: {type: string, pattern: '^[A-Za-z0-9-]{1,64}$'}
+    AccountId: {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+    AddressId: {name: addressId, in: path, required: true, schema: {type: string, format: uuid}}
+  headers:
+    CorrelationId:
+      description: Correlation identifier of the request, echoed on every response (including errors).
+      schema: {type: string, pattern: '^[A-Za-z0-9-]{1,64}$'}
+  responses:
+    BadRequest:
+      description: Malformed request, or a path, header or body field violates its documented constraint (400, problem type `validation`).
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example: {type: 'https://ecommerce.example/problems/validation', title: Validation failed, status: 400, detail: Request validation failed., correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13, errors: [{field: orderId, message: must be a UUID}]}
+    Unauthorized:
+      description: Header `X-Internal-Token` is missing or wrong (401, problem type `unauthorized`).
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example: {type: 'https://ecommerce.example/problems/unauthorized', title: Unauthorized, status: 401, detail: Internal token missing or invalid., correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13}
+    NotFound:
+      description: The addressed resource does not exist (404, problem type `not-found`).
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example: {type: 'https://ecommerce.example/problems/not-found', title: Not found, status: 404, detail: Resource not found., correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13}
+    ServiceUnavailable:
+      description: The service cannot answer right now, for example no signing key is available (503, problem type `unavailable`). Callers must not fall back to accepting unverified data.
+      headers: {X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}}
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/Problem'}
+          example: {type: 'https://ecommerce.example/problems/unavailable', title: Service unavailable, status: 503, detail: No signing key is available., correlationId: 3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13}
+  schemas:
+    Problem:
+      type: object
+      description: |
+        RFC 9457 problem details, identical in shape to the public contracts plus the mandatory
+        `correlationId`. `type` is `https://ecommerce.example/problems/<slug>` with a slug from
+        docs/service-conventions.md section 3. Operations that add extension members say so.
+      required: [type, title, status, correlationId]
+      properties:
+        type: {type: string, format: uri}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        instance: {type: string}
+        correlationId: {type: string, maxLength: 64, description: Same value as the X-Correlation-Id response header.}
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: {type: string}
+              message: {type: string}
+    PostalAddress:
+      type: object
+      description: Value object PostalAddress of data-model section 2.
+      required: [recipientName, line1, city, postalCode, countryCode]
+      properties:
+        recipientName: {type: string, minLength: 1, maxLength: 100}
+        line1: {type: string, minLength: 1, maxLength: 120}
+        line2: {type: string, maxLength: 120, description: Omitted when the address has no second line.}
+        city: {type: string, minLength: 1, maxLength: 80}
+        region: {type: string, maxLength: 80, description: Omitted when not applicable.}
+        postalCode: {type: string, minLength: 1, maxLength: 20}
+        countryCode: {type: string, pattern: '^[A-Z]{2}$', description: ISO 3166-1 alpha-2 (the order and event schemas call the same value `country`).}
+    AccountContact:
+      type: object
+      required: [accountId, email, phoneVerified, channels, anonymised]
+      properties:
+        accountId: {type: string, format: uuid}
+        email: {type: string, maxLength: 254, description: 'Lower-cased address; for an anonymised account the placeholder `<pseudonym>@anonymised.invalid` (the reserved `.invalid` TLD is undeliverable).'}
+        phoneNumber: {type: string, pattern: '^\+[1-9][0-9]{7,14}$', description: E.164. Omitted when none is registered and for anonymised accounts.}
+        phoneVerified: {type: boolean}
+        channels:
+          type: array
+          uniqueItems: true
+          items: {type: string, enum: [email, sms]}
+          description: Channels notifications may be sent on now. Empty when anonymised.
+        anonymised: {type: boolean, description: True once the account was deleted (FR-007).}
+    Jwk:
+      type: object
+      description: Ed25519 public key as a JSON Web Key (RFC 8037).
+      required: [kty, crv, kid, x, use, alg]
+      properties:
+        kty: {type: string, const: OKP}
+        crv: {type: string, const: Ed25519}
+        kid: {type: string, minLength: 1, maxLength: 64, description: Key id; matches the `kid` header of tokens signed with this key.}
+        x: {type: string, pattern: '^[A-Za-z0-9_-]{43}$', description: Base64url-encoded 32-byte public key, no padding.}
+        use: {type: string, const: sig}
+        alg: {type: string, const: EdDSA}
+    JwkSet:
+      type: object
+      required: [keys]
+      properties:
+        keys: {type: array, minItems: 1, items: {$ref: '#/components/schemas/Jwk'}}
