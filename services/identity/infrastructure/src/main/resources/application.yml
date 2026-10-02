@@ -12,9 +12,53 @@ spring:
     url: jdbc:postgresql://${IDENTITY_DB_HOST:localhost}:5432/identity
     user: ${IDENTITY_DB_USER}
     password: ${IDENTITY_DB_PASSWORD}
+    # The service schema (V2__) after the generator baseline and platform-messaging's outbox/processed_event;
+    # the `seed` profile (SEED=true) adds classpath:db/seed (application-seed.yml).
+    locations: classpath:db/migration,classpath:db/messaging
+  mail:
+    # Mailpit locally (docs/service-conventions.md section 2): the simulated SMS channel mirrors every SMS there.
+    # JavaMailSender blocks: every send runs on Dispatchers.IO (services/identity/README.md "Blocking exceptions").
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1025}
+    properties:
+      mail:
+        smtp:
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
   reactor:
     # Restores thread locals (such as an MDC correlation id) on Reactor operators.
     context-propagation: auto
+
+platform:
+  security:
+    # The anonymous operations of identity.yaml and the JWKS document; every other operation needs a bearer token
+    # (validated against this service's own signing keys) and /internal/** needs X-Internal-Token.
+    public-paths:
+      - POST /api/v1/identity/accounts
+      - POST /api/v1/identity/accounts/verify-email
+      - POST /api/v1/identity/sessions
+      - POST /api/v1/identity/sessions/refresh
+      - POST /api/v1/identity/password-resets
+      - POST /api/v1/identity/password-resets/complete
+      - GET /.well-known/jwks.json
+
+identity:
+  # Ed25519 private key (PKCS#8, PEM or Base64) that signs access tokens; blank generates one at start-up.
+  signing-key: ${IDENTITY_SIGNING_KEY:}
+  # kid of that key; blank uses the RFC 7638 thumbprint of its public key.
+  signing-key-id: ${IDENTITY_SIGNING_KEY_ID:}
+  access-token-lifetime: 15m
+  session-lifetime: 30d
+  sign-in:
+    # FR-006 / data-model section 1: 5 consecutive failures lock an account for 15 minutes.
+    account-max-failures: 5
+    account-lock: 15m
+    # A source address is shared by everyone behind it (NAT, the test runner): a higher limit, same lock.
+    source-max-failures: ${IDENTITY_SOURCE_MAX_FAILURES:20}
+    source-lock: 15m
+  sms:
+    from: sms@ecommerce.example
 
 management:
   server:
@@ -33,6 +77,9 @@ management:
     # The built-in R2DBC indicator has no timeout and hangs while the database is unreachable; database
     # health belongs in a HealthProbe adapter with a timeout, as in services/catalog (DatabaseHealthProbe).
     r2dbc:
+      enabled: false
+    # An unreachable SMTP server only fails phone verification requests (503); it must not take the service down.
+    mail:
       enabled: false
 
 logging:
