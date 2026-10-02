@@ -9,7 +9,7 @@ FROM eclipse-temurin:25-jdk@sha256:8c0a84ea11c8f6ed52600fc19f1040121f2a162998e9f
 ARG SERVICE_MODULE
 WORKDIR /workspace
 COPY . .
-RUN --mount=type=cache,target=/root/.gradle \
+RUN --mount=type=cache,target=/root/.gradle,sharing=locked \
     test -n "${SERVICE_MODULE}" \
     && ./gradlew -q --no-daemon "${SERVICE_MODULE}:bootJar" \
     && module_dir="$(echo "${SERVICE_MODULE}" | sed 's#^:##; s#:#/#g')" \

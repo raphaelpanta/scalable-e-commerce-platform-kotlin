@@ -105,3 +105,11 @@ docker compose --profile core --profile observability --profile ci down -v   # a
 
 With Podman the images must keep their `HEALTHCHECK`: build in Docker image format (`BUILDAH_FORMAT=docker`), otherwise
 services never turn healthy and `depends_on: service_healthy` blocks the stack.
+
+## Building the images
+
+`docker compose --profile core up -d --build` builds the seven service images from `platform/docker/Dockerfile`.
+They share one BuildKit cache mount for Gradle (`sharing=locked`, so concurrent builds wait for each other); the
+scripts also set `COMPOSE_PARALLEL_LIMIT=1` so images build one at a time, which is the fastest option on a single
+machine because the shared cache is warm after the first image. With podman set `BUILDAH_FORMAT=docker` so the
+`HEALTHCHECK` survives.
