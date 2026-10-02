@@ -9,7 +9,7 @@ export PODMAN_COMPOSE_WARNING_LOGS=false
 # Application containers whose image HEALTHCHECK must report "healthy".
 APP_SERVICES=(gateway identity catalog cart order payment notification)
 
-GATEWAY_URL="${GATEWAY_URL:-http://localhost:8080}"
+GATEWAY_URL="${GATEWAY_URL:-http://localhost:${GATEWAY_PORT:-8080}}"
 CATALOG_PATH="/api/v1/catalog/products"
 
 # Selects `docker compose` (v2 plugin) or the standalone `docker-compose`.

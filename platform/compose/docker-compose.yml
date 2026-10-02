@@ -32,6 +32,10 @@ x-app: &app
   restart: unless-stopped
   stop_grace_period: 30s
   profiles: [core]
+  # Bound every service so the JVM (MaxRAMPercentage=75) sizes itself to the container, not to the whole engine VM;
+  # seven unbounded JVMs exhausted an 8 GiB Podman machine.
+  mem_limit: ${SERVICE_MEM_LIMIT:-640m}
+  cpus: ${SERVICE_CPUS:-1.0}
   # Probe the actuator health endpoint on the management port (the JRE image has no curl; bash's /dev/tcp is enough).
   # Declared here so it also applies to images built before the Dockerfile carried the same check.
   healthcheck:
@@ -49,6 +53,7 @@ x-db: &db
   image: postgres:18-alpine
   restart: unless-stopped
   profiles: [core]
+  mem_limit: ${DB_MEM_LIMIT:-256m}
   networks: [internal]
   healthcheck:
     test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
@@ -69,7 +74,8 @@ services:
         SERVICE_MODULE: :services:gateway
     environment: *platform-env
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:8080:8080"
+      # GATEWAY_PORT lets the stack run beside another local service that already holds 8080
+      - "${BIND_ADDRESS:-127.0.0.1}:${GATEWAY_PORT:-8080}:8080"
     networks: [edge, internal]
     depends_on:
       identity:
@@ -236,10 +242,12 @@ services:
   # ------------------------------------------------------------------ core: broker and mail sink
   kafka:
     image: apache/kafka:4.3.1
+    mem_limit: ${KAFKA_MEM_LIMIT:-1g}
     restart: unless-stopped
     profiles: [core]
     networks: [internal]
     environment:
+      KAFKA_HEAP_OPTS: ${KAFKA_HEAP_OPTS:--Xmx512m -Xms256m}
       KAFKA_NODE_ID: "1"
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
@@ -266,6 +274,7 @@ services:
 
   mailpit:
     image: axllent/mailpit:v1.31.3
+    mem_limit: ${OBS_MEM_LIMIT:-512m}
     restart: unless-stopped
     profiles: [core]
     networks: [internal]
@@ -287,6 +296,7 @@ services:
   # ------------------------------------------------------------------ observability
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.161.0
+    mem_limit: ${OBS_MEM_LIMIT:-512m}
     restart: unless-stopped
     profiles: [observability]
     networks: [internal]
@@ -298,6 +308,7 @@ services:
 
   loki:
     image: grafana/loki:3.7.8
+    mem_limit: ${OBS_MEM_LIMIT:-512m}
     restart: unless-stopped
     profiles: [observability]
     networks: [internal]
@@ -308,6 +319,7 @@ services:
 
   tempo:
     image: grafana/tempo:3.1.0
+    mem_limit: ${OBS_MEM_LIMIT:-512m}
     restart: unless-stopped
     profiles: [observability]
     networks: [internal]
@@ -318,6 +330,7 @@ services:
 
   prometheus:
     image: prom/prometheus:v3.15.0
+    mem_limit: ${OBS_MEM_LIMIT:-512m}
     restart: unless-stopped
     profiles: [observability]
     networks: [internal]
@@ -333,6 +346,7 @@ services:
 
   grafana:
     image: grafana/grafana:12.4.12
+    mem_limit: ${OBS_MEM_LIMIT:-512m}
     restart: unless-stopped
     profiles: [observability]
     networks: [internal]

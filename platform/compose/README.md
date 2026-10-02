@@ -113,3 +113,11 @@ They share one BuildKit cache mount for Gradle (`sharing=locked`, so concurrent 
 scripts also set `COMPOSE_PARALLEL_LIMIT=1` so images build one at a time, which is the fastest option on a single
 machine because the shared cache is warm after the first image. With podman set `BUILDAH_FORMAT=docker` so the
 `HEALTHCHECK` survives.
+
+## Resource limits
+
+Every service container is bounded (`SERVICE_MEM_LIMIT`, default 640m, and `SERVICE_CPUS`, default 1.0) so that the
+JVM's `MaxRAMPercentage=75` sizes the heap to the container; databases get `DB_MEM_LIMIT` (256m), Kafka
+`KAFKA_MEM_LIMIT` (1g) with `KAFKA_HEAP_OPTS`, and each observability container `OBS_MEM_LIMIT` (512m). The whole
+`core` + `observability` stack needs about 8 GiB; on a smaller engine VM start `core` alone first. `GATEWAY_PORT`
+moves the published gateway port when 8080 is taken on the host.
