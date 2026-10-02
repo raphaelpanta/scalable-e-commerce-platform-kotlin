@@ -3,29 +3,13 @@ package com.ecommerce.catalog.infrastructure
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT
-import org.springframework.boot.test.web.server.LocalServerPort
-import org.springframework.context.annotation.Import
 import org.springframework.test.json.JsonCompareMode
-import org.springframework.test.web.reactive.server.WebTestClient
 import org.testcontainers.postgresql.PostgreSQLContainer
-import java.time.Duration
 
-@SpringBootTest(webEnvironment = RANDOM_PORT, properties = ["management.server.port="])
-@Import(PostgresContainerConfig::class)
+/** Health is UP while the database answers and DOWN within five seconds when it does not. */
 class HealthEndpointIntegrationTest(
-    @LocalServerPort private val port: Int,
     @Autowired private val postgres: PostgreSQLContainer,
-) {
-    private val client: WebTestClient by lazy {
-        WebTestClient
-            .bindToServer()
-            .baseUrl("http://localhost:$port")
-            .responseTimeout(Duration.ofSeconds(5))
-            .build()
-    }
-
+) : CatalogIntegrationTest() {
     @AfterEach
     fun resumeStorage() {
         if (postgres.currentContainerInfo.state.paused == true) {
