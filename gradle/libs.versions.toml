@@ -56,6 +56,7 @@ pact-provider-junit5 = { module = "au.com.dius.pact.provider:junit5", version.re
 cucumber-java = { module = "io.cucumber:cucumber-java", version.ref = "cucumber" }
 cucumber-junit-platform-engine = { module = "io.cucumber:cucumber-junit-platform-engine", version.ref = "cucumber" }
 cucumber-spring = { module = "io.cucumber:cucumber-spring", version.ref = "cucumber" }
+cucumber-picocontainer = { module = "io.cucumber:cucumber-picocontainer", version.ref = "cucumber" }
 junit-platform-suite = { module = "org.junit.platform:junit-platform-suite", version.ref = "junit-platform" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit-platform" }
 konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }

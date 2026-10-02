@@ -1,0 +1,146 @@
+# Platform pipeline (feature 004, user story 9, T112): validates the Compose and observability configuration and runs
+# the cross-service acceptance suite against a `core` stack built on the runner. Required status check: `platform`
+# (docs/ci-cd.md). Triggered only by changes to the platform, the acceptance suite or the contracts it exercises.
+#
+# Steps: `docker compose config -q` for every profile (and for the CI runner stack), shellcheck of the platform
+# scripts, yamllint of the observability and Compose files, then core up with --build, platform/compose/scripts/smoke.sh
+# --keep (health, gateway 200, ports not published), `./gradlew -q :acceptance:test` with GATEWAY_URL, and an always-run
+# teardown (down -v). Cucumber reports and, on failure, the container logs are uploaded as artifacts.
+#
+# Runner: ephemeral container with the Docker socket, host network (so http://localhost:8080 reaches the gateway
+# published by Compose on the host) and the work directory mounted at the same path inside and outside the container
+# (platform/ci-runner/README.md). Safeguards as in service-ci.yml: read-only token, no secrets, pinned actions and tool
+# images, no fork pull requests on the runner. Only one platform run can use the host ports at a time: keep a single
+# runner replica for it (or serialise the runs).
+name: platform
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'platform/**'
+      - 'acceptance/**'
+      - 'contracts/**'
+      - '.github/workflows/platform.yml'
+  pull_request:
+    paths:
+      - 'platform/**'
+      - 'acceptance/**'
+      - 'contracts/**'
+      - '.github/workflows/platform.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  platform:
+    name: platform
+    runs-on: [self-hosted, linux, ecommerce]
+    timeout-minutes: 30
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      # Podman engines drop HEALTHCHECK from OCI images (platform/compose/README.md); BuildKit gives the Gradle cache mount.
+      BUILDAH_FORMAT: docker
+      DOCKER_BUILDKIT: "1"
+      SHELLCHECK_IMAGE: koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
+      YAMLLINT_PYTHON_IMAGE: python:3.14-alpine@sha256:2e740b2c28a426e74f11396c05e38afb3191acced75045b8d62df573c1dc8ce8
+      YAMLLINT_VERSION: 1.38.0
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate the Compose files (every profile)
+        run: |
+          set -euo pipefail
+          if docker compose version >/dev/null 2>&1; then compose=(docker compose); else compose=(docker-compose); fi
+          "${compose[@]}" -f platform/compose/docker-compose.yml --env-file platform/compose/.env.example \
+            --profile core --profile observability --profile ci config -q
+          "${compose[@]}" -f platform/ci-runner/docker-compose.yml --env-file platform/ci-runner/.env.example config -q
+
+      - name: Shellcheck the platform scripts
+        run: |
+          docker run --rm -v "$PWD:$PWD" -w "$PWD" "$SHELLCHECK_IMAGE" -x -P SCRIPTDIR \
+            platform/compose/scripts/*.sh platform/ci-runner/scripts/*.sh
+
+      - name: Lint the observability and Compose YAML
+        run: |
+          docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:$PWD" -w "$PWD" "$YAMLLINT_PYTHON_IMAGE" sh -c \
+            "pip install -q --no-cache-dir --disable-pip-version-check --target /tmp/yl yamllint==$YAMLLINT_VERSION \
+            && PYTHONPATH=/tmp/yl python -m yamllint -d relaxed --no-warnings platform/observability \
+            platform/compose/docker-compose.yml platform/ci-runner/docker-compose.yml"
+
+      - name: Set up JDK from .java-version
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version-file: .java-version
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          validate-wrappers: true
+
+      # Throw-away configuration: example values plus a random internal token, never reused or published.
+      - name: Create platform/compose/.env for CI
+        run: |
+          set -euo pipefail
+          cp platform/compose/.env.example platform/compose/.env
+          token="$(openssl rand -hex 24)"
+          echo "::add-mask::$token"
+          sed -i "s|^INTERNAL_API_TOKEN=.*|INTERNAL_API_TOKEN=$token|" platform/compose/.env
+
+      - name: Build and start the core stack
+        run: |
+          set -euo pipefail
+          if docker compose version >/dev/null 2>&1; then compose=(docker compose); else compose=(docker-compose); fi
+          cd platform/compose
+          "${compose[@]}" --profile core up -d --build
+
+      # smoke.sh starts (no-op now), waits for every service to be healthy (5 minutes at most), checks the gateway
+      # (200 on the catalogue) and that the databases, Kafka and the management ports are not published. It also
+      # brings up the observability profile.
+      - name: Wait for the stack (smoke test)
+        run: platform/compose/scripts/smoke.sh --no-build --keep
+
+      - name: Acceptance suite
+        env:
+          GATEWAY_URL: http://localhost:8080
+        run: ./gradlew -q :acceptance:test
+
+      - name: Collect the container logs
+        if: failure()
+        run: |
+          mkdir -p ci-out
+          if docker compose version >/dev/null 2>&1; then compose=(docker compose); else compose=(docker-compose); fi
+          cd platform/compose
+          "${compose[@]}" --profile core --profile observability ps -a > ../../ci-out/compose-ps.txt 2>&1 || true
+          "${compose[@]}" --profile core --profile observability logs --no-color --tail 300 > ../../ci-out/compose-logs.txt 2>&1 || true
+
+      - name: Upload the Cucumber reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: platform-reports
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            acceptance/build/reports/**
+            acceptance/build/test-results/**
+            ci-out/**
+
+      # Always: a failed or cancelled run must not leave a stack (ports 8080, 3000, 8025) or volumes behind.
+      - name: Tear down the stack
+        if: always()
+        run: |
+          if docker compose version >/dev/null 2>&1; then compose=(docker compose); else compose=(docker-compose); fi
+          cd platform/compose
+          [ -f .env ] || cp .env.example .env
+          "${compose[@]}" --profile core --profile observability --profile ci down -v --remove-orphans
+          rm -f .env

@@ -29,7 +29,7 @@ Layout and decisions are documented feature by feature in [`specs/`](specs/); th
 
 ## Build and verify
 
-Full build documentation: [docs/build.md](docs/build.md) (layout, test layers, adding a module or dependency, quality gates) and CI in [docs/ci-cd.md](docs/ci-cd.md).
+Full build documentation: [docs/build.md](docs/build.md) (layout, test layers, adding a module or dependency, quality gates) and CI in [docs/ci-cd.md](docs/ci-cd.md), system overview in [docs/architecture.md](docs/architecture.md).
 
 The Gradle build is introduced by `specs/002-gradle-monorepo-bootstrap/`. Once it is present, run the
 full quality gate from the repository root:

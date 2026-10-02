@@ -63,7 +63,7 @@
 - [X] T024 [P] Create `services/<ctx>/infrastructure/Dockerfile` for each service and the gateway from the template in `platform/docker/Dockerfile.service` and wire `build:` contexts in `platform/compose/docker-compose.yml`
 - [X] T025 [P] Create `platform/observability/otel-collector.yaml` (OTLP receivers; exporters to Loki, Tempo, Prometheus), `platform/observability/grafana/provisioning/datasources.yaml` and a correlation-id search dashboard in `platform/observability/grafana/dashboards/requests-by-correlation.json`
 - [X] T026 [P] Add the Pact Broker and the simulated SMS sink to `platform/compose/docker-compose.yml` under profile `ci`, and configure `pact { broker }` publication settings in the `pact` convention usage of each infrastructure module (`PACT_BROKER_URL` env)
-- [ ] T027 Create the Cucumber runner `acceptance/src/test/kotlin/com/ecommerce/acceptance/RunCucumberTest.kt`, shared world/HTTP client with `X-Correlation-Id`, `Idempotency-Key` and bearer handling in `acceptance/src/test/kotlin/com/ecommerce/acceptance/support/ApiClient.kt`, and a Mailpit reader in `acceptance/src/test/kotlin/com/ecommerce/acceptance/support/MailpitClient.kt`
+- [X] T027 Create the Cucumber runner `acceptance/src/test/kotlin/com/ecommerce/acceptance/RunCucumberTest.kt`, shared world/HTTP client with `X-Correlation-Id`, `Idempotency-Key` and bearer handling in `acceptance/src/test/kotlin/com/ecommerce/acceptance/support/ApiClient.kt`, and a Mailpit reader in `acceptance/src/test/kotlin/com/ecommerce/acceptance/support/MailpitClient.kt`
 - [ ] T028 Create the seed-data profile (operator account, 3 categories, 20 products with stock, one withdrawn product) as Flyway `R__seed.sql` under a `seed` Spring profile in `services/identity/infrastructure/src/main/resources/db/seed/` and `services/catalog/infrastructure/src/main/resources/db/seed/`, enabled via `SEED=true` in `platform/compose/docker-compose.yml`
 
 **Checkpoint**: Foundation ready — `docker compose --profile core up` starts every service with health checks green; gateway routing tests pass.
@@ -81,7 +81,7 @@
 - [ ] T029 [P] [US1] Property tests for `Product`, `Category`, `InventoryLevel`, `Sku`, `ProductName` value objects (name non-blank ≤ 200, price > 0, availability = available − reserved ≥ 0, withdrawn products not addable) in `services/catalog/domain/src/test/kotlin/com/ecommerce/catalog/domain/`
 - [ ] T030 [P] [US1] Integration tests for product/category R2DBC repositories and search (case-insensitive name match, category filter, paging max 100, withdrawn excluded) in `services/catalog/infrastructure/src/integrationTest/kotlin/com/ecommerce/catalog/CatalogQueryIT.kt`
 - [ ] T031 [P] [US1] Pact provider verification for `listProducts`, `getProduct`, `listCategories`, `getCategory` against `contracts/openapi/catalog.yaml` in `services/catalog/infrastructure/src/contractTest/kotlin/com/ecommerce/catalog/CatalogProviderPactTest.kt`
-- [ ] T032 [P] [US1] Cucumber feature `acceptance/src/test/resources/features/catalogue-browsing.feature` (browse a category, search, view an out-of-stock product, request an unknown product) written in business language, plus steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/CatalogueSteps.kt`
+- [X] T032 [P] [US1] Cucumber feature `acceptance/src/test/resources/features/catalogue-browsing.feature` (browse a category, search, view an out-of-stock product, request an unknown product) written in business language, plus steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/CatalogueSteps.kt`
 
 ### Implementation for User Story 1
 
@@ -107,7 +107,7 @@
 - [ ] T039 [P] [US2] Pact consumer test cart → catalog for price/availability lookup (in stock, out of stock, withdrawn, unknown product) in `services/cart/infrastructure/src/contractTest/kotlin/com/ecommerce/cart/CatalogClientPactTest.kt`
 - [ ] T040 [P] [US2] Integration tests for cart persistence, `X-Cart-Token` issuance, merge consuming the anonymous cart (second merge → 404), 30-day idle purge in `services/cart/infrastructure/src/integrationTest/kotlin/com/ecommerce/cart/CartIT.kt`
 - [ ] T041 [P] [US2] Pact provider verification for `getCart`, `addCartLine`, `updateCartLineQuantity`, `removeCartLine`, `clearCart`, `mergeCart` against `contracts/openapi/cart.yaml` in `services/cart/infrastructure/src/contractTest/kotlin/com/ecommerce/cart/CartProviderPactTest.kt`
-- [ ] T042 [P] [US2] Cucumber feature `acceptance/src/test/resources/features/shopping-cart.feature` (add and change quantities, remove, more than stock refused, price changed flag, merge on sign-in) and steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/CartSteps.kt`
+- [X] T042 [P] [US2] Cucumber feature `acceptance/src/test/resources/features/shopping-cart.feature` (add and change quantities, remove, more than stock refused, price changed flag, merge on sign-in) and steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/CartSteps.kt`
 
 ### Implementation for User Story 2
 
@@ -133,7 +133,7 @@
 - [ ] T049 [P] [US3] Property tests for `Account` aggregate and value objects (password policy 12–128 chars and not equal to email, verification/reset tokens single-use with 24 h / 1 h TTL, throttle after 5 consecutive failures for 15 min reset on success, roles shopper|operator, anonymisation replaces email with pseudonym and clears profile/addresses) in `services/identity/domain/src/test/kotlin/com/ecommerce/identity/domain/`
 - [ ] T050 [P] [US3] Integration tests for registration → verification → sign-in → refresh → sign-out flows, Argon2id hashing, JWKS endpoint, throttling, reset flow with Testcontainers PostgreSQL in `services/identity/infrastructure/src/integrationTest/kotlin/com/ecommerce/identity/IdentityFlowsIT.kt`
 - [ ] T051 [P] [US3] Pact provider verification for all 18 identity operations against `contracts/openapi/identity.yaml` in `services/identity/infrastructure/src/contractTest/kotlin/com/ecommerce/identity/IdentityProviderPactTest.kt`, and consumer test gateway → identity JWKS in `services/gateway/src/contractTest/kotlin/com/ecommerce/gateway/IdentityJwksPactTest.kt`
-- [ ] T052 [P] [US3] Cucumber feature `acceptance/src/test/resources/features/account.feature` (register and verify, duplicate email, wrong password five times, address persists, forgotten password, checkout while signed out) and steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/AccountSteps.kt`
+- [X] T052 [P] [US3] Cucumber feature `acceptance/src/test/resources/features/account.feature` (register and verify, duplicate email, wrong password five times, address persists, forgotten password, checkout while signed out) and steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/AccountSteps.kt`
 
 ### Implementation for User Story 3
 
@@ -162,7 +162,7 @@
 - [ ] T062 [P] [US4] Pact consumer tests order → cart (read cart with revision), order → catalog (reserve success, insufficient stock listing lines, commit, release), order → payment (authorise approved/declined/pending) in `services/order/infrastructure/src/contractTest/kotlin/com/ecommerce/order/`; message pacts payment → order for `PaymentApproved`, `PaymentDeclined`, `PaymentPending`
 - [ ] T063 [P] [US4] Integration test for concurrent checkout of the last unit (two parallel requests, exactly one 201, stock never negative) and for idempotency (same key same body → same response; same key different body → 422) with Testcontainers PostgreSQL + Kafka in `services/order/infrastructure/src/integrationTest/kotlin/com/ecommerce/order/CheckoutConcurrencyIT.kt`
 - [ ] T064 [P] [US4] Pact provider verification for `placeOrder` (201, 202, 409 insufficient-stock, 409 price-changed, 422 declined) against `contracts/openapi/order.yaml` in `services/order/infrastructure/src/contractTest/kotlin/com/ecommerce/order/OrderProviderPactTest.kt`, and for `getSimulatorRules`, `getPaymentAttempt`, `listPaymentAttemptsForOrder` in `services/payment/infrastructure/src/contractTest/kotlin/com/ecommerce/payment/PaymentProviderPactTest.kt`
-- [ ] T065 [P] [US4] Cucumber feature `acceptance/src/test/resources/features/checkout.feature` (approved order, declined payment, last unit race, retried checkout with the same key, item out of stock, price changed since cart viewed, provider unreachable) and steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/CheckoutSteps.kt`
+- [X] T065 [P] [US4] Cucumber feature `acceptance/src/test/resources/features/checkout.feature` (approved order, declined payment, last unit race, retried checkout with the same key, item out of stock, price changed since cart viewed, provider unreachable) and steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/CheckoutSteps.kt`
 
 ### Implementation for User Story 4
 
@@ -193,7 +193,7 @@
 
 - [ ] T078 [P] [US5] Property tests for transition guards (`preparing` refused unless paymentStatus approved; shopper cancel only from placed; operator cancel from placed|preparing; illegal jumps refused and order unchanged) in `services/order/domain/src/test/kotlin/com/ecommerce/order/domain/OrderTransitionsSpec.kt`
 - [ ] T079 [P] [US5] Pact provider verification for `listOwnOrders`, `getOwnOrder`, `cancelOwnOrder`, `transitionOrderStatus` (cross-shopper → 404) against `contracts/openapi/order.yaml` in `services/order/infrastructure/src/contractTest/kotlin/com/ecommerce/order/OrderQueryProviderPactTest.kt`; message pacts order → payment for `OrderCancelled` (refund) and order → catalog for `OrderCancelled` (release)
-- [ ] T080 [P] [US5] Cucumber feature `acceptance/src/test/resources/features/order-tracking.feature` (history newest first and own only, operator ships, shopper cancels before preparing with refund, cancel after shipping refused, illegal transition refused) and steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/OrderTrackingSteps.kt`
+- [X] T080 [P] [US5] Cucumber feature `acceptance/src/test/resources/features/order-tracking.feature` (history newest first and own only, operator ships, shopper cancels before preparing with refund, cancel after shipping refused, illegal transition refused) and steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/OrderTrackingSteps.kt`
 
 ### Implementation for User Story 5
 
@@ -218,7 +218,7 @@
 - [ ] T086 [P] [US6] Message pact consumer tests for every consumed event (`AccountRegistered`, `AccountVerified`, `AccountDeleted`, `PasswordResetRequested`, `OrderPaid`, `OrderPaymentFailed`, `OrderShipped`, `OrderDelivered`) in `services/notification/infrastructure/src/contractTest/kotlin/com/ecommerce/notification/EventConsumerPactTest.kt`
 - [ ] T087 [P] [US6] Integration test with Testcontainers Kafka + Mailpit container: event → email within 30 s, failing SMTP → retries → failed, duplicate eventId → single send in `services/notification/infrastructure/src/integrationTest/kotlin/com/ecommerce/notification/DeliveryIT.kt`
 - [ ] T088 [P] [US6] Pact provider verification for `listOwnNotifications`, `listFailedNotifications`, `retryFailedNotification` against `contracts/openapi/notification.yaml` in `services/notification/infrastructure/src/contractTest/kotlin/com/ecommerce/notification/NotificationProviderPactTest.kt`
-- [ ] T089 [P] [US6] Cucumber feature `acceptance/src/test/resources/features/notifications.feature` (order confirmation email, SMS when opted in, failed channel visible to operator and retried, preference change honoured) and steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/NotificationSteps.kt`
+- [X] T089 [P] [US6] Cucumber feature `acceptance/src/test/resources/features/notifications.feature` (order confirmation email, SMS when opted in, failed channel visible to operator and retried, preference change honoured) and steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/NotificationSteps.kt`
 
 ### Implementation for User Story 6
 
@@ -242,7 +242,7 @@
 
 - [ ] T095 [P] [US7] Property tests for `StockAdjustment` (reason mandatory, negative adjustment cannot take available below reserved, audit fields who/when/why) and `withdraw` (not visible, not addable, open orders unaffected) in `services/catalog/domain/src/test/kotlin/com/ecommerce/catalog/domain/CatalogOperationsSpec.kt`
 - [ ] T096 [P] [US7] Pact provider verification for `createProduct`, `updateProduct`, `withdrawProduct`, `adjustStock`, `addProductImage`, `createCategory`, `updateCategory` against `contracts/openapi/catalog.yaml` in `services/catalog/infrastructure/src/contractTest/kotlin/com/ecommerce/catalog/CatalogAdminProviderPactTest.kt`
-- [ ] T097 [P] [US7] Cucumber feature `acceptance/src/test/resources/features/catalogue-operations.feature` (create product visible immediately, stock adjustment with reason, withdraw with open orders, shopper refused) and steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/CatalogueOperationsSteps.kt`
+- [X] T097 [P] [US7] Cucumber feature `acceptance/src/test/resources/features/catalogue-operations.feature` (create product visible immediately, stock adjustment with reason, withdraw with open orders, shopper refused) and steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/CatalogueOperationsSteps.kt`
 
 ### Implementation for User Story 7
 
@@ -264,7 +264,7 @@
 
 - [ ] T101 [P] [US8] Compose smoke test script `platform/compose/scripts/smoke.sh` (start `core`+`observability`, wait for all health checks within 5 min, call the gateway, assert services unreachable on host ports except gateway/Grafana/Mailpit)
 - [ ] T102 [P] [US8] Resilience test script `platform/compose/scripts/resilience.sh` (`--scale catalog=2`, continuous browse loop, stop one instance, assert zero non-2xx after in-flight requests)
-- [ ] T103 [P] [US8] Cucumber feature `acceptance/src/test/resources/features/platform-observability.feature` (request traceable across services by correlation id via Loki API, health and metrics exposed by every service) and steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/ObservabilitySteps.kt`
+- [X] T103 [P] [US8] Cucumber feature `acceptance/src/test/resources/features/platform-observability.feature` (request traceable across services by correlation id via Loki API, health and metrics exposed by every service) and steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/ObservabilitySteps.kt`
 
 ### Implementation for User Story 8
 
@@ -285,14 +285,14 @@
 
 ### Tests for User Story 9
 
-- [ ] T108 [P] [US9] Workflow dry-run test using `act` or a documented manual check in `platform/ci-runner/README.md` verifying path filters trigger only the touched service workflow
+- [X] T108 [P] [US9] Workflow dry-run test using `act` or a documented manual check in `platform/ci-runner/README.md` verifying path filters trigger only the touched service workflow
 
 ### Implementation for User Story 9
 
-- [ ] T109 [P] [US9] Create `platform/ci-runner/docker-compose.yml` with an ephemeral `actions/runner` (or `myoung34/github-runner`) container with Docker socket mount, `registry:2` with basic auth + TLS, and the Pact Broker; document registration, labels and the public-repo safeguards (no fork PR execution, approval for outside collaborators, SHA-pinned actions) in `platform/ci-runner/README.md`
-- [ ] T110 [P] [US9] Create the reusable workflow `.github/workflows/service-ci.yml` (inputs: service name; steps: checkout, JDK 25, Gradle quiet `check` for the service modules, `pitest`, Pact publish + `can-i-deploy`, Docker build from the service Dockerfile, push `<registry>/<service>:<sha>` and `:<branch>`) targeting `runs-on: [self-hosted, ecommerce]`
-- [ ] T111 [P] [US9] Create per-service caller workflows `.github/workflows/<ctx>.yml` for gateway, identity, catalog, cart, order, payment, notification with `paths:` filters on `services/<ctx>/**`, `libs/**`, `build-logic/**`, `gradle/**`, `contracts/**`
-- [ ] T112 [P] [US9] Create `.github/workflows/platform.yml` (compose config validation, acceptance suite against a `core` stack on the runner, observability config lint) with filters on `platform/**` and `acceptance/**`
+- [X] T109 [P] [US9] Create `platform/ci-runner/docker-compose.yml` with an ephemeral `actions/runner` (or `myoung34/github-runner`) container with Docker socket mount, `registry:2` with basic auth + TLS, and the Pact Broker; document registration, labels and the public-repo safeguards (no fork PR execution, approval for outside collaborators, SHA-pinned actions) in `platform/ci-runner/README.md`
+- [X] T110 [P] [US9] Create the reusable workflow `.github/workflows/service-ci.yml` (inputs: service name; steps: checkout, JDK 25, Gradle quiet `check` for the service modules, `pitest`, Pact publish + `can-i-deploy`, Docker build from the service Dockerfile, push `<registry>/<service>:<sha>` and `:<branch>`) targeting `runs-on: [self-hosted, ecommerce]`
+- [X] T111 [P] [US9] Create per-service caller workflows `.github/workflows/<ctx>.yml` for gateway, identity, catalog, cart, order, payment, notification with `paths:` filters on `services/<ctx>/**`, `libs/**`, `build-logic/**`, `gradle/**`, `contracts/**`
+- [X] T112 [P] [US9] Create `.github/workflows/platform.yml` (compose config validation, acceptance suite against a `core` stack on the runner, observability config lint) with filters on `platform/**` and `acceptance/**`
 - [ ] T113 [US9] Register the required status checks (`service-ci / <ctx>`, `platform`) in the branch protection configured by feature 003 and document the merge policy in `docs/ci-cd.md`
 
 **Checkpoint**: A single-service change builds, tests and publishes only that service within 15 min (SC-009).
@@ -303,12 +303,12 @@
 
 **Purpose**: Hardening, performance evidence and documentation across all stories.
 
-- [ ] T114 [P] Authorisation sweep test: every operator operation as shopper → 403 and every protected operation anonymously → 401 across all six contracts in `acceptance/src/test/resources/features/authorisation-sweep.feature` (SC-010)
+- [X] T114 [P] Authorisation sweep test: every operator operation as shopper → 403 and every protected operation anonymously → 401 across all six contracts in `acceptance/src/test/resources/features/authorisation-sweep.feature` (SC-010)
 - [ ] T115 [P] Load test with k6 or Gatling: 1,000 concurrent browsing shoppers and 100 concurrent checkouts, p95 catalogue < 1 s at 10,000 products, in `platform/perf/browse-and-checkout.js` with a seeded 10k-product dataset generator `platform/perf/seed-10k.sql` (SC-002, SC-003)
 - [ ] T116 [P] Dependency vulnerability scanning and image scanning steps added to `.github/workflows/service-ci.yml`; SBOM generation task in `build-logic`
 - [ ] T117 [P] PII audit: assert no `Email`, `PhoneNumber`, `PostalAddress` or token values reach logs (log-capture test) in `libs/platform-core/src/test/kotlin/com/ecommerce/platform/observability/PiiMaskingSpec.kt`
 - [ ] T118 [P] Mutation thresholds: enable Pitest with the Kotlin plugin (Arcmutate licence per research §14, or documented exclusions fallback) at 80 % for every `domain` and `application` module in `build-logic/src/main/kotlin/pitest.gradle.kts`
-- [ ] T119 [P] Write `docs/architecture.md` (bounded contexts, layers, event flows, status model) and `docs/adr/0001-two-status-order-model.md`, `docs/adr/0002-synchronous-stock-reservation.md`, `docs/adr/0003-cart-revision-checkout.md`
+- [X] T119 [P] Write `docs/architecture.md` (bounded contexts, layers, event flows, status model) and `docs/adr/0001-two-status-order-model.md`, `docs/adr/0002-synchronous-stock-reservation.md`, `docs/adr/0003-cart-revision-checkout.md`
 - [ ] T120 Propose the constitution PATCH amendment ("Spring Boot, latest GA major") via `/speckit-constitution` and record the Flyway blocking-at-boot exception in `docs/architecture.md`
 - [ ] T121 Run the full `specs/004-ecommerce-platform-mvp/quickstart.md` on a clean machine and record results in `docs/validation/2026-10-quickstart-run.md`
 

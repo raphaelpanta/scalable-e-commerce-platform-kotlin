@@ -1,0 +1,114 @@
+# CI runner stack of feature 004 (research.md sections 4 and 5): an ephemeral GitHub Actions runner, the private image
+# registry (basic auth + TLS) and the Pact Broker with its PostgreSQL. Runs on the CI host, separately from the
+# platform stack of platform/compose. Setup, registration, labels and the public-repository safeguards: README.md.
+#
+#   cp .env.example .env && $EDITOR .env
+#   scripts/init-registry.sh                # TLS certificate and htpasswd file under data/
+#   docker compose up -d
+#
+# The runner uses the host network, so `localhost` inside a job reaches what Compose publishes on the host (the
+# registry, the Pact Broker, and the gateway of the platform workflow). Its work directory is bind-mounted at the SAME
+# path inside and outside the container, because jobs start sibling containers through the mounted Docker socket and
+# pass them paths (`docker run -v "$PWD:$PWD"`). Mounting the Docker socket gives every job root-equivalent access to the
+# host: run this stack on a dedicated machine and only for trusted code (README.md, "Public-repository safeguards").
+name: ci-runner
+
+services:
+  runner:
+    # Official `actions/runner` images are not published as a stable registry image (research.md section 14); this
+    # image tracks the runner release (2.337.0) on Ubuntu 24.04 and includes Docker CLI, Compose, git and jq.
+    image: myoung34/github-runner:2.337.0-ubuntu-noble@sha256:1b947d2475cc6f4c3edf0e91dd879b091857e41a311be917016243479bb34101
+    # `always`: after its single job the ephemeral runner exits and the container restarts and registers again.
+    # scripts/run-ephemeral.sh sets RUNNER_RESTART=no and recreates the container for every job instead.
+    restart: ${RUNNER_RESTART:-always}
+    network_mode: host
+    environment:
+      REPO_URL: ${REPO_URL:?set REPO_URL in .env}
+      RUNNER_SCOPE: repo
+      # Either a least-privilege PAT / registration token flow (ACCESS_TOKEN) or a one-hour registration token
+      # supplied per start (RUNNER_TOKEN, scripts/run-ephemeral.sh). Leave the unused one empty.
+      ACCESS_TOKEN: ${ACCESS_TOKEN:-}
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+      # self-hosted, linux and the architecture are added automatically: the jobs ask for [self-hosted, linux, ecommerce].
+      LABELS: ecommerce
+      EPHEMERAL: "1"
+      DISABLE_AUTO_UPDATE: "1"
+      RUNNER_NAME_PREFIX: ${RUNNER_NAME_PREFIX:-ecommerce}
+      RANDOM_RUNNER_SUFFIX: "true"
+      RUNNER_WORKDIR: ${RUNNER_WORKDIR:?set RUNNER_WORKDIR in .env}
+      # Drop the registration settings (the token above) from the environment the jobs inherit.
+      UNSET_CONFIG_VARS: "true"
+      # Docker image format keeps HEALTHCHECK when the engine is Podman (platform/compose/README.md).
+      BUILDAH_FORMAT: docker
+      DOCKER_BUILDKIT: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${RUNNER_WORKDIR}:${RUNNER_WORKDIR}
+
+  registry:
+    image: registry:3.1.2@sha256:ddf754342cfc8acc51a56d5d0ab6af06826461864460636d8bd5c546dab2a7b8
+    restart: unless-stopped
+    ports:
+      - "${REGISTRY_BIND_ADDRESS:-127.0.0.1}:${REGISTRY_PORT:-5443}:5000"
+    environment:
+      REGISTRY_HTTP_ADDR: 0.0.0.0:5000
+      REGISTRY_HTTP_TLS_CERTIFICATE: /certs/registry.crt
+      REGISTRY_HTTP_TLS_KEY: /certs/registry.key
+      # Health endpoint on the container loopback only (not published).
+      REGISTRY_HTTP_DEBUG_ADDR: 127.0.0.1:5001
+      REGISTRY_AUTH: htpasswd
+      REGISTRY_AUTH_HTPASSWD_REALM: ecommerce-registry
+      REGISTRY_AUTH_HTPASSWD_PATH: /auth/htpasswd
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+    volumes:
+      - registry-data:/var/lib/registry
+      - ./data/certs:/certs:ro
+      - ./data/auth:/auth:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5001/debug/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+
+  pact-broker-db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pact_broker
+      POSTGRES_PASSWORD: ${PACT_BROKER_DB_PASSWORD:?set PACT_BROKER_DB_PASSWORD in .env}
+      POSTGRES_DB: pact_broker
+    volumes:
+      - pact-broker-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  pact-broker:
+    image: pactfoundation/pact-broker:3.0.0-pactbroker2.121.2
+    restart: unless-stopped
+    environment:
+      PACT_BROKER_PORT: "9292"
+      PACT_BROKER_DATABASE_URL: postgres://pact_broker:${PACT_BROKER_DB_PASSWORD:?set PACT_BROKER_DB_PASSWORD in .env}@pact-broker-db/pact_broker
+      PACT_BROKER_DATABASE_CONNECT_MAX_RETRIES: "10"
+      PACT_BROKER_BASIC_AUTH_USERNAME: ${PACT_BROKER_BASIC_AUTH_USERNAME:?set PACT_BROKER_BASIC_AUTH_USERNAME in .env}
+      PACT_BROKER_BASIC_AUTH_PASSWORD: ${PACT_BROKER_BASIC_AUTH_PASSWORD:?set PACT_BROKER_BASIC_AUTH_PASSWORD in .env}
+      PACT_BROKER_ALLOW_PUBLIC_READ: "false"
+    ports:
+      - "${PACT_BROKER_BIND_ADDRESS:-127.0.0.1}:${PACT_BROKER_PORT:-9292}:9292"
+    depends_on:
+      pact-broker-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--tries=1", "--timeout=5", "-O", "/dev/null", "http://localhost:9292/diagnostic/status/heartbeat"]
+      interval: 10s
+      timeout: 6s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  registry-data: {}
+  pact-broker-db-data: {}

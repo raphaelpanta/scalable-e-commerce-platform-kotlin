@@ -41,3 +41,6 @@ Thumbs.db
 !.env.example
 *.pem
 *.key
+
+# --- Agent worktrees (nested checkouts created by the coding harness) -------------------------
+.claude/worktrees/

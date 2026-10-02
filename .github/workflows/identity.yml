@@ -1,0 +1,49 @@
+# Service pipeline of `identity` (feature 004, user story 9): the `service-ci` reusable workflow runs the gate, the Pact
+# flow, the scans and the image of this service only, and only when the service or something it is built from
+# changes (`paths:`). Required status check: `service-ci / identity` (docs/ci-cd.md). Pull requests from forks never run
+# on the self-hosted runner (guard below, plus the repository setting "Require approval for all outside collaborators").
+# The image is pushed to the private registry on pushes to main only.
+name: identity
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/identity/**'
+      - 'libs/**'
+      - 'build-logic/**'
+      - 'gradle/**'
+      - 'contracts/**'
+      - 'platform/docker/**'
+      - 'settings.gradle.kts'
+      - 'build.gradle.kts'
+      - 'gradle.properties'
+      - 'config/**'
+      - '.github/workflows/service-ci.yml'
+      - '.github/workflows/identity.yml'
+  pull_request:
+    paths:
+      - 'services/identity/**'
+      - 'libs/**'
+      - 'build-logic/**'
+      - 'gradle/**'
+      - 'contracts/**'
+      - 'platform/docker/**'
+      - 'settings.gradle.kts'
+      - 'build.gradle.kts'
+      - 'gradle.properties'
+      - 'config/**'
+      - '.github/workflows/service-ci.yml'
+      - '.github/workflows/identity.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  service-ci:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/service-ci.yml
+    with:
+      service: identity
+      publish-image: ${{ github.event_name == 'push' }}
+    secrets: inherit

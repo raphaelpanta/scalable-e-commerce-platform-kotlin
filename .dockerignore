@@ -7,3 +7,6 @@
 .kotlin
 .idea
 frontend/node_modules
+
+# Agent worktrees are nested checkouts, never part of the build context or the repository
+.claude/worktrees/

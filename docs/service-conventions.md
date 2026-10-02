@@ -57,7 +57,9 @@ Kafka are reachable only on the internal network (FR-023).
   (`contracts/internal/*.yaml`), is never routed by the gateway and requires the `X-Internal-Token` header.
 - Errors are RFC 9457 `application/problem+json` using `com.ecommerce.platform.problem.Problem`; type URIs are
   `https://ecommerce.example/problems/<slug>` with slugs `validation`, `not-found`, `conflict`, `throttled`,
-  `insufficient-stock`, `price-changed`, `stale-revision`, `unauthorized`, `forbidden`, `unavailable` (503). Every error
+  `insufficient-stock`, `price-changed`, `stale-revision`, `unauthorized`, `forbidden`, `unavailable` (503), and the
+  order-specific `payment-declined` (422), `order-not-cancellable` (409), `invalid-transition` (409),
+  `idempotency-key-reuse` (422) exactly as `contracts/openapi/order.yaml` uses them. Every error
   carries `correlationId`. The public OpenAPI copies use the same host.
 - `X-Correlation-Id` is read, sanitised, echoed and logged by the `CorrelationIdWebFilter` of `platform-core`
   (rules in `contracts/gateway-routes.md`); clients copy it to downstream calls and events.
@@ -118,3 +120,24 @@ Kafka are reachable only on the internal network (FR-023).
 - `./gradlew -q verify` must stay silent and green; run the module's `check` (and `pitest`) before finishing a task.
 - Logging: structured ECS JSON on the console (Spring Boot structured logging), fields `service`, `traceId`,
   `spanId`, `correlationId`; never log emails, phone numbers, addresses, tokens or passwords.
+
+## 8. Resolved ambiguities (binding)
+
+Where the design documents disagree, the implementation follows these rules.
+
+| Topic | Rule |
+|---|---|
+| Checkout hops | Synchronous: order reads the cart (`GET /internal/carts/by-account/{id}`), reserves stock (`POST /internal/reservations`), charges (`POST /internal/charges`), then commits or releases the reservation and clears the cart synchronously. Events (`OrderPlaced`, `OrderPaid`, `OrderPaymentFailed`, `OrderCancelled`) are published too; their consumers in payment, catalog and cart are idempotent safety nets that must converge on the same state (payment keys the charge on the checkout `Idempotency-Key`, so an `OrderPlaced` consumer never creates a second attempt). |
+| Checkout responses | 201 `placed`/`approved`; 202 `placed`/`pending` (provider unreachable); 409 `insufficient-stock`; 409 `price-changed`; 422 `payment-declined` with the order `cancelled`/`failed`. |
+| Cart revision mismatch | Any `cartRevision` that is not the cart's current revision is refused with 409 `price-changed`, `changedLines` (possibly empty when only quantities or lines changed) and `currentCartRevision`. `stale-revision` is reserved for optimistic-concurrency conflicts inside a service. |
+| Idempotency after a refusal | A refused checkout (409) stores no idempotency record; the shopper may resubmit with the same key or a new one. |
+| Cancellation while payment is pending | Shopper or operator cancellation of a `placed` order whose payment is `pending` voids the attempt: `paymentStatus` becomes `failed`, the reservation is released, no refund is recorded. No cancelled order keeps `pending`. |
+| Decline categories | `insufficient_funds`, `card_expired`, `card_rejected`, `suspected_fraud`, `invalid_payment_method` everywhere (data-model §2's shorter list is superseded). |
+| Event consumers | cart consumes `OrderPaid` (clear ordered lines) and `AccountDeleted`; order consumes `payment.payment.v1` and `AccountDeleted`; order does not need to consume `catalog.stock.v1` in the MVP; notification consumes `RefundRecorded`; catalog consumes `OrderPaid`, `OrderPaymentFailed`, `OrderCancelled`. |
+| DNS names | Compose service names are the bare context names (`identity`, `catalog`, ...); the `-service` suffix in gateway-routes.md is superseded. |
+| Reservation expiry | 45 minutes after creation (configurable), always later than the 30-minute payment expiry. |
+| Seeded operator | `operator@ecommerce.example` / `Operator-Passw0rd!2026` (identity `seed` profile; the acceptance suite reads `OPERATOR_EMAIL`/`OPERATOR_PASSWORD` with these defaults). |
+| Module naming | Modules are `domain`, `application`, `infrastructure`; "adapters" in older text means `infrastructure`. |
+| Simulated SMS | The notification service's SMS simulator records each message and also mirrors it to Mailpit as an email to `sms-<E.164 digits>@sms.ecommerce.invalid` with subject `SMS to <phone>` and the SMS text as body, so tests and the acceptance suite read codes by searching Mailpit for the phone number. |
+| Mailpit chaos | Compose starts Mailpit with `MP_ENABLE_CHAOS=true`; the acceptance suite uses the chaos API to make deliveries fail (US6 scenario 3). |
+| Order number | Orders carry `orderNumber` (`ORD-<yyyyMMdd>-<sequence>`); confirmation messages include both the order id and the order number. |

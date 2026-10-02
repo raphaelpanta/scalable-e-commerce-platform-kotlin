@@ -261,6 +261,8 @@ services:
       MP_SMTP_AUTH_ACCEPT_ANY: "true"
       MP_SMTP_AUTH_ALLOW_INSECURE: "true"
       MP_MAX_MESSAGES: "5000"
+      # The acceptance suite uses the chaos API to make deliveries fail (US6 scenario 3)
+      MP_ENABLE_CHAOS: "true"
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:8025:8025"
     healthcheck:
