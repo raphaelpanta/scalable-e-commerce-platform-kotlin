@@ -12,9 +12,15 @@ spring:
     url: jdbc:postgresql://${PAYMENT_DB_HOST:localhost}:5432/payment
     user: ${PAYMENT_DB_USER}
     password: ${PAYMENT_DB_PASSWORD}
+    # The service schema plus the outbox and processed-event tables of libs/platform-messaging.
+    locations: classpath:db/migration,classpath:db/messaging
   reactor:
     # Restores thread locals (such as an MDC correlation id) on Reactor operators.
     context-propagation: auto
+
+# platform.security.* (JWKS_URI, JWT_ISSUER, JWT_AUDIENCE, INTERNAL_API_TOKEN) and the Kafka connection
+# (KAFKA_BOOTSTRAP_SERVERS, consumer group `payment`) come from the platform defaults. Every public path requires a
+# bearer token, so no public path is declared; /internal/** is guarded by X-Internal-Token.
 
 management:
   server:

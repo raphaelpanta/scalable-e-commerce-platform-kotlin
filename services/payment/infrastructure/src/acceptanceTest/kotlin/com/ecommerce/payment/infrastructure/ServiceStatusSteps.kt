@@ -1,5 +1,6 @@
 package com.ecommerce.payment.infrastructure
 
+import com.ecommerce.platform.messaging.testing.KafkaTestConfig
 import io.cucumber.java.en.Given
 import io.cucumber.java.en.Then
 import io.cucumber.java.en.When
@@ -20,11 +21,11 @@ private val http: HttpClient = HttpClient.newBuilder().connectTimeout(Duration.o
 
 /**
  * Step definitions for `service-status.feature`. Cucumber's Spring integration starts the application once
- * for the whole run (with a throwaway PostgreSQL) and the steps ask it over HTTP.
+ * for the whole run (with a throwaway PostgreSQL and Kafka) and the steps ask it over HTTP.
  */
 @CucumberContextConfiguration
 @SpringBootTest(webEnvironment = RANDOM_PORT, properties = ["management.server.port="])
-@Import(PostgresContainerConfig::class)
+@Import(PostgresContainerConfig::class, KafkaTestConfig::class)
 class ServiceStatusSteps(
     @LocalServerPort private val port: Int,
     private val context: ConfigurableApplicationContext,
