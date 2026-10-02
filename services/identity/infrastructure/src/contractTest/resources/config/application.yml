@@ -5,4 +5,34 @@ logging:
     org.springframework.boot.reactor.netty.GracefulShutdown: warn
     # Testcontainers stops the database while R2DBC connections are still open; the resulting "Connection
     # reset" is expected at shutdown and would otherwise print at ERROR level (Principle VIII).
-    io.r2dbc.postgresql.client.ReactorNettyClient: off
+    io.r2dbc.postgresql.client.ReactorNettyClient: "off"
+    com.ecommerce.platform.messaging.PeriodicJob: error
+    org.apache.kafka: error
+    org.springframework.kafka: warn
+    # The Docker client retries a dropped connection at INFO while Testcontainers stops the containers at exit.
+    com.github.dockerjava: warn
+    com.ecommerce.identity.infrastructure: error
+
+management:
+  # No collector in tests: the OTLP exporters of platform-core's defaults stay off.
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  tracing:
+    export:
+      enabled: false
+  logging:
+    export:
+      otlp:
+        enabled: false
+
+platform:
+  security:
+    internal-token: pact-internal-token
+  messaging:
+    # The contract layer has no broker: message pacts are verified on the envelopes the outbox would store.
+    outbox:
+      relay-enabled: false
+    topics:
+      create: false
