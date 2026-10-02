@@ -2,30 +2,13 @@ package com.ecommerce.payment.infrastructure
 
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
-import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.context.SpringBootTest
-import org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT
-import org.springframework.boot.test.web.server.LocalServerPort
-import org.springframework.context.annotation.Import
-import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.test.json.JsonCompareMode
-import org.springframework.test.web.reactive.server.WebTestClient
-import java.time.Duration
 
-private val TIMEOUT: Duration = Duration.ofSeconds(10)
-
-@SpringBootTest(webEnvironment = RANDOM_PORT, properties = ["management.server.port="])
-@Import(PostgresContainerConfig::class)
-class ServiceBaselineIntegrationTest(
-    @LocalServerPort private val port: Int,
-    @Autowired private val database: DatabaseClient,
-) {
+/** Health and migrations of the service, in the shared integration context. */
+class ServiceBaselineIntegrationTest : PaymentIntegrationTest() {
     @Test
     fun healthIsUp() {
-        WebTestClient
-            .bindToServer()
-            .baseUrl("http://localhost:$port")
-            .build()
+        client
             .get()
             .uri("/actuator/health")
             .exchange()
@@ -36,14 +19,8 @@ class ServiceBaselineIntegrationTest(
     }
 
     @Test
-    fun baselineMigrationIsRecordedAsVersionOne() {
-        val baseline =
-            database
-                .sql("SELECT version, success FROM flyway_schema_history WHERE version = '1'")
-                .fetch()
-                .one()
-                .block(TIMEOUT)
-
-        baseline shouldBe mapOf("version" to "1", "success" to true)
+    fun migrationsAreApplied() {
+        column("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank") shouldBe
+            listOf("1", "1.1", "2")
     }
 }
