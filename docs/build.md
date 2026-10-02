@@ -296,6 +296,20 @@ request path stays non-blocking. The exception is commented in
 `services/catalog/infrastructure/src/main/resources/application.yml`; any further blocking call needs its own
 documented justification.
 
+The second documented exception is the Kafka consumer thread of `libs/platform-messaging`.
+`EventListenerSupport.dispatch` runs the suspending, idempotent handler and waits for it on the listener
+container's own consumer thread, never on a Netty or Reactor event loop. A `suspend` `@KafkaListener` would hand
+over the next record before the previous one finished, and the events contract promises per-key ordering. The
+producer side has no such exception: the outbox relay runs on a coroutine scope started by a `SmartLifecycle` bean,
+reads and updates rows over R2DBC and calls `KafkaProducer.send`, which can block while it fetches metadata, on
+`Dispatchers.IO`.
+
+Integration tests that load `platform-messaging` (outbox relay, listeners) keep the context shutdown quiet with
+`logging.level.com.ecommerce.platform.messaging.PeriodicJob: error` and `org.apache.kafka: error` in their test
+configuration. Without Ryuk (Podman), Testcontainers stops the containers in a JVM hook that runs concurrently with
+Spring's, so the relay can still poll a database that is already gone. The library's own test configuration is
+`libs/platform-messaging/src/integrationTest/resources/application.yml`.
+
 ## Measured timings
 
 Measured on 2026-10-02 (Apple Silicon, macOS, Podman engine with 4 CPUs and 8 GB, `postgres:18-alpine` image
