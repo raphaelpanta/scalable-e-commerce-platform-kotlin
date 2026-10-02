@@ -59,6 +59,8 @@ class GatewayRoutingIT(
     private val client: WebTestClient by lazy { gatewayClient(port) }
 
     companion object {
+        private const val LOG_POLL_ATTEMPTS = 50
+        private const val LOG_POLL_INTERVAL_MS = 100L
         private val upstream = WireMockServer(wireMockConfig().dynamicPort()).apply { start() }
         private val signingKey = TestSigningKey("it-key-1")
         private val otherKey = TestSigningKey("it-key-1")
@@ -284,8 +286,23 @@ class GatewayRoutingIT(
         upstream.verify(
             getRequestedFor(urlPathEqualTo("/api/v1/catalog/products")).withHeader(CORRELATION, equalTo(replaced)),
         )
-        output.out.lines().single { it.contains("\"originalCorrelationId\":\"abc-123\"") } shouldContain
+        // The access line is written after the response has been sent; give it a moment under load.
+        accessLineWith(output, "\"originalCorrelationId\":\"abc-123\"") shouldContain
             "\"correlationId\":\"$replaced\""
+    }
+
+    private fun accessLineWith(
+        output: CapturedOutput,
+        marker: String,
+    ): String {
+        repeat(LOG_POLL_ATTEMPTS) {
+            output.out
+                .lines()
+                .singleOrNull { it.contains(marker) }
+                ?.let { return it }
+            Thread.sleep(LOG_POLL_INTERVAL_MS)
+        }
+        return output.out.lines().single { it.contains(marker) }
     }
 
     @Test
