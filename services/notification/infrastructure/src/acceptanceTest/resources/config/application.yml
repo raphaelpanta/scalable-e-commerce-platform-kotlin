@@ -41,3 +41,5 @@ platform:
 notification:
   delivery:
     enabled: false
+    # The delivery job may be mid-poll when Testcontainers stops the database at shutdown
+    org.springframework.transaction.reactive.TransactionalOperatorImpl: off

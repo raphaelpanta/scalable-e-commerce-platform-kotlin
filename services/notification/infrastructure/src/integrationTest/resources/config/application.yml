@@ -40,3 +40,5 @@ notification:
     initial-delay: 200ms
     max-delay: 800ms
     max-attempts: 5
+    # The delivery job may be mid-poll when Testcontainers stops the database at shutdown
+    org.springframework.transaction.reactive.TransactionalOperatorImpl: off

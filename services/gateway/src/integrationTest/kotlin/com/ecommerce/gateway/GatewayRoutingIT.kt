@@ -296,13 +296,14 @@ class GatewayRoutingIT(
         marker: String,
     ): String {
         repeat(LOG_POLL_ATTEMPTS) {
-            output.out
-                .lines()
-                .singleOrNull { it.contains(marker) }
-                ?.let { return it }
+            val line =
+                output.out
+                    .lines()
+                    .singleOrNull { candidate -> candidate.contains(marker) }
+            if (line != null) return line
             Thread.sleep(LOG_POLL_INTERVAL_MS)
         }
-        return output.out.lines().single { it.contains(marker) }
+        return output.out.lines().single { candidate -> candidate.contains(marker) }
     }
 
     @Test

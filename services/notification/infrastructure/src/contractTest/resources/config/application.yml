@@ -45,3 +45,5 @@ notification:
   delivery:
     # The consumer pacts assert what an event produces; nothing is delivered in this layer.
     enabled: false
+    # The delivery job may be mid-poll when Testcontainers stops the database at shutdown
+    org.springframework.transaction.reactive.TransactionalOperatorImpl: off
