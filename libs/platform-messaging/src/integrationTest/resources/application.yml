@@ -30,6 +30,8 @@ management:
 # poll a database that is already gone: keep that shutdown quiet.
 logging:
   level:
+    # Testcontainers' Docker client retries dropped socket responses at INFO (Podman shim); not a test signal
+    com.github.dockerjava: warn
     org.apache.kafka: error
     org.springframework.kafka: warn
     com.ecommerce.platform.messaging.PeriodicJob: error

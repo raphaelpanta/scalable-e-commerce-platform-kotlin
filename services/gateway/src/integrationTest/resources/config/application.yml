@@ -16,4 +16,6 @@ management:
 
 logging:
   level:
+    # Testcontainers' Docker client retries dropped socket responses at INFO (Podman shim); not a test signal
+    com.github.dockerjava: warn
     org.springframework.boot.reactor.netty.GracefulShutdown: warn

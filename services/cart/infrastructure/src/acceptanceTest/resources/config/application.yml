@@ -4,6 +4,8 @@
 # purge jobs and the Kafka clients may still talk to containers that are already gone.
 logging:
   level:
+    # Testcontainers' Docker client retries dropped socket responses at INFO (Podman shim); not a test signal
+    com.github.dockerjava: warn
     org.springframework.boot.reactor.netty.GracefulShutdown: warn
     io.r2dbc.postgresql.client.ReactorNettyClient: off
     com.ecommerce.platform.messaging.PeriodicJob: error

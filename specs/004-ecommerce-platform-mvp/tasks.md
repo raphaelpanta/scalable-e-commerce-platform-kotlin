@@ -268,9 +268,9 @@
 
 ### Implementation for User Story 8
 
-- [ ] T104 [P] [US8] Configure Spring Cloud LoadBalancer with DNS-based discovery and `networkaddress.cache.ttl=5` in every service's `application.yml` and `JAVA_TOOL_OPTIONS` in `platform/docker/Dockerfile.service`; set retry-on-connect-error for WebClient adapters in `libs/platform-core/src/main/kotlin/com/ecommerce/platform/http/WebClientDefaults.kt`
-- [ ] T105 [P] [US8] Finalise `platform/observability/` configs: Loki, Tempo, Prometheus scrape of `/actuator/prometheus` for all services, Grafana dashboards for request rate/error/latency per service and the correlation search, and link logs↔traces via `traceId`
-- [ ] T106 [P] [US8] Enforce network isolation in `platform/compose/docker-compose.yml`: services and databases on an internal network, only `gateway:8080`, `grafana:3000`, `mailpit:8025` published to the host
+- [X] T104 [P] [US8] Configure Spring Cloud LoadBalancer with DNS-based discovery and `networkaddress.cache.ttl=5` in every service's `application.yml` and `JAVA_TOOL_OPTIONS` in `platform/docker/Dockerfile.service`; set retry-on-connect-error for WebClient adapters in `libs/platform-core/src/main/kotlin/com/ecommerce/platform/http/WebClientDefaults.kt`
+- [X] T105 [P] [US8] Finalise `platform/observability/` configs: Loki, Tempo, Prometheus scrape of `/actuator/prometheus` for all services, Grafana dashboards for request rate/error/latency per service and the correlation search, and link logs↔traces via `traceId`
+- [X] T106 [P] [US8] Enforce network isolation in `platform/compose/docker-compose.yml`: services and databases on an internal network, only `gateway:8080`, `grafana:3000`, `mailpit:8025` published to the host
 - [X] T107 [US8] Write `docs/running-locally.md` (one-command start, profiles, seed, URLs, scaling, teardown) referencing `specs/004-ecommerce-platform-mvp/quickstart.md`
 
 **Checkpoint**: Quickstart §Start, §Observability and §Resilience steps pass on a clean machine.
@@ -304,7 +304,7 @@
 **Purpose**: Hardening, performance evidence and documentation across all stories.
 
 - [X] T114 [P] Authorisation sweep test: every operator operation as shopper → 403 and every protected operation anonymously → 401 across all six contracts in `acceptance/src/test/resources/features/authorisation-sweep.feature` (SC-010)
-- [ ] T115 [P] Load test with k6 or Gatling: 1,000 concurrent browsing shoppers and 100 concurrent checkouts, p95 catalogue < 1 s at 10,000 products, in `platform/perf/browse-and-checkout.js` with a seeded 10k-product dataset generator `platform/perf/seed-10k.sql` (SC-002, SC-003)
+- [X] T115 [P] Load test with k6 or Gatling: 1,000 concurrent browsing shoppers and 100 concurrent checkouts, p95 catalogue < 1 s at 10,000 products, in `platform/perf/browse-and-checkout.js` with a seeded 10k-product dataset generator `platform/perf/seed-10k.sql` (SC-002, SC-003)
 - [X] T116 [P] Dependency vulnerability scanning and image scanning steps added to `.github/workflows/service-ci.yml`; SBOM generation task in `build-logic`
 - [X] T117 [P] PII audit: assert no `Email`, `PhoneNumber`, `PostalAddress` or token values reach logs (log-capture test) in `libs/platform-core/src/test/kotlin/com/ecommerce/platform/observability/PiiMaskingSpec.kt`
 - [X] T118 [P] Mutation thresholds: enable Pitest with the Kotlin plugin (Arcmutate licence per research §14, or documented exclusions fallback) at 80 % for every `domain` and `application` module in `build-logic/src/main/kotlin/pitest.gradle.kts`

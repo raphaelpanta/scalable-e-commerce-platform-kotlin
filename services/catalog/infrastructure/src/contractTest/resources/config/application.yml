@@ -2,6 +2,8 @@
 # application in a JVM shutdown hook, after Gradle stops capturing test output; keep that shutdown quiet.
 logging:
   level:
+    # Testcontainers' Docker client retries dropped socket responses at INFO (Podman shim); not a test signal
+    com.github.dockerjava: warn
     org.springframework.boot.reactor.netty.GracefulShutdown: warn
     # Testcontainers stops the database while R2DBC connections are still open; the resulting "Connection
     # reset" is expected at shutdown and would otherwise print at ERROR level (Principle VIII).

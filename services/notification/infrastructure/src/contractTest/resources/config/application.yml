@@ -2,6 +2,8 @@
 # application in a JVM shutdown hook, after Gradle stops capturing test output; keep that shutdown quiet.
 logging:
   level:
+    # Testcontainers' Docker client retries dropped socket responses at INFO (Podman shim); not a test signal
+    com.github.dockerjava: warn
     org.springframework.boot.reactor.netty.GracefulShutdown: warn
     # The delivery job may be mid-poll when Testcontainers stops the database at shutdown
     org.springframework.transaction.reactive.TransactionalOperatorImpl: off
