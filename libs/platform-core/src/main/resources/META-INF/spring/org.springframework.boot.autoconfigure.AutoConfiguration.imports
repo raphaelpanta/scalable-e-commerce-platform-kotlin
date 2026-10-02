@@ -1,0 +1,3 @@
+com.ecommerce.platform.correlation.CorrelationAutoConfiguration
+com.ecommerce.platform.problem.PlatformProblemAutoConfiguration
+com.ecommerce.platform.security.PlatformSecurityAutoConfiguration
