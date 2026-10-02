@@ -827,3 +827,11 @@ Note: the catalog module that exists today uses the state text `the catalogue se
 (`services/catalog/.../HealthConsumerPactTest.kt`); the consumer and the provider verification of that module already
 agree on it, so it stays until that test is renamed to `the catalog service is running` in one change with its provider.
 
+## Addendum (2026-10-02): order → identity contact lookup
+
+Order events carry a `recipient` snapshot, so the order service reads
+`GET /internal/accounts/{accountId}/contact` at checkout. The `order-identity` pact therefore also contains the
+interaction `a request for the contact details of an account with email only` with provider state
+`an account exists {...}` (same description, state and shapes as the notification → identity row). Identity
+implements that state once and it serves both consumers; `pact-matrix.md` gains the row "order → identity: read
+recipient contact for order events".
