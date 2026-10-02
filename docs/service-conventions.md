@@ -55,7 +55,7 @@ Kafka are reachable only on the internal network (FR-023).
 - Public paths are versioned `/api/v1/<context>/...` exactly as in `contracts/openapi/*.yaml`; the gateway routes them
   per `contracts/gateway-routes.md`. Anything under `/internal/**` is service-to-service only
   (`contracts/internal/*.yaml`), is never routed by the gateway and requires the `X-Internal-Token` header.
-- Errors are RFC 9457 `application/problem+json` using `com.ecommerce.platform.problem.Problem`; type URIs are
+- Errors are RFC 9457 `application/problem+json` using `com.ecommerce.platform.core.problem.Problem` (responses via `com.ecommerce.platform.problem.ProblemResponses`); type URIs are
   `https://ecommerce.example/problems/<slug>` with slugs `validation`, `not-found`, `conflict`, `throttled`,
   `insufficient-stock`, `price-changed`, `stale-revision`, `unauthorized`, `forbidden`, `unavailable` (503), and the
   order-specific `payment-declined` (422), `order-not-cancellable` (409), `invalid-transition` (409),
