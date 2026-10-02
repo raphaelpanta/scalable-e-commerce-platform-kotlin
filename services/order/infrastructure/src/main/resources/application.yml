@@ -12,9 +12,25 @@ spring:
     url: jdbc:postgresql://${ORDER_DB_HOST:localhost}:5432/order
     user: ${ORDER_DB_USER}
     password: ${ORDER_DB_PASSWORD}
+    # The service schema plus the outbox and processed-event tables of libs/platform-messaging.
+    locations: classpath:db/migration,classpath:db/messaging
   reactor:
     # Restores thread locals (such as an MDC correlation id) on Reactor operators.
     context-propagation: auto
+
+# platform.security.* (JWKS_URI, JWT_ISSUER, JWT_AUDIENCE, INTERNAL_API_TOKEN) comes from the platform defaults;
+# every order path requires a bearer token, so no public path is declared.
+
+order:
+  clients:
+    cart-url: ${CART_URL:http://localhost:8080}
+    catalog-url: ${CATALOG_URL:http://localhost:8080}
+    payment-url: ${PAYMENT_URL:http://localhost:8080}
+    identity-url: ${IDENTITY_URL:http://localhost:8080}
+  payment-expiry:
+    # How often the job looks for payments still pending 30 minutes after placement, and how many per pass.
+    interval: 1m
+    batch-size: 100
 
 management:
   server:

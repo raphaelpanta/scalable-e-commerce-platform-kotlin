@@ -1,0 +1,38 @@
+{
+  "eventId": "ee000011-0000-4000-8000-000000000011",
+  "type": "OrderCancelled",
+  "version": 1,
+  "occurredAt": "2026-10-02T10:50:00Z",
+  "aggregateId": "0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a11",
+  "correlationId": "3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13",
+  "producer": "order",
+  "payload": {
+    "orderId": "0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a11",
+    "orderNumber": "ORD-20261002-0002",
+    "accountId": "7c1d4f3e-0a52-4c0b-8d3a-1e2f3a4b5c6d",
+    "lines": [
+      {
+        "productId": "3d7c2b9a-1f44-4c8e-9a52-6b0e7d3c4f02",
+        "quantity": 2
+      }
+    ],
+    "total": {
+      "amountMinor": 4900,
+      "currency": "BRL"
+    },
+    "orderStatus": "cancelled",
+    "paymentStatus": "failed",
+    "reason": "PAYMENT_EXPIRED",
+    "refundRequired": false,
+    "paymentId": null,
+    "cancelledAt": "2026-10-02T10:50:00Z",
+    "recipient": {
+      "accountId": "7c1d4f3e-0a52-4c0b-8d3a-1e2f3a4b5c6d",
+      "email": "ada@example.test",
+      "phone": null,
+      "preferredChannels": [
+        "email"
+      ]
+    }
+  }
+}
