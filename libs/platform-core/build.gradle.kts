@@ -8,6 +8,10 @@ plugins {
 // Only the framework-free packages are mutation tested; Spring wiring is covered by the services' integration layers.
 mutation { targetPackage.set("com.ecommerce.platform.core") }
 
+// The property specs of the core sit next to the mutated classes; the WebTestClient tests of the Spring layer kill
+// nothing there and would only slow every mutant down.
+pitest { targetTests.set(setOf("com.ecommerce.platform.core.*")) }
+
 dependencies {
     api(libs.arrow.core)
     api(libs.kotlinx.coroutines.core)
@@ -32,4 +36,8 @@ dependencies {
     testFixturesApi(libs.kotest.property)
     testFixturesImplementation(libs.spring.boot.starter.webflux.test)
     testFixturesImplementation(libs.spring.security.oauth2.jose)
+    testFixturesImplementation(libs.jackson.module.kotlin)
+
+    // The fixtures smoke test talks JDBC to the PostgreSQL container.
+    integrationTestRuntimeOnly(libs.postgresql)
 }

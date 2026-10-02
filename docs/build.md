@@ -277,6 +277,13 @@ is part of their `check`.
      `com.ecommerce.platform.*`; a module outside `services/` must set it, or it fails at configuration with
      `Module <path> applies pitest outside services/`;
   3. for `:services:<service>:<layer>`, `com.ecommerce.<service>.<layer>.*`.
+- Tests run against the mutants: every unit test of the module by default. A module whose unit layer also holds
+  slow Spring tests that cannot kill mutants in the target package may narrow them in its build script;
+  `:libs:platform-core` mutates only its framework-free `com.ecommerce.platform.core.*` and runs only the property
+  specs of that package (`pitest { targetTests.set(setOf("com.ecommerce.platform.core.*")) }`).
+- Inline functions are not covered (their bodies run inlined at the call sites), so code meant to be mutation tested
+  is written as regular functions; the getters of `@JvmInline value class` properties stay uncovered for the same
+  reason.
 - Exclusions for Kotlin-synthetic code: `*$WhenMappings`, `*$DefaultImpls`, `*Kt$*$1`; calls to
   `kotlin.jvm.internal`, `kotlin.Intrinsics` and `kotlinx.coroutines` are not mutated; the methods
   `toString`, `hashCode`, `equals`, `copy` and `component*` are skipped.
@@ -341,6 +348,10 @@ free; with less, the build fails with "Gradle build daemon disappeared unexpecte
   rules and `build-logic` tests need no Docker.
 - **A convention guard failure** (`Module :x applies no convention`): give the module a build file that
   applies a convention, or exempt it in the root `build.gradle.kts` with a reason.
+- **`There were N compiler errors found during analysis`** from a `detekt<SourceSet>` task breaks the silent
+  output. Detekt's type resolution does not apply the Kotlin Spring (all-open) plugin, so a test base class that
+  only Spring's annotations open (for example a `@SpringBootTest` class other tests extend) must be declared
+  `open` explicitly. Add `detekt { debug.set(true) }` to the module temporarily to see the errors.
 
 ## Follow-ups
 
