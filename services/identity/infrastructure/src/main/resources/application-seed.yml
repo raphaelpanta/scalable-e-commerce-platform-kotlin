@@ -1,0 +1,5 @@
+# Profile `seed` (SEED=true, see SeedProfile): Flyway also applies the repeatable seed scripts of classpath:db/seed
+# (the operator account of docs/service-conventions.md section 8).
+spring:
+  flyway:
+    locations: classpath:db/migration,classpath:db/messaging,classpath:db/seed
