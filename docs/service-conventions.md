@@ -144,3 +144,5 @@ Where the design documents disagree, the implementation follows these rules.
 | Order number | Orders carry `orderNumber` (`ORD-<yyyyMMdd>-<sequence>`); confirmation messages include both the order id and the order number. |
 | WebClient in Boot 4 | `WebClient.Builder` is only auto-configured with `spring-boot-starter-webclient`; an infrastructure module that calls another service adds `implementation(libs.spring.boot.starter.webclient)` (alias in the catalogue). |
 | Coroutine mutants | The `pitest` convention excludes calls to `kotlin.ResultKt`; application tests' fake ports should `yield()` so resume paths execute. |
+| Phone verification code | No event carries it: identity sends the SMS code itself through its own `SmsSenderPort` with a simulated sender that mirrors to Mailpit exactly like the notification service (same recipient and subject rule), so the acceptance suite reads the code from Mailpit by phone number. |
+| Notification type values | `order_cancelled`, `refund_confirmation` (types) and `suppressed` (status) are additive values of `contracts/openapi/notification.yaml`. |
