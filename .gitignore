@@ -3,6 +3,9 @@
 
 # --- Build outputs and dependency caches -------------------------------------------------
 build/
+# ...but the Kotlin package com.ecommerce.build of the convention plugins is source, not output
+!build-logic/src/*/kotlin/com/ecommerce/build/
+!build-logic/src/*/kotlin/com/ecommerce/build/**
 out/
 dist/
 bin/
