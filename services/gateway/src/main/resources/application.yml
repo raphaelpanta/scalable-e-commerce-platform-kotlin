@@ -1,0 +1,263 @@
+# API gateway (contracts/gateway-routes.md is the specification; docs/gateway.md explains this file).
+#
+# Deny by default: only the method + path pairs below are forwarded; everything else (including /internal/**,
+# /.well-known/** and /actuator/** on this port) answers 404 application/problem+json and reaches no service.
+# Every route declares its auth requirement and rate-limit tier in `metadata` (RoutePolicy); a route without them,
+# or with a response-timeout other than its tier's, stops the gateway at start-up.
+#
+# Tier upstream timeouts (metadata response-timeout, ms): auth 5000, browse 5000, standard 10000,
+# checkout 30000, operator 15000.
+spring:
+  application:
+    name: gateway
+  reactor:
+    # Restores thread locals (MDC correlationId) on Reactor operators, also when started without main().
+    context-propagation: auto
+  web:
+    resources:
+      add-mappings: false
+  cloud:
+    gateway:
+      server:
+        webflux:
+          httpclient:
+            connect-timeout: 2000
+            response-timeout: 10s
+          default-filters:
+            # Only idempotent reads are retried, and only when no connection could be opened (DNS lists every
+            # instance; a refused connection moves on to another one). POST /api/v1/orders is never retried: it
+            # relies on the client's Idempotency-Key.
+            - name: Retry
+              args:
+                retries: 2
+                methods: GET,HEAD
+                series: ""
+                statuses: ""
+                exceptions: java.net.ConnectException
+                backoff:
+                  first-backoff: 50ms
+                  max-backoff: 500ms
+                  factor: 2
+                  based-on-previous-value: false
+          routes:
+            # --- identity ----------------------------------------------------------------------------------------
+            - id: identity-credentials
+              uri: ${IDENTITY_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/identity/sessions,/api/v1/identity/sessions/refresh,/api/v1/identity/password-resets,/api/v1/identity/password-resets/complete
+                - Method=POST
+              metadata: { auth: anonymous, tier: auth, response-timeout: 5000 }
+            - id: identity-registration
+              uri: ${IDENTITY_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/identity/accounts,/api/v1/identity/accounts/verify-email
+                - Method=POST
+              metadata: { auth: anonymous, tier: standard, response-timeout: 10000 }
+            - id: identity-sign-out
+              uri: ${IDENTITY_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/identity/sessions/current
+                - Method=DELETE
+              metadata: { auth: authenticated, tier: standard, response-timeout: 10000 }
+            - id: identity-account-deletion
+              uri: ${IDENTITY_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/identity/accounts/me
+                - Method=DELETE
+              metadata: { auth: shopper, tier: standard, response-timeout: 10000 }
+            - id: identity-profile
+              uri: ${IDENTITY_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/identity/accounts/me,/api/v1/identity/accounts/me/notification-preferences
+                - Method=GET,PUT
+              metadata: { auth: authenticated, tier: standard, response-timeout: 10000 }
+            - id: identity-addresses
+              uri: ${IDENTITY_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/identity/accounts/me/addresses
+                - Method=GET,POST
+              metadata: { auth: authenticated, tier: standard, response-timeout: 10000 }
+            - id: identity-address
+              uri: ${IDENTITY_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/identity/accounts/me/addresses/*
+                - Method=PUT,DELETE
+              metadata: { auth: authenticated, tier: standard, response-timeout: 10000 }
+            - id: identity-phone-verification
+              uri: ${IDENTITY_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/identity/accounts/me/phone-verifications,/api/v1/identity/accounts/me/phone-verifications/confirm
+                - Method=POST
+              metadata: { auth: authenticated, tier: standard, response-timeout: 10000 }
+            # --- catalog -----------------------------------------------------------------------------------------
+            - id: catalog-reads
+              uri: ${CATALOG_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/catalog/products,/api/v1/catalog/products/*,/api/v1/catalog/categories,/api/v1/catalog/categories/*
+                - Method=GET
+              metadata: { auth: anonymous, tier: browse, response-timeout: 5000 }
+            - id: catalog-image-registration
+              uri: ${CATALOG_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/catalog/products/*/images
+                - Method=POST
+              metadata: { auth: operator, tier: operator, max-body-size: 5MB, response-timeout: 15000 }
+            - id: catalog-creations
+              uri: ${CATALOG_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/catalog/products,/api/v1/catalog/products/*/withdrawal,/api/v1/catalog/products/*/stock-adjustments,/api/v1/catalog/categories
+                - Method=POST
+              metadata: { auth: operator, tier: operator, response-timeout: 15000 }
+            - id: catalog-updates
+              uri: ${CATALOG_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/catalog/products/*,/api/v1/catalog/categories/*
+                - Method=PUT
+              metadata: { auth: operator, tier: operator, response-timeout: 15000 }
+            # --- cart (anonymous with X-Cart-Token, or any signed-in caller) --------------------------------------
+            - id: cart-merge
+              uri: ${CART_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/cart/merge
+                - Method=POST
+              metadata: { auth: authenticated, tier: standard, response-timeout: 10000 }
+            - id: cart
+              uri: ${CART_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/cart
+                - Method=GET,DELETE
+              metadata: { auth: anonymous, tier: standard, response-timeout: 10000 }
+            - id: cart-line-addition
+              uri: ${CART_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/cart/lines
+                - Method=POST
+              metadata: { auth: anonymous, tier: standard, response-timeout: 10000 }
+            - id: cart-line
+              uri: ${CART_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/cart/lines/*
+                - Method=PUT,DELETE
+              metadata: { auth: anonymous, tier: standard, response-timeout: 10000 }
+            # --- orders ------------------------------------------------------------------------------------------
+            - id: order-placement
+              uri: ${ORDER_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/orders
+                - Method=POST
+              metadata: { auth: shopper, tier: checkout, response-timeout: 30000 }
+            - id: order-history
+              uri: ${ORDER_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/orders
+                - Method=GET
+              metadata: { auth: shopper, tier: standard, response-timeout: 10000 }
+            - id: order-read
+              uri: ${ORDER_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/orders/*
+                - Method=GET
+              metadata: { auth: authenticated, tier: standard, operator-tier: operator, response-timeout: 10000 }
+            - id: order-cancellation
+              uri: ${ORDER_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/orders/*/cancellation
+                - Method=POST
+              metadata: { auth: shopper, tier: standard, response-timeout: 10000 }
+            - id: order-status
+              uri: ${ORDER_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/orders/*/status
+                - Method=POST
+              metadata: { auth: operator, tier: operator, response-timeout: 15000 }
+            # --- payments ----------------------------------------------------------------------------------------
+            - id: payment-simulator-rules
+              uri: ${PAYMENT_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/payments/simulator/rules
+                - Method=GET
+              metadata: { auth: operator, tier: operator, response-timeout: 15000 }
+            - id: payment-reads
+              uri: ${PAYMENT_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/payments/attempts,/api/v1/payments/attempts/*,/api/v1/payments/refunds,/api/v1/payments/refunds/*
+                - Method=GET
+              metadata: { auth: authenticated, tier: standard, response-timeout: 10000 }
+            # --- notifications -----------------------------------------------------------------------------------
+            - id: notification-failed
+              uri: ${NOTIFICATION_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/notifications/failed
+                - Method=GET
+              metadata: { auth: operator, tier: operator, response-timeout: 15000 }
+            - id: notification-retry
+              uri: ${NOTIFICATION_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/notifications/*/retry
+                - Method=POST
+              metadata: { auth: operator, tier: operator, response-timeout: 15000 }
+            - id: notification-list
+              uri: ${NOTIFICATION_URL:http://localhost:8080}
+              predicates:
+                - Path=/api/v1/notifications
+                - Method=GET
+              metadata: { auth: shopper, tier: standard, response-timeout: 10000 }
+
+gateway:
+  jwt:
+    jwks-uri: ${JWKS_URI:http://localhost:8080/.well-known/jwks.json}
+    issuer: ${JWT_ISSUER:https://identity.ecommerce.local}
+    audience: ${JWT_AUDIENCE:ecommerce-api}
+    cache-ttl: 5m
+    refresh-cooldown: 10s
+    fetch-timeout: 2s
+  # Per gateway instance (in-memory token buckets, docs/gateway.md): requests per minute per client key.
+  rate-limit:
+    requests-per-minute:
+      auth: 10
+      browse: 600
+      standard: 120
+      checkout: 20
+      operator: 300
+  max-body-size: 1MB
+
+server:
+  port: 8080
+  # Header size and idle time are bounded; upstream time per tier is bounded by the routes' response-timeout.
+  max-http-request-header-size: 16KB
+  netty:
+    idle-timeout: 60s
+
+management:
+  server:
+    port: 8081
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: never
+      # /actuator/health/liveness and /actuator/health/readiness
+      probes:
+        enabled: true
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+    logging:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/logs
+  otlp:
+    metrics:
+      export:
+        url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/metrics
+
+# The container image sets -Dnetworkaddress.cache.ttl=5 (research.md section 2): service names resolve to every
+# instance and removed instances drop out of DNS within seconds, so routes need no change when scaling.
+logging:
+  structured:
+    format:
+      console: ecs

@@ -1,0 +1,19 @@
+# Test-only overrides, loaded on top of the main application.yml: no OTLP collector runs in this layer, and
+# Spring's test context cache closes the application in a JVM shutdown hook, after Gradle stops capturing output.
+management:
+  tracing:
+    export:
+      otlp:
+        enabled: false
+  logging:
+    export:
+      otlp:
+        enabled: false
+  otlp:
+    metrics:
+      export:
+        enabled: false
+
+logging:
+  level:
+    org.springframework.boot.reactor.netty.GracefulShutdown: warn
