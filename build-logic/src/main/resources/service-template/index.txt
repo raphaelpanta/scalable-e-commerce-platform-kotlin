@@ -12,8 +12,10 @@ infrastructure/src/acceptanceTest/kotlin/com/ecommerce/__name__/infrastructure/S
 infrastructure/src/acceptanceTest/resources/config/application.yml
 infrastructure/src/acceptanceTest/resources/features/service-status.feature
 infrastructure/src/contractTest/kotlin/com/ecommerce/__name__/infrastructure/HealthConsumerPactTest.kt
-infrastructure/src/contractTest/kotlin/com/ecommerce/__name__/infrastructure/HealthProviderVerificationTest.kt
 infrastructure/src/contractTest/kotlin/com/ecommerce/__name__/infrastructure/PostgresContainerConfig.kt
+infrastructure/src/contractTest/kotlin/com/ecommerce/__name__/infrastructure/__Name__BrokerVerificationTest.kt
+infrastructure/src/contractTest/kotlin/com/ecommerce/__name__/infrastructure/__Name__ProviderStates.kt
+infrastructure/src/contractTest/kotlin/com/ecommerce/__name__/infrastructure/__Name__ProviderVerificationTest.kt
 infrastructure/src/contractTest/resources/config/application.yml
 infrastructure/src/integrationTest/kotlin/com/ecommerce/__name__/infrastructure/PostgresContainerConfig.kt
 infrastructure/src/integrationTest/kotlin/com/ecommerce/__name__/infrastructure/ServiceBaselineIntegrationTest.kt

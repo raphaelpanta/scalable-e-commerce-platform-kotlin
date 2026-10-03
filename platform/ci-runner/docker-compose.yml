@@ -97,6 +97,10 @@ services:
       PACT_BROKER_BASIC_AUTH_USERNAME: ${PACT_BROKER_BASIC_AUTH_USERNAME:?set PACT_BROKER_BASIC_AUTH_USERNAME in .env}
       PACT_BROKER_BASIC_AUTH_PASSWORD: ${PACT_BROKER_BASIC_AUTH_PASSWORD:?set PACT_BROKER_BASIC_AUTH_PASSWORD in .env}
       PACT_BROKER_ALLOW_PUBLIC_READ: "false"
+      # Webhooks (contract_content_changed -> workflow_dispatch of the provider's pipeline, README "Pact Broker
+      # webhooks") may only call the GitHub API over HTTPS.
+      PACT_BROKER_WEBHOOK_SCHEME_WHITELIST: https
+      PACT_BROKER_WEBHOOK_HOST_WHITELIST: api.github.com
     ports:
       - "${PACT_BROKER_BIND_ADDRESS:-127.0.0.1}:${PACT_BROKER_PORT:-9292}:9292"
     depends_on:

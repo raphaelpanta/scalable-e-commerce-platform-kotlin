@@ -93,15 +93,15 @@ git diff --name-only origin/main...HEAD | .github/scripts/path-filter-check.sh -
 | Job | Step | Tool | Fails when |
 | --- | --- | --- | --- |
 | `gate` | Gradle `check` of the service modules (`:services:<ctx>:domain`, `:application`, `:infrastructure`; `:services:gateway`) | `./gradlew -q`: ktlint, detekt, unit, integration, contract, acceptance and architecture layers, Pitest (80 % threshold) | any layer, rule or the mutation threshold fails |
-| | Publish consumer pacts | `pactfoundation/pact-cli` `publish build/pacts --consumer-app-version <sha> --branch <branch>` | the broker rejects the pacts; skipped without `PACT_BROKER_URL` or without pacts |
-| | Provider verification | `./gradlew -q <module>:contractVerify` with `PACT_BROKER_URL`, credentials and `PACT_PUBLISH_RESULTS=true` (`pact.provider.version` = commit SHA) | a pact is not honoured; the output names the consumer and the interaction |
-| | `can-i-deploy` | `pact-broker can-i-deploy --pacticipant <ctx> --version <sha> [--to-environment $PACT_ENVIRONMENT]`, retried for 60 s while verification results are unknown | an integrated version is incompatible; disabled by the variable `PACT_CAN_I_DEPLOY=false` |
+| | Publish consumer pacts | `pactfoundation/pact-cli` `publish build/pacts/<ctx>-*.json build/pacts/platform-probe-<ctx>.json --consumer-app-version <sha> --branch <branch> --build-url <run>` | the broker rejects the pacts; skipped without `PACT_BROKER_URL` or without pacts |
+| | Provider verification | `./gradlew -q <module>:contractVerify` with `PACT_BROKER_URL`, credentials, `PACT_PUBLISH_RESULTS=true`, `PACT_PROVIDER_BRANCH` (and `PACT_URL`/`PACT_CONSUMER` in a webhook-dispatched run): `<Ctx>BrokerVerificationTest` verifies the broker's pacts and publishes the results (`pact.provider.version` = commit SHA) | a pact is not honoured; the output names the consumer and the interaction |
+| | `can-i-deploy` | `pact-broker can-i-deploy --pacticipant <ctx> --version <sha> [--to-environment $PACT_ENVIRONMENT]`, retried every 10 s while verification results are unknown (`PACT_CAN_I_DEPLOY_RETRIES`, default 24) | an integrated version is incompatible; disabled by the variable `PACT_CAN_I_DEPLOY=false` |
 | | Dependency scan | `gradle ... dependencies --configuration runtimeClasspath` converted by `.github/scripts/gradle-deps-to-lockfile.sh` to a `gradle.lockfile`, scanned by `osv-scanner` | a dependency has a known vulnerability; `DEPENDENCY_SCAN_ENFORCE=false` downgrades it to an annotation |
 | `jar` | Boot jar | `./gradlew -q <module>:bootJar`, artifact `jar-<ctx>` (1 day) | the service does not compile or package |
 | `image` | Build | `docker build -f platform/docker/Dockerfile --build-arg SERVICE_MODULE=<module> --build-arg APP_JAR=ci-jar/app.jar .` with `BUILDAH_FORMAT=docker`; the build stage copies the jar of the `jar` job instead of compiling | the build fails |
 | | Image scan | `aquasec/trivy image --severity CRITICAL --ignore-unfixed --exit-code 1` | a CRITICAL vulnerability with a fix is in the image |
 | | SBOM | `anchore/syft` CycloneDX JSON, artifact `sbom-<ctx>` (30 days) | |
-| | Start and health | `.github/scripts/image-health.sh <ctx> <image>`: run the image (with a `postgres:18-alpine` sidecar except for the gateway), wait up to 90 s for `/actuator/health` to report UP, stop everything | the container exits or does not report UP in 90 s; the last 80 log lines are printed |
+| | Start and health | `.github/scripts/image-health.sh <ctx> <image>`: run the image (with a `postgres:18-alpine` sidecar except for the gateway), wait up to 90 s for the readiness group `/actuator/health/readiness` to report UP, stop everything | the container exits or does not report UP in 90 s; the last 80 log lines are printed |
 | | Hand-over (push to `main` only) | `docker save` to the artifact `image-<ctx>` (1 day) | |
 | `publish` (push to `main` only) | Push | `docker login --password-stdin`, `docker push <REGISTRY_HOST>/<ctx>:<sha>` and `:<branch>`; runs only when `gate` and `image` both succeeded | the registry rejects the push; skipped with a warning when `REGISTRY_HOST` or the secrets are missing |
 | `<ctx>` | Aggregate | shell | `gate` or `image` did not succeed, or `publish` failed (a skipped `publish` is fine; a skipped `gate` or `image` counts as failure) |
@@ -142,7 +142,7 @@ check that does not need the platform:
 - The gateway has no database: it is started alone with its defaults.
 - The probe runs inside the container (`docker exec ... bash` with `/dev/tcp` to `127.0.0.1:8081`, the same as the image
   HEALTHCHECK), so no port is published and the runner's host network, a remote engine or Podman all behave the same. It
-  polls every 2 seconds for up to 90 seconds for `"status":"UP"` (the gateway's body also lists `groups`).
+  polls the readiness group `/actuator/health/readiness` every 2 seconds for up to 90 seconds for `"status":"UP"`.
 - On failure the step prints the last 80 log lines of the service (and 20 of the database) and exits non-zero; an exit of
   the container ends the wait early. A shell `trap` always removes the containers, their volumes and the network.
 
@@ -206,16 +206,25 @@ Repository configuration used by the pipelines (Settings > Secrets and variables
 | variable | `REGISTRY_HOST` | `host:port` of the private registry, e.g. `localhost:5443` |
 | secret | `REGISTRY_USERNAME`, `REGISTRY_PASSWORD` | basic-auth credentials of the registry (only the push step sees them) |
 | secret | `PACT_BROKER_URL`, `PACT_BROKER_USERNAME`, `PACT_BROKER_PASSWORD` | Pact Broker; without the URL every broker step is skipped |
-| variable (optional) | `PACT_ENVIRONMENT`, `PACT_CAN_I_DEPLOY`, `DEPENDENCY_SCAN_ENFORCE` | target environment of `can-i-deploy`; `false` switches the check off; `false` makes the dependency scan advisory |
+| variable (optional) | `PACT_ENVIRONMENT`, `PACT_CAN_I_DEPLOY`, `PACT_CAN_I_DEPLOY_RETRIES`, `DEPENDENCY_SCAN_ENFORCE` | target environment of `can-i-deploy`; `false` switches the check off; how many 10-second polls `can-i-deploy` waits for unknown results (default 24); `false` makes the dependency scan advisory |
 
 ### Pact publish and `can-i-deploy` flow
 
-1. `check` runs the consumer tests (`contractTest`, pacts to `build/pacts`) and the file-based provider verification.
-2. With a broker configured, the pacts are published with the commit SHA as consumer version and the branch.
-3. `contractVerify` runs again with the broker variables: results are published for `pact.provider.version` = commit SHA.
+1. `check` runs the consumer tests (`contractTest`, pacts to `build/pacts`) and the file-based provider verification
+   (`<Ctx>ProviderVerificationTest`, `@PactFolder`).
+2. With a broker configured, the service's own pacts (`<ctx>-*.json`, `platform-probe-<ctx>.json`) are published with the
+   commit SHA as consumer version, the branch and the run URL. A pact whose content changed fires the broker webhook
+   `contract_content_changed`, which dispatches the provider's workflow (`workflow_dispatch` inputs `reason`,
+   `pact-url`, `consumer`; setup in [platform/ci-runner/README.md](../platform/ci-runner/README.md), "Pact Broker
+   webhooks").
+3. `contractVerify` runs again with the broker variables: `<Ctx>BrokerVerificationTest` (`@PactBroker`, guarded by
+   `pactbroker.url`, same provider states as the folder verification through `<Ctx>ProviderStates`) verifies the
+   consumer versions on `main`, deployed or released and on the same branch, or only the pact the webhook named, and
+   publishes the results for `pact.provider.version` = commit SHA and `pact.provider.branch`.
 4. `can-i-deploy` asks the broker whether this SHA is compatible with the versions it integrates with (the versions
-   deployed to `PACT_ENVIRONMENT` when set). A failure names the pact, consumer and provider, which is the
-   user-story-9 scenario "a change that breaks a contract fails naming the contract and the consumer".
+   deployed to `PACT_ENVIRONMENT` when set), waiting while a dispatched provider run has not published its result yet.
+   A failure names the pact, consumer and provider, which is the user-story-9 scenario "a change that breaks a contract
+   fails naming the contract and the consumer".
 
 ### Required status checks and merge policy (T113, amended by T148, for the maintainer)
 

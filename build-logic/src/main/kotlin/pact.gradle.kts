@@ -10,8 +10,9 @@ import com.ecommerce.build.registerTestLayer
 //  - `contractVerify` runs only the provider verification classes (tag `provider`) after every `contractTest`
 //    task of the build; they read the pacts with @PactFolder("${pact.folder}") and @IgnoreNoPactsToVerify.
 // With the environment variable PACT_BROKER_URL both tasks also get `pactbroker.url`, the optional credentials
-// (PACT_BROKER_TOKEN, or PACT_BROKER_USERNAME and PACT_BROKER_PASSWORD) and `pact.provider.version` (GITHUB_SHA
-// or `git rev-parse HEAD`); verification results are published only when PACT_PUBLISH_RESULTS=true.
+// (PACT_BROKER_TOKEN, or PACT_BROKER_USERNAME and PACT_BROKER_PASSWORD), `pact.provider.version` (GITHUB_SHA
+// or `git rev-parse HEAD`), the provider branch (PACT_PROVIDER_BRANCH) and, for a run a broker webhook triggered, the
+// pact to verify (PACT_URL, PACT_CONSUMER); verification results are published only when PACT_PUBLISH_RESULTS=true.
 val catalog = the<VersionCatalogsExtension>().named("libs")
 val pactDirectory: File =
     isolated.rootProject.projectDirectory
@@ -39,6 +40,10 @@ val gitSha: Provider<String> =
                 .map(String::trim),
         ).filter(String::isNotBlank)
 
+/** A non-blank environment variable, read only when a broker is configured. */
+fun brokerOnly(name: String): Provider<String> =
+    pactBrokerUrl.flatMap { providers.environmentVariable(name) }.filter(String::isNotBlank)
+
 fun brokerArguments(): PactBrokerArguments =
     objects.newInstance<PactBrokerArguments>().apply {
         brokerUrl.set(pactBrokerUrl)
@@ -47,6 +52,9 @@ fun brokerArguments(): PactBrokerArguments =
         password.set(providers.environmentVariable("PACT_BROKER_PASSWORD"))
         // Only resolved (and git only run) when a broker is configured.
         providerVersion.set(pactBrokerUrl.flatMap { gitSha })
+        providerBranch.set(brokerOnly("PACT_PROVIDER_BRANCH"))
+        pactUrl.set(brokerOnly("PACT_URL"))
+        consumer.set(brokerOnly("PACT_CONSUMER"))
         publishResults.set(providers.environmentVariable("PACT_PUBLISH_RESULTS").map { it == "true" }.orElse(false))
     }
 

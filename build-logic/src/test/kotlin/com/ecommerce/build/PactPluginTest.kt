@@ -128,6 +128,9 @@ class PactPluginTest :
                                 "PACT_BROKER_TOKEN" to "secret-token",
                                 "GITHUB_SHA" to "0123abc",
                                 "PACT_PUBLISH_RESULTS" to "true",
+                                "PACT_PROVIDER_BRANCH" to "main",
+                                "PACT_URL" to "https://broker.example/pacts/provider/echo/consumer/gateway/latest",
+                                "PACT_CONSUMER" to "gateway",
                             ),
                     ).build()
                     .output
@@ -138,6 +141,10 @@ class PactPluginTest :
                 "-Dpactbroker.auth.token=secret-token",
                 "-Dpact.provider.version=0123abc",
                 "-Dpact.verifier.publishResults=true",
+                "-Dpact.provider.branch=main",
+                "-Dpactbroker.providerBranch=main",
+                "-Dpact.filter.pacturl=https://broker.example/pacts/provider/echo/consumer/gateway/latest",
+                "-Dpact.filter.consumers=gateway",
             ).forEach { lines shouldContain "contractVerify $it" }
             lines.filter { it.contains("pactbroker.auth.username") } shouldBe emptyList()
             lines shouldNotContain "contractVerify -Dpact.verifier.publishResults=false"

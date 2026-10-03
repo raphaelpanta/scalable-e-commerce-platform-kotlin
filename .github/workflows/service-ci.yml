@@ -39,6 +39,18 @@ on:
         description: Push the image to the private registry (honoured only on pushes to main)
         type: boolean
         default: true
+      reason:
+        description: Why the pipeline runs (the caller's event, or the reason of a workflow_dispatch from a Pact Broker webhook)
+        type: string
+        default: ''
+      pact-url:
+        description: Pact Broker URL of the one pact a webhook-triggered run verifies (PACT_URL); empty for the usual selectors
+        type: string
+        default: ''
+      consumer:
+        description: Consumer of that pact (PACT_CONSUMER)
+        type: string
+        default: ''
     secrets:
       REGISTRY_USERNAME:
         description: Basic-auth user of the private registry (image push)
@@ -74,7 +86,7 @@ jobs:
     name: gate (${{ inputs.service }})
     runs-on: [self-hosted, linux, ecommerce]
     timeout-minutes: 15
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     env:
       SERVICE: ${{ inputs.service }}
     steps:
@@ -130,12 +142,20 @@ jobs:
           read -ra tasks <<< "$CHECK_TASKS"
           ./gradlew -q "${tasks[@]}"
 
-      # Secrets are not usable in `if:`; the step only records whether a broker is configured.
+      # Secrets are not usable in `if:`; the step only records whether a broker is configured. Inputs reach the shell
+      # through env: only (a dispatched run's reason and pact URL are free text).
       - name: Detect the Pact Broker
         id: pact
         env:
           PACT_BROKER_URL: ${{ secrets.PACT_BROKER_URL }}
+          REASON: ${{ inputs.reason }}
+          PACT_URL: ${{ inputs.pact-url }}
+          PACT_CONSUMER: ${{ inputs.consumer }}
         run: |
+          {
+            echo "Trigger: ${REASON:-$GITHUB_EVENT_NAME}"
+            [ -z "$PACT_URL" ] || echo "Pact to verify: $PACT_URL (consumer ${PACT_CONSUMER:-unknown})"
+          } >> "$GITHUB_STEP_SUMMARY"
           if [ -n "$PACT_BROKER_URL" ]; then
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
@@ -143,8 +163,11 @@ jobs:
             echo "::notice::PACT_BROKER_URL is not configured: pact publication, broker verification and can-i-deploy are skipped"
           fi
 
-      # The pacts written by contractTest (consumer side) live in the repository root build/pacts. A service that is
-      # only a provider has none: nothing to publish.
+      # The pacts written by this service's contractTest live in the repository root build/pacts, named
+      # <consumer>-<provider>.json: the ones it consumes (<svc>-*.json) and the platform probe's health pact of this
+      # provider (platform-probe-<svc>.json). Only those are published, with the commit SHA as consumer version, the
+      # branch and the run URL; publishing a changed pact fires the broker's contract_content_changed webhook, which
+      # dispatches the provider's pipeline (platform/ci-runner/README.md "Pact Broker webhooks").
       - name: Publish the consumer pacts to the Pact Broker
         if: steps.pact.outputs.enabled == 'true'
         env:
@@ -154,19 +177,26 @@ jobs:
           PACT_BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           set -euo pipefail
-          if ! find build/pacts -name '*.json' 2>/dev/null | grep -q .; then
-            echo "::notice::$SERVICE wrote no consumer pact (build/pacts is empty): nothing to publish"
+          shopt -s nullglob
+          pacts=(build/pacts/"$SERVICE"-*.json build/pacts/platform-probe-"$SERVICE".json)
+          if [ "${#pacts[@]}" -eq 0 ]; then
+            echo "::notice::$SERVICE wrote no consumer pact to build/pacts: nothing to publish"
             exit 0
           fi
+          files=()
+          for pact in "${pacts[@]}"; do files+=("$PWD/$pact"); done
           creds=()
           [ -z "$PACT_BROKER_USERNAME" ] || creds+=(-e PACT_BROKER_USERNAME -e PACT_BROKER_PASSWORD)
           docker run --rm --network host -w "$PWD" -v "$PWD:$PWD" -e PACT_BROKER_BASE_URL "${creds[@]}" \
-            "$PACT_CLI_IMAGE" publish "$PWD/build/pacts" \
-            --consumer-app-version "$GITHUB_SHA" --branch "$PACT_BRANCH"
+            "$PACT_CLI_IMAGE" publish "${files[@]}" \
+            --consumer-app-version "$GITHUB_SHA" --branch "$PACT_BRANCH" \
+            --build-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
-      # Provider side against the broker: the build reads PACT_BROKER_URL and the credentials (docs/build.md,
-      # "Contract tests"), sets pact.provider.version to GITHUB_SHA and publishes the results. Without a broker the
-      # file-based verification of `check` above has already run.
+      # Provider side against the broker: with PACT_BROKER_URL the build passes pactbroker.url and the credentials
+      # (docs/build.md, "Contract tests"), so the <Ctx>BrokerVerificationTest classes run next to the file-based ones:
+      # they fetch the pacts of the consumer versions on main, deployed or released and on this branch, or only the
+      # pact a webhook named (PACT_URL, PACT_CONSUMER), and publish the results for pact.provider.version = GITHUB_SHA
+      # on branch PACT_PROVIDER_BRANCH. A broken contract fails here, naming the consumer and the interaction.
       - name: Verify the provider contracts and publish the results
         if: steps.pact.outputs.enabled == 'true'
         env:
@@ -174,11 +204,17 @@ jobs:
           PACT_BROKER_USERNAME: ${{ secrets.PACT_BROKER_USERNAME }}
           PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
           PACT_PUBLISH_RESULTS: "true"
+          PACT_PROVIDER_BRANCH: ${{ github.head_ref || github.ref_name }}
+          PACT_URL: ${{ inputs.pact-url }}
+          PACT_CONSUMER: ${{ inputs.consumer }}
         run: ./gradlew -q "$VERIFY_TASK"
 
       # Fails the job, naming the pact and the consumer or provider involved, when this version is not compatible with
-      # the versions it integrates with. PACT_ENVIRONMENT (repository variable, optional) restricts the check to the
-      # versions deployed to that environment; PACT_CAN_I_DEPLOY=false switches the check off.
+      # the versions it integrates with. A consumer's new pact is verified by the provider pipeline the webhook
+      # dispatched, so the check waits while results are unknown: PACT_CAN_I_DEPLOY_RETRIES (repository variable,
+      # default 24) polls every 10 s, 4 minutes by default, within the job's 15-minute bound. PACT_ENVIRONMENT
+      # (optional) restricts the check to the versions deployed to that environment; PACT_CAN_I_DEPLOY=false switches
+      # the check off.
       - name: Can I deploy?
         if: steps.pact.outputs.enabled == 'true' && vars.PACT_CAN_I_DEPLOY != 'false'
         env:
@@ -186,15 +222,17 @@ jobs:
           PACT_BROKER_USERNAME: ${{ secrets.PACT_BROKER_USERNAME }}
           PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
           PACT_ENVIRONMENT: ${{ vars.PACT_ENVIRONMENT }}
+          RETRIES: ${{ vars.PACT_CAN_I_DEPLOY_RETRIES || '24' }}
         run: |
           set -euo pipefail
+          case "$RETRIES" in '' | *[!0-9]*) echo "::error::PACT_CAN_I_DEPLOY_RETRIES must be a number"; exit 1 ;; esac
           creds=()
           [ -z "$PACT_BROKER_USERNAME" ] || creds+=(-e PACT_BROKER_USERNAME -e PACT_BROKER_PASSWORD)
           target=()
           [ -z "$PACT_ENVIRONMENT" ] || target+=(--to-environment "$PACT_ENVIRONMENT")
           docker run --rm --network host -e PACT_BROKER_BASE_URL "${creds[@]}" "$PACT_CLI_IMAGE" \
             pact-broker can-i-deploy --pacticipant "$SERVICE" --version "$GITHUB_SHA" "${target[@]}" \
-            --retry-while-unknown 6 --retry-interval 10
+            --retry-while-unknown "$RETRIES" --retry-interval 10
 
       # Dependency scan: the resolved runtime classpath of the deployable module is converted to a Gradle lockfile
       # (the build does not use dependency locking) and checked against OSV by osv-scanner. Any known vulnerability
@@ -243,7 +281,7 @@ jobs:
     name: jar (${{ inputs.service }})
     runs-on: [self-hosted, linux, ecommerce]
     timeout-minutes: 15
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     env:
       SERVICE: ${{ inputs.service }}
     steps:
@@ -292,7 +330,7 @@ jobs:
     needs: jar
     runs-on: [self-hosted, linux, ecommerce]
     timeout-minutes: 15
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     env:
       SERVICE: ${{ inputs.service }}
       REGISTRY_HOST: ${{ vars.REGISTRY_HOST }}
