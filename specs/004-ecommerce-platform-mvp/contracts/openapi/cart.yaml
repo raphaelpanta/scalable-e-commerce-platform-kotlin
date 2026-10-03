@@ -133,6 +133,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/v1/cart/lines/{lineId}:
     parameters:
       - $ref: '#/components/parameters/LineId'
@@ -312,6 +313,12 @@ components:
             detail: Only 3 units are available; requested 5.
             instance: /api/v1/cart/lines
             errors: [{ field: quantity, message: 'available quantity: 3' }]
+    ServiceUnavailable:
+      description: The catalogue, which prices and checks the product, is unavailable (503); nothing was changed.
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
     TooManyRequests:
       description: Rate limited (429).
       headers:

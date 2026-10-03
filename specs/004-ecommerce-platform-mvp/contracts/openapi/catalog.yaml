@@ -504,7 +504,7 @@ components:
       type: object
       required: [url]
       properties:
-        url: { type: string, format: uri, maxLength: 2048 }
+        url: { type: string, format: uri-reference, maxLength: 2048, description: An https URL or a storage key. }
         altText: { type: string, maxLength: 200 }
         primary: { type: boolean, default: false }
     ProductImage:
@@ -572,7 +572,7 @@ components:
       type: object
       required: [name]
       properties:
-        name: { type: string, minLength: 1, maxLength: 100 }
+        name: { type: string, minLength: 1, maxLength: 120 }
         description: { type: string, maxLength: 1000 }
         parentId: { type: [string, 'null'], format: uuid }
     Category:
