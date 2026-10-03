@@ -112,11 +112,20 @@ need "$S" '--exit-code 1' '--severity CRITICAL' "service-ci.yml: Trivy must fail
 need "$S" ':services:$SERVICE:domain:check :services:$SERVICE:application:check :services:$SERVICE:infrastructure:check' \
   "service-ci.yml must check the three modules of a service"
 grep -q ':services:gateway:check' "$S" || _t_fail "service-ci.yml must check :services:gateway"
-need "$P" '  push:' '    branches: [main]' '  pull_request:' "platform.yml: push to main and pull_request triggers"
+# T152: pull requests are path-filtered; every push to main runs (paths-ignore for documentation only, so that the
+# path-filter simulation, which reads every `paths:` list, stays the pull_request one); nightly and manual runs exist
+need "$P" '  push:' '    branches: [main]' '  pull_request:' '  schedule:' '  workflow_dispatch:' "platform.yml: push to main, pull_request, schedule and manual triggers"
 for p in 'platform/**' 'acceptance/**' 'contracts/**' '.github/workflows/platform.yml'; do
-  [ "$(grep -cF "      - '$p'" "$P")" = 2 ] || _t_fail "platform.yml: path filter $p missing on push or pull_request"
+  [ "$(grep -cF "      - '$p'" "$P")" = 1 ] || _t_fail "platform.yml: path filter $p must be on pull_request only"
 done
-grep -q 'timeout-minutes: 30' "$P" || _t_fail "platform.yml: timeout-minutes: 30 missing"
+grep -q '^    paths-ignore:' "$P" || _t_fail "platform.yml: the push trigger needs paths-ignore (documentation only), not a paths list"
+grep -q '^  platform:' "$P" || _t_fail "platform.yml: the job named platform is the check to keep"
+grep -q '^  acceptance-slow:' "$P" || _t_fail "platform.yml: the slow and chaos suites need their own job"
+[ "$(grep -c 'timeout-minutes: 45' "$P")" = 1 ] && [ "$(grep -c 'timeout-minutes: 75' "$P")" = 1 ] ||
+  _t_fail "platform.yml: platform needs timeout-minutes: 45 and acceptance-slow 75"
+need "$P" 'compose.perf.yml' 'GATEWAY_PORT:' 'GATEWAY_URL:' "platform.yml: rate-limit override and gateway port/URL"
+need "$P" 'cucumber.filter.tags="not @slow and not @chaos"' 'cucumber.filter.tags="@slow and not @chaos"' 'cucumber.filter.tags="@chaos"' \
+  "platform.yml: the acceptance suite must be split by tags"
 need "$P" 'smoke.sh --no-build --keep' ':acceptance:test' 'down -v' "platform.yml: smoke, acceptance and teardown steps"
 grep -A1 'name: Tear down the stack' "$P" | grep -q 'if: always()' || _t_fail "platform.yml: teardown must run always"
 

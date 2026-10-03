@@ -1,51 +1,77 @@
-# Platform pipeline (feature 004, user story 9, T112): validates the Compose and observability configuration and runs
-# the cross-service acceptance suite against a `core` stack built on the runner. Required status check: `platform`
-# (docs/ci-cd.md). Triggered only by changes to the platform, the acceptance suite or the contracts it exercises.
+# Platform pipeline (feature 004, user story 9, T112, T152): validates the Compose and observability configuration and runs
+# the cross-service acceptance suite against a `core` stack built on the runner. Required status check, through the
+# path-neutral `services-aggregate` (docs/ci-cd.md): `platform`.
 #
-# Steps: `docker compose config -q` for every profile (and for the CI runner stack), shellcheck of the platform
-# scripts, yamllint of the observability and Compose files, then core up with --build, platform/compose/scripts/smoke.sh
-# --keep (health, gateway 200, ports not published), `./gradlew -q :acceptance:test` with GATEWAY_URL, and an always-run
-# teardown (down -v). Cucumber reports and, on failure, the container logs are uploaded as artifacts.
+# Triggers: pull requests that touch the platform, the acceptance suite or the contracts (`paths:`), EVERY push to `main`
+# except documentation-only ones (post-merge: a service change is exercised against the whole stack), a nightly schedule
+# and a manual run. The `platform` job (fast suite) runs for all of them; `acceptance-slow` (the `@slow` scenarios, then
+# `@chaos`) runs after it for everything except pull requests, with its own, longer timeout.
+#
+# `platform` steps: `docker compose config -q` for every profile (also with the performance override and for the CI
+# runner stack), shellcheck of the platform scripts, yamllint of the observability and Compose files, then core up with
+# --build and the rate-limit override platform/perf/compose.perf.yml (the suite signs in from ONE source address, so the
+# gateway's per-address limits would turn the run into a test of the limiter; docs/acceptance.md), smoke.sh --keep
+# (health, gateway 200, ports not published), `./gradlew -q :acceptance:test` for the scenarios that are neither `@slow`
+# nor `@chaos`, and an always-run teardown (down -v). Cucumber reports and, on failure, the container logs are uploaded.
 #
 # Runner: ephemeral container with the Docker socket, host network (so http://localhost:8080 reaches the gateway
 # published by Compose on the host) and the work directory mounted at the same path inside and outside the container
 # (platform/ci-runner/README.md). Safeguards as in service-ci.yml: read-only token, no secrets, pinned actions and tool
 # images, no fork pull requests on the runner. Only one platform run can use the host ports at a time: keep a single
-# runner replica for it (or serialise the runs).
+# runner replica for it (the concurrency group below also queues the non-pull-request runs behind each other).
 name: platform
 
 on:
   push:
     branches: [main]
-    paths:
-      - 'platform/**'
-      - 'acceptance/**'
-      - 'contracts/**'
-      - '.github/workflows/platform.yml'
+    # Every other push to main runs the stack: services/**, libs/** and the build files change what is deployed. Only
+    # documentation-only pushes are skipped. (A `paths:` list here would make .github/scripts/path-filter-check.sh
+    # report platform.yml for service changes, which the pull_request trigger does not do.)
+    paths-ignore:
+      - 'docs/**'
+      - 'specs/**'
+      - '**.md'
+      - '.specify/**'
+      - '.claude/**'
   pull_request:
     paths:
       - 'platform/**'
       - 'acceptance/**'
       - 'contracts/**'
       - '.github/workflows/platform.yml'
+  # Nightly: dependencies, base images and flakiness drift without a push (UTC).
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+# Pull-request runs are superseded by a newer push; push, schedule and manual runs share one queue (they all publish the
+# gateway on the same host port) and are never cancelled.
 concurrency:
-  group: platform-${{ github.event_name }}-${{ github.ref }}
+  group: ${{ github.event_name == 'pull_request' && format('platform-pr-{0}', github.ref) || 'platform-stack' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Podman engines drop HEALTHCHECK from OCI images (platform/compose/README.md); BuildKit gives the Gradle cache mount.
+  BUILDAH_FORMAT: docker
+  DOCKER_BUILDKIT: "1"
+  # The published gateway port (docker-compose.yml, ${GATEWAY_PORT:-8080}) and the URL the acceptance suite and the
+  # scripts call; change both together when 8080 is taken on the runner host.
+  GATEWAY_PORT: "8080"
+  GATEWAY_URL: http://localhost:8080
+  # Every `docker compose` call of the scripts and steps below (smoke.sh, logs, teardown) runs with the rate-limit override.
+  COMPOSE_FILE: docker-compose.yml:../perf/compose.perf.yml
 
 jobs:
   platform:
     name: platform
     runs-on: [self-hosted, linux, ecommerce]
-    timeout-minutes: 30
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    # Seven image builds, the observability profile, smoke test and the fast suite; cache-cold runs need most of it.
+    timeout-minutes: 45
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     env:
-      # Podman engines drop HEALTHCHECK from OCI images (platform/compose/README.md); BuildKit gives the Gradle cache mount.
-      BUILDAH_FORMAT: docker
-      DOCKER_BUILDKIT: "1"
       SHELLCHECK_IMAGE: koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
       YAMLLINT_PYTHON_IMAGE: python:3.14-alpine@sha256:2e740b2c28a426e74f11396c05e38afb3191acced75045b8d62df573c1dc8ce8
       YAMLLINT_VERSION: 1.38.0
@@ -55,25 +81,27 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate the Compose files (every profile)
+      - name: Validate the Compose files (every profile, with and without the performance override)
         run: |
           set -euo pipefail
           if docker compose version >/dev/null 2>&1; then compose=(docker compose); else compose=(docker-compose); fi
           "${compose[@]}" -f platform/compose/docker-compose.yml --env-file platform/compose/.env.example \
             --profile core --profile observability --profile ci config -q
+          "${compose[@]}" -f platform/compose/docker-compose.yml -f platform/perf/compose.perf.yml \
+            --env-file platform/compose/.env.example --profile core --profile observability config -q
           "${compose[@]}" -f platform/ci-runner/docker-compose.yml --env-file platform/ci-runner/.env.example config -q
 
       - name: Shellcheck the platform scripts
         run: |
           docker run --rm -v "$PWD:$PWD" -w "$PWD" "$SHELLCHECK_IMAGE" -x -P SCRIPTDIR \
-            platform/compose/scripts/*.sh platform/ci-runner/scripts/*.sh
+            platform/compose/scripts/*.sh platform/ci-runner/scripts/*.sh platform/perf/*.sh
 
       - name: Lint the observability and Compose YAML
         run: |
           docker run --rm -u "$(id -u):$(id -g)" -v "$PWD:$PWD" -w "$PWD" "$YAMLLINT_PYTHON_IMAGE" sh -c \
             "pip install -q --no-cache-dir --disable-pip-version-check --target /tmp/yl yamllint==$YAMLLINT_VERSION \
             && PYTHONPATH=/tmp/yl python -m yamllint -d relaxed --no-warnings platform/observability \
-            platform/compose/docker-compose.yml platform/ci-runner/docker-compose.yml"
+            platform/compose/docker-compose.yml platform/perf/compose.perf.yml platform/ci-runner/docker-compose.yml"
 
       - name: Set up JDK from .java-version
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
@@ -96,12 +124,13 @@ jobs:
           echo "::add-mask::$token"
           sed -i "s|^INTERNAL_API_TOKEN=.*|INTERNAL_API_TOKEN=$token|" platform/compose/.env
 
-      - name: Build and start the core stack
+      # The override lifts the gateway's per-source-address rate limits (auth, browse, standard tiers) for this run only.
+      - name: Build and start the core stack (rate-limit override)
         run: |
           set -euo pipefail
           if docker compose version >/dev/null 2>&1; then compose=(docker compose); else compose=(docker-compose); fi
           cd platform/compose
-          "${compose[@]}" --profile core up -d --build
+          "${compose[@]}" -f docker-compose.yml -f ../perf/compose.perf.yml --profile core up -d --build
 
       # smoke.sh starts (no-op now), waits for every service to be healthy (5 minutes at most), checks the gateway
       # (200 on the catalogue) and that the databases, Kafka and the management ports are not published. It also
@@ -109,10 +138,10 @@ jobs:
       - name: Wait for the stack (smoke test)
         run: platform/compose/scripts/smoke.sh --no-build --keep
 
-      - name: Acceptance suite
-        env:
-          GATEWAY_URL: http://localhost:8080
-        run: ./gradlew -q :acceptance:test
+      # Everything except the scenarios that wait minutes (@slow: races, notifications, the central log) and the one
+      # that breaks Mailpit on purpose (@chaos); those run in `acceptance-slow`.
+      - name: Acceptance suite (fast scenarios)
+        run: ./gradlew -q :acceptance:test -Dcucumber.filter.tags="not @slow and not @chaos"
 
       - name: Collect the container logs
         if: failure()
@@ -136,6 +165,93 @@ jobs:
             ci-out/**
 
       # Always: a failed or cancelled run must not leave a stack (ports 8080, 3000, 8025) or volumes behind.
+      - name: Tear down the stack
+        if: always()
+        run: |
+          if docker compose version >/dev/null 2>&1; then compose=(docker compose); else compose=(docker-compose); fi
+          cd platform/compose
+          [ -f .env ] || cp .env.example .env
+          "${compose[@]}" --profile core --profile observability --profile ci down -v --remove-orphans
+          rm -f .env
+
+  # The slow and chaos scenarios (docs/acceptance.md, tags): the race at checkout, everything that waits for a
+  # notification or the central log, the `@sms` and `@observability` checks and the Mailpit chaos scenario (waits for the
+  # retries of a failing delivery, NOTIFICATION_FAILURE_TIMEOUT_MINUTES, 15 by default). Not for pull requests: they
+  # would hold the single runner for an hour; push to main, the nightly schedule and a manual run cover them. Queued
+  # behind `platform`, which tears its stack down first, because both publish the gateway on the same host port.
+  acceptance-slow:
+    name: acceptance-slow
+    needs: platform
+    runs-on: [self-hosted, linux, ecommerce]
+    timeout-minutes: 75
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK from .java-version
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version-file: .java-version
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          validate-wrappers: true
+
+      - name: Create platform/compose/.env for CI
+        run: |
+          set -euo pipefail
+          cp platform/compose/.env.example platform/compose/.env
+          token="$(openssl rand -hex 24)"
+          echo "::add-mask::$token"
+          sed -i "s|^INTERNAL_API_TOKEN=.*|INTERNAL_API_TOKEN=$token|" platform/compose/.env
+
+      # Layers are cached on the runner host after the `platform` job; a cold host rebuilds the seven images.
+      - name: Build and start the core stack (rate-limit override)
+        run: |
+          set -euo pipefail
+          if docker compose version >/dev/null 2>&1; then compose=(docker compose); else compose=(docker-compose); fi
+          cd platform/compose
+          "${compose[@]}" -f docker-compose.yml -f ../perf/compose.perf.yml --profile core up -d --build
+
+      # Also starts the observability profile, which the `@observability` scenarios need.
+      - name: Wait for the stack (smoke test)
+        run: platform/compose/scripts/smoke.sh --no-build --keep
+
+      - name: Acceptance suite (@slow, without @chaos)
+        run: ./gradlew -q :acceptance:test -Dcucumber.filter.tags="@slow and not @chaos"
+
+      # Runs even when the slow suite failed (but not when the run was cancelled); restores Mailpit in an @After hook.
+      - name: Acceptance suite (@chaos)
+        if: ${{ !cancelled() }}
+        run: ./gradlew -q :acceptance:test -Dcucumber.filter.tags="@chaos"
+
+      - name: Collect the container logs
+        if: failure()
+        run: |
+          mkdir -p ci-out
+          if docker compose version >/dev/null 2>&1; then compose=(docker compose); else compose=(docker-compose); fi
+          cd platform/compose
+          "${compose[@]}" --profile core --profile observability ps -a > ../../ci-out/compose-ps.txt 2>&1 || true
+          "${compose[@]}" --profile core --profile observability logs --no-color --tail 300 > ../../ci-out/compose-logs.txt 2>&1 || true
+
+      - name: Upload the Cucumber reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: acceptance-slow-reports
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            acceptance/build/reports/**
+            acceptance/build/test-results/**
+            ci-out/**
+
       - name: Tear down the stack
         if: always()
         run: |

@@ -72,7 +72,7 @@ Runner, private registry and Pact Broker live in `platform/ci-runner/` (setup in
 | --- | --- | --- | --- |
 | `gateway.yml`, `identity.yml`, `catalog.yml`, `cart.yml`, `order.yml`, `payment.yml`, `notification.yml` | push to `main`, pull request | `services/<ctx>/**`, `libs/**`, `build-logic/**`, `gradle/**`, `contracts/**`, `platform/docker/**`, `settings.gradle.kts`, `build.gradle.kts`, `gradle.properties`, `config/**`, `.github/workflows/service-ci.yml`, `.github/workflows/<ctx>.yml` | `service-ci / <ctx>` (per-service aggregate, informational: required through `services-aggregate`), `service-ci / gate (<ctx>)`, `service-ci / image (<ctx>)` |
 | `service-ci.yml` | `workflow_call` only | (called by the seven workflows above with `service` and `publish-image`) | |
-| `platform.yml` | push to `main`, pull request | `platform/**`, `acceptance/**`, `contracts/**`, `.github/workflows/platform.yml` | `platform` |
+| `platform.yml` | pull request (filtered), every push to `main` except documentation-only ones, nightly (02:17 UTC), manual | pull request only: `platform/**`, `acceptance/**`, `contracts/**`, `.github/workflows/platform.yml`; the push trigger uses `paths-ignore` (`docs/**`, `specs/**`, `**.md`, `.specify/**`, `.claude/**`) so a service change merged to `main` is exercised against the whole stack | `platform`, `acceptance-slow` (not on pull requests) |
 | `pr-gate.yml` / `verify.yml` | every pull request / push to `main` | none (feature 001) | `pr-gate`, `verify / verify` |
 | `required-checks.yml` | every pull request | none (path-neutral on purpose) | `services-aggregate` (the one to require beside `pr-gate`) |
 
@@ -270,21 +270,36 @@ needs `pr-gate` to stay required as well, since it does not run the gate (`verif
 Merge policy: a pull request merges when `pr-gate` and `services-aggregate` are green (the latter covers the service and
 `platform` checks of the paths it touches); images are published only from `main`; fork pull requests never run on the
 runner (a maintainer pushes the branch to this repository). `platform.yml` also runs after every merge to `main` and every
-night, with the slow and chaos tags (see "Running the platform workflow locally").
+night, with the slow and chaos tags (see "Platform workflow").
 
-### Running the platform workflow locally
+### Platform workflow (`platform.yml`) and running it locally
+
+Jobs: `platform` (45 minutes) validates the Compose files (every profile, also merged with `platform/perf/compose.perf.yml`),
+shellchecks the scripts, lints the YAML, starts the `core` stack with `-f docker-compose.yml -f ../perf/compose.perf.yml`
+(the override lifts the gateway's per-source-address rate limits: the suite signs in from one address, and with the default
+tiers the run would measure the limiter), runs `smoke.sh --keep` and the **fast** acceptance scenarios
+(`-Dcucumber.filter.tags="not @slow and not @chaos"`). `acceptance-slow` (75 minutes, after `platform`, never on pull
+requests) rebuilds the stack the same way and runs `@slow and not @chaos`, then `@chaos` (which waits
+`NOTIFICATION_FAILURE_TIMEOUT_MINUTES`, 15 by default, for a failing delivery to run out of retries). Both tear the stack
+down always. `GATEWAY_PORT` and `GATEWAY_URL` are set once in the workflow `env:` (change both if 8080 is taken), and
+`COMPOSE_FILE` carries the override into `smoke.sh` and the teardown. Triggers are in the workflow map above; the
+non-pull-request runs share one concurrency queue because they publish the gateway on the same host port.
 
 ```bash
 docker compose -f platform/compose/docker-compose.yml --env-file platform/compose/.env.example \
   --profile core --profile observability --profile ci config -q
-shellcheck -x -P SCRIPTDIR platform/compose/scripts/*.sh platform/ci-runner/scripts/*.sh
+shellcheck -x -P SCRIPTDIR platform/compose/scripts/*.sh platform/ci-runner/scripts/*.sh platform/perf/*.sh
 pip install yamllint==1.38.0 && yamllint -d relaxed --no-warnings platform/observability \
-  platform/compose/docker-compose.yml platform/ci-runner/docker-compose.yml
+  platform/compose/docker-compose.yml platform/perf/compose.perf.yml platform/ci-runner/docker-compose.yml
 
 cp platform/compose/.env.example platform/compose/.env           # replace INTERNAL_API_TOKEN for anything shared
+export COMPOSE_FILE=docker-compose.yml:../perf/compose.perf.yml GATEWAY_PORT=8080
 (cd platform/compose && BUILDAH_FORMAT=docker docker compose --profile core up -d --build)
 platform/compose/scripts/smoke.sh --no-build --keep               # health, gateway 200, ports not published
-GATEWAY_URL=http://localhost:8080 ./gradlew -q :acceptance:test
+export GATEWAY_URL=http://localhost:$GATEWAY_PORT
+./gradlew -q :acceptance:test -Dcucumber.filter.tags="not @slow and not @chaos"       # fast suite
+./gradlew -q :acceptance:test -Dcucumber.filter.tags="@slow and not @chaos"           # slow suite
+./gradlew -q :acceptance:test -Dcucumber.filter.tags="@chaos"                         # chaos (Mailpit chaos API)
 (cd platform/compose && docker compose --profile core --profile observability --profile ci down -v)
 ```
 
