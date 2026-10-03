@@ -4,7 +4,9 @@ Service for the bounded context **cart** (user story 2, FR-008..FR-010): anonymo
 `X-Cart-Token` (only its SHA-256 hash is stored) and account carts addressed by the bearer token, priced live from
 the catalog's internal pricing API, with an opaque `revision` (ADR 0003), the merge on sign-in (`CartMerged`), the
 internal API order uses at checkout (`contracts/internal/cart-internal.yaml`), the `OrderPaid` and `AccountDeleted`
-consumers and the hourly purge of anonymous carts idle for 30 days.
+consumers and the hourly purge of anonymous carts idle for 30 days. An order that empties an account cart (the
+internal clear after payment approval, or `OrderPaid` taking the bought units out) deletes the cart row (data-model
+§1); the account then reads an empty cart again and its next add creates a new cart.
 
 Package root: `com.ecommerce.cart`.
 

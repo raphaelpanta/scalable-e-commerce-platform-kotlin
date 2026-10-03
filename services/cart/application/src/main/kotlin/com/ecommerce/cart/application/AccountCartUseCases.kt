@@ -14,8 +14,12 @@ import java.time.Duration
 /** Attempts of a background change that lost an optimistic-locking race before it gives up. */
 internal const val CONFLICT_ATTEMPTS: Int = 3
 
-/** Re-reads the account cart and applies [change] until it is stored, at most [CONFLICT_ATTEMPTS] times. */
-internal suspend fun CartStore.changeAccountCart(
+/**
+ * Re-reads the account cart and applies an order's [change] until it is stored, at most [CONFLICT_ATTEMPTS] times. A
+ * cart the order leaves empty is deleted, not kept as an empty row (data-model section 1: carts are deleted when an
+ * order success empties them); the account then reads an empty cart again and its next add creates a new one.
+ */
+internal suspend fun CartStore.changeAccountCartForOrder(
     accountId: AccountId,
     change: (Cart) -> Cart,
 ): Either<CartError, Unit> {
@@ -25,7 +29,20 @@ internal suspend fun CartStore.changeAccountCart(
         attempt++
         val cart = repository.findByAccount(accountId) ?: return Unit.right()
         val changed = change(cart)
-        outcome = if (changed === cart) Unit.right() else persist(cart, changed).map { }
+        outcome =
+            when {
+                changed.lines.isEmpty() -> {
+                    if (repository.delete(cart)) Unit.right() else CartError.ConcurrentUpdate.left()
+                }
+
+                changed === cart -> {
+                    Unit.right()
+                }
+
+                else -> {
+                    persist(cart, changed).map { }
+                }
+            }
     }
     return outcome
 }
@@ -46,22 +63,29 @@ class GetAccountCart(
         }
 }
 
-/** `clearCartByAccount` (internal, after payment approval): removes every line; idempotent. */
+/**
+ * `clearCartByAccount` (internal, after payment approval): empties the account's cart, which deletes it; idempotent
+ * (an account without a cart is left as it is).
+ */
 class ClearAccountCart(
     private val store: CartStore,
 ) {
     suspend operator fun invoke(accountId: AccountId): Either<CartError, Unit> =
-        store.changeAccountCart(accountId) { cart -> if (cart.lines.isEmpty()) cart else cart.clear(store.now()) }
+        store.changeAccountCartForOrder(accountId) { cart -> cart.clear(store.now()) }
 }
 
-/** `OrderPaid` consumer: takes the ordered quantities out of the account's cart (same end state as the clear). */
+/**
+ * `OrderPaid` consumer: takes the ordered quantities out of the account's cart (same end state as the clear); a cart
+ * left without lines is deleted.
+ */
 class RemoveOrderedLines(
     private val store: CartStore,
 ) {
     suspend operator fun invoke(
         accountId: AccountId,
         ordered: List<OrderedItem>,
-    ): Either<CartError, Unit> = store.changeAccountCart(accountId) { cart -> cart.removeOrdered(ordered, store.now()) }
+    ): Either<CartError, Unit> =
+        store.changeAccountCartForOrder(accountId) { cart -> cart.removeOrdered(ordered, store.now()) }
 }
 
 /** `AccountDeleted` consumer: discards the account's cart (data-model section 1, deletion). */

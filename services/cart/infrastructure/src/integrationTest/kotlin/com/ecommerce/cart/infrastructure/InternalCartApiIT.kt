@@ -10,13 +10,18 @@ import io.kotest.matchers.shouldNotBe
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpHeaders
 import org.springframework.test.web.reactive.server.WebTestClient
+import java.time.Duration
 import java.util.UUID
 
 private const val BAD_REQUEST = 400
+private val QUERY_TIMEOUT: Duration = Duration.ofSeconds(10)
 private const val ESPRESSO_PRICE = 14900L
 private const val BEANS_PRICE = 2450L
 
-/** cart-internal.yaml: order reads and clears an account cart, only with `X-Internal-Token`. */
+/**
+ * cart-internal.yaml: order reads and clears an account cart, only with `X-Internal-Token`; a cleared cart is deleted
+ * (data-model section 1).
+ */
 class InternalCartApiIT : CartIntegrationTest() {
     private fun internal(
         method: String,
@@ -101,7 +106,7 @@ class InternalCartApiIT : CartIntegrationTest() {
     }
 
     @Test
-    fun `order clears the account cart idempotently, keeping the cart`() {
+    fun `order clears the account cart idempotently by deleting it, and the shopper then sees an empty cart`() {
         val account = UUID.randomUUID()
         addToAccount(account, catalog.product(), 1)
         val before = accountCartOf(account)
@@ -114,12 +119,37 @@ class InternalCartApiIT : CartIntegrationTest() {
         internal("POST", "/internal/carts/by-account/$account/clear").expectStatus().isNoContent
         internal("POST", "/internal/carts/by-account/${UUID.randomUUID()}/clear").expectStatus().isNoContent
 
-        val after = accountCartOf(account)
-        after["cartId"] shouldBe before["cartId"]
-        after["revision"] shouldNotBe before["revision"]
-        (after["lines"] as List<*>).shouldBeEmpty()
-        after["total"] shouldBe mapOf("amountMinor" to 0, "currency" to "BRL")
+        internal("GET", "/internal/carts/by-account/$account").expectProblem(ProblemType.NOT_FOUND)
+        cartRows(account) shouldBe 0L
+        val public = publicCartOf(account)
+        (public["lines"] as List<*>).shouldBeEmpty()
+        public["id"] shouldNotBe before["cartId"]
+        public["total"] shouldBe mapOf("amountMinor" to 0, "currency" to "BRL")
+
+        addToAccount(account, catalog.product(), 1)
+        accountCartOf(account)["cartId"] shouldNotBe before["cartId"]
     }
+
+    private fun publicCartOf(account: UUID): Json =
+        client
+            .get()
+            .uri("/api/v1/cart")
+            .header(HttpHeaders.AUTHORIZATION, bearer(account))
+            .exchange()
+            .expectStatus()
+            .isOk
+            .expectBody(JSON_OBJECT)
+            .returnResult()
+            .responseBody
+            .shouldNotBeNull()
+
+    private fun cartRows(account: UUID): Long =
+        database
+            .sql("SELECT count(*) AS n FROM cart WHERE account_id = :account")
+            .bind("account", account)
+            .map { row -> checkNotNull(row.get("n", Long::class.javaObjectType)) }
+            .one()
+            .block(QUERY_TIMEOUT) ?: 0L
 
     @Test
     fun `an account without a cart is not found and malformed ids are refused`() {

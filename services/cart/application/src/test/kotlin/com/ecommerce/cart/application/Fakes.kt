@@ -65,6 +65,7 @@ class InMemoryCarts : CartRepository {
     var losingUpdates = 0
     var losingDeletes = 0
     var updates = 0
+    var deletes = 0
     var purgeCutoff: Instant? = null
 
     fun store(vararg stored: Cart) = stored.forEach { carts[it.id] = it }
@@ -107,6 +108,7 @@ class InMemoryCarts : CartRepository {
 
     override suspend fun delete(cart: Cart): Boolean {
         yield()
+        deletes++
         if (losingDeletes > 0 || carts[cart.id]?.version != cart.version) {
             losingDeletes--
             return false
