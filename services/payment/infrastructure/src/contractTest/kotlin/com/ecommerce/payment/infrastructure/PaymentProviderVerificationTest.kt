@@ -10,15 +10,9 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
-import com.ecommerce.payment.domain.IdempotencyKey
-import com.ecommerce.payment.domain.PaymentAttempt
 import com.ecommerce.payment.domain.PaymentEvent
 import com.ecommerce.payment.domain.PaymentOutcome
-import com.ecommerce.payment.domain.RefundId
-import com.ecommerce.payment.domain.RefundRecord
-import com.ecommerce.payment.infrastructure.PactFixtures.ADA
 import com.ecommerce.payment.infrastructure.PactFixtures.ADA_CONTACT
-import com.ecommerce.payment.infrastructure.PactFixtures.APPROVE_TOKEN
 import com.ecommerce.payment.infrastructure.PactFixtures.CORRELATION_ID
 import com.ecommerce.payment.infrastructure.messaging.PaymentEnvelopes
 import com.ecommerce.platform.messaging.envelope.EnvelopeFactory
@@ -36,13 +30,12 @@ import org.springframework.context.annotation.Import
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
-import java.util.UUID
 
 private const val APPROVED_AT = "2026-10-02T10:15:01Z"
 
 /**
  * Provider side of every pact whose provider is `payment` (repository root `build/pacts`): the platform probe's health
- * check, the six charge and refund calls of the order service (pact-interactions.md section 2.4) replayed against
+ * check, the four charge calls of the order service (pact-interactions.md section 2.4) replayed against
  * the running service over HTTP with parameterised provider states, and the payment events consumed by order and
  * notification (section 3.2), each produced from the fixture payments by the outbox's own mapping. Tagged
  * `provider`, so it runs in `contractVerify`; with no pact for `payment` the verification is skipped, not failed.
@@ -107,33 +100,6 @@ class PaymentProviderVerificationTest(
         )
     }
 
-    @State("an approved charge exists")
-    fun approvedChargeExists(parameters: Map<String, Any>) {
-        harness.reset()
-        harness.store(approvedCharge(parameters, UUID.randomUUID().toString()))
-    }
-
-    @State("a refund exists")
-    fun refundExists(parameters: Map<String, Any>) {
-        harness.reset()
-        val charge = approvedCharge(parameters, UUID.randomUUID().toString())
-        val createdAt = Instant.parse(parameters.text("createdAt"))
-        harness.store(charge)
-        harness.store(
-            RefundRecord(
-                RefundId(UUID.fromString(parameters.text("refundId"))),
-                charge.orderId,
-                charge.accountId,
-                charge.id,
-                charge.amount,
-                PactFixtures.refund.providerReference,
-                IdempotencyKey(UUID.fromString(parameters.text("idempotencyKey"))),
-                createdAt,
-                createdAt,
-            ),
-        )
-    }
-
     // The message states name the fixture payments of pact-interactions.md; the events are built from those
     // fixtures, so the states arrange nothing.
 
@@ -173,22 +139,6 @@ class PaymentProviderVerificationTest(
             mapOf("topic" to Topic.PAYMENT, "kafkaKey" to envelope.aggregateId.toString()),
         )
     }
-
-    private fun approvedCharge(
-        parameters: Map<String, Any>,
-        key: String,
-    ): PaymentAttempt =
-        PactFixtures.attempt(
-            id = parameters.text("attemptId"),
-            orderId = parameters.text("orderId"),
-            amountMinor = parameters.amount(),
-            key = key,
-            outcome = PaymentOutcome.APPROVED,
-            reference = PactFixtures.approvedCharge.providerReference?.value,
-            createdAt = APPROVED_AT,
-            accountId = parameters["accountId"]?.toString() ?: ADA,
-            paymentMethodRef = APPROVE_TOKEN,
-        )
 
     private companion object {
         val ENVELOPES = EnvelopeFactory("payment", Clock.fixed(Instant.parse(APPROVED_AT), ZoneOffset.UTC))

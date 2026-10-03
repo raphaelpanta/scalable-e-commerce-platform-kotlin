@@ -39,7 +39,7 @@ flowchart LR
     cart -->|pricing| catalog
     order -->|cart, clear| cart
     order -->|reserve, commit, release, pricing| catalog
-    order -->|charge, refund| payment
+    order -->|charge| payment
     order -->|address| identity
     notification -->|contact details| identity
     kafka[(Kafka)]
@@ -109,7 +109,7 @@ answer 404 and nothing is forwarded; `/actuator/**` and `/internal/**` are never
 | gateway, every service | identity | `GET /.well-known/jwks.json` (no token) | Validate access tokens locally |
 | order | cart | `GET /internal/carts/by-account/{accountId}`, `POST .../clear` | Read cart and revision, clear after approval |
 | order | catalog | `POST /internal/reservations`, `.../{id}/commit`, `.../{id}/release`, `GET /internal/products/pricing` | Reserve, commit, release; freeze prices |
-| order | payment | `POST /internal/charges`, `POST /internal/refunds` | Charge and refund (`Idempotency-Key` mandatory) |
+| order | payment | `POST /internal/charges` | Charge (`Idempotency-Key` mandatory); refunds follow `OrderCancelled` in payment |
 | order | identity | `GET /internal/accounts/{accountId}/addresses/{addressId}` | Delivery address snapshot |
 | notification | identity | `GET /internal/accounts/{accountId}/contact` | Contact details and preferences |
 | cart | catalog | `GET /internal/products/{productId}/pricing`, `/internal/products/pricing` | Live price and availability |

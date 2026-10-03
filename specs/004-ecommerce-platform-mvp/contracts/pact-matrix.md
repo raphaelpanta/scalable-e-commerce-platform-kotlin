@@ -27,7 +27,7 @@ contracts (the event payload shapes are defined in `contracts/asyncapi/`).
 | gateway | identity | `GET` JWKS document (valid key set, rotation with a new `kid`, unavailable provider state) | identity |
 | order | cart | read the shopper's cart (non-empty, empty, unknown cart), clear the cart after a successful order | cart |
 | order | catalog | reserve stock for cart lines (success, insufficient stock listing unavailable lines), commit reservation, release reservation (idempotent when already released), read current price and name for freezing lines | catalog |
-| order | payment | authorise a charge (approved, declined with category, provider unreachable resulting in pending, same idempotency key returns the same attempt), refund an approved charge (success, refund replay with the same key); internal network endpoints, not published at the gateway | payment |
+| order | payment | authorise a charge (approved, declined with category, provider unreachable resulting in pending, same idempotency key returns the same attempt); internal network endpoint, not published at the gateway. Refunds are not called by order: payment records them from `OrderCancelled` | payment |
 | order | identity | read a delivery address owned by the shopper (found, not owned, not found) | identity |
 | order | identity | read the recipient contact for order events (email only) at checkout, so order events carry the `recipient` snapshot (added 2026-10-02 during implementation; same shape as the notification lookup) | identity |
 | notification | identity | read recipient contact details and notification preferences for an account (email only, SMS opted in with verified number, anonymised account) | identity |

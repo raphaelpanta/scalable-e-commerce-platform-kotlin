@@ -3,9 +3,6 @@ package com.ecommerce.order.infrastructure.clients
 import com.ecommerce.order.application.ChargeRequest
 import com.ecommerce.order.application.PaymentPort
 import com.ecommerce.order.domain.DeclineCategory
-import com.ecommerce.order.domain.IdempotencyKey
-import com.ecommerce.order.domain.Money
-import com.ecommerce.order.domain.OrderId
 import com.ecommerce.order.domain.PaymentAttemptId
 import com.ecommerce.order.domain.PaymentOutcome
 import com.ecommerce.platform.http.awaitBodyOrProblem
@@ -52,25 +49,11 @@ data class ChargeAttemptJson(
     }
 }
 
-/** `RefundRequest`. */
-data class RefundJson(
-    val orderId: UUID,
-    val attemptId: UUID,
-    val amount: MoneyJson,
-)
-
-/** `RefundRecord` (the fields the order reads). */
-data class RefundRecordJson(
-    val refundId: UUID,
-    val orderId: UUID,
-    val attemptId: UUID,
-    val status: String,
-)
-
 /**
  * [PaymentPort] over payment-internal.yaml. The charge is keyed by the checkout `Idempotency-Key`, so this call and
  * the `OrderPlaced` consumer of payment converge on one attempt. A payment service that cannot be reached, or
- * answers with an error, leaves the payment pending: the order is placed and the events settle it later.
+ * answers with an error, leaves the payment pending: the order is placed and the events settle it later. Refunds
+ * are not called from here: the `OrderCancelled` consumer of payment records them (conventions section 8).
  */
 class PaymentClient(
     private val client: WebClient,
@@ -101,27 +84,6 @@ class PaymentClient(
             log.warn("The payment service could not be reached; the payment stays pending", failure)
             PaymentOutcome.Pending(null)
         }
-
-    /**
-     * Records a full refund of an approved charge (`POST /internal/refunds`, keyed by [key]); the id of the refund,
-     * or null when it was refused. The cancellation flow relies on the `OrderCancelled` consumer of payment instead;
-     * this call is the synchronous edge of the order -> payment pact.
-     */
-    suspend fun refund(
-        orderId: OrderId,
-        attemptId: PaymentAttemptId,
-        amount: Money,
-        key: IdempotencyKey,
-    ): UUID? =
-        required("payment") {
-            client
-                .post()
-                .uri("/internal/refunds")
-                .header(IDEMPOTENCY_KEY, key.toString())
-                .accept(MediaType.APPLICATION_JSON)
-                .bodyValue(RefundJson(orderId.value, attemptId.value, MoneyJson(amount.amountMinor, amount.currency)))
-                .awaitBodyOrProblem<RefundRecordJson>()
-        }.getOrNull()?.refundId
 
     private companion object {
         const val IDEMPOTENCY_KEY = "Idempotency-Key"
