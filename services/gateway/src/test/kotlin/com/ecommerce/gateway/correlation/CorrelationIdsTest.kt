@@ -67,6 +67,8 @@ class CorrelationIdsTest :
 
         test("generated ids are UUIDs") {
             CorrelationIds.resolve(null).original.shouldBeNull()
+            CorrelationIds.isAcceptable(CorrelationIds.resolve(null).id).shouldBeTrue()
+            CorrelationIds.isAcceptable(CorrelationIds.resolve("bad id").id).shouldBeTrue()
             CorrelationIds.isAcceptable(CorrelationIds.newId()).shouldBeTrue()
         }
     })

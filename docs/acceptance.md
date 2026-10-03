@@ -62,9 +62,11 @@ The suite never logs credentials or tokens. Response bodies in assertion message
   leaves every attempt `pending`, for scenarios that need the payment to stay pending. Amounts whose last two minor
   digits are `13` or `14` are declined, so every price in the features keeps totals away from those endings.
 - **Rate limits.** The gateway's `auth` tier allows 10 credential calls per minute per source address
-  (`contracts/gateway-routes.md`). Every scenario registers, verifies and signs in a fresh shopper, so set-up
-  calls wait on 429 with `untilNotThrottled`. The suite stays correct but becomes slow; start the stack with the override
-  `-f ../perf/compose.perf.yml` (as `.github/workflows/platform.yml` does) to lift the per-address tiers for faster runs.
+  (`contracts/gateway-routes.md`); registration and e-mail verification are in that tier too, next to sign-in, refresh
+  and password resets. Every scenario registers, verifies and signs in a fresh shopper from the same address, so
+  set-up calls wait on 429 with `untilNotThrottled`. The suite stays correct but becomes slow; local runs start the
+  stack with the override `-f ../perf/compose.perf.yml` (as `.github/workflows/platform.yml` does), which sets
+  `GATEWAY_RATELIMIT_REQUESTSPERMINUTE_AUTH` (and the browse and standard budgets) high enough for the suite.
 - **`@chaos`** needs Mailpit's chaos triggers (`MP_ENABLE_CHAOS=true` on the `mailpit` service); the Compose file
   already sets it, so no extra step is needed against `platform/compose`. The scenario makes Mailpit refuse every
   recipient, waits until the order confirmation has used up its retries, and restores Mailpit in an `@After` hook. A

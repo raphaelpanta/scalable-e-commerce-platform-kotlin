@@ -23,7 +23,8 @@ import java.util.concurrent.TimeUnit
  * - drops client-supplied identity, internal and forwarding headers ([EdgeHeaders.CLIENT_FORBIDDEN]);
  * - adds the security headers and removes server details from every response;
  * - writes one structured access-log line per request, with `originalCorrelationId` when the client's value was
- *   refused.
+ *   refused, and the `traceId` and `spanId` of the request's server span ([RequestTrace]): the line is written after
+ *   the server observation has stopped, so the span is captured inside it and made current again for the line.
  */
 @Component
 class EdgeHttpHandlerDecorator : HttpHandlerDecoratorFactory {
@@ -38,6 +39,7 @@ class EdgeHttpHandlerDecorator : HttpHandlerDecoratorFactory {
     ): Mono<Void> {
         val started = System.nanoTime()
         val correlation = CorrelationIds.resolve(request.headers.getFirst(CorrelationIds.HEADER))
+        val trace = RequestTrace()
         val sanitised =
             request
                 .mutate()
@@ -53,8 +55,8 @@ class EdgeHttpHandlerDecorator : HttpHandlerDecoratorFactory {
         }
         return delegate
             .handle(sanitised, response)
-            .doFinally { accessLog(sanitised, response, correlation, started) }
-            .contextWrite(Context.of(CorrelationIds.CONTEXT_KEY, correlation.id))
+            .doFinally { trace.inScope { accessLog(sanitised, response, correlation, started) } }
+            .contextWrite(Context.of(CorrelationIds.CONTEXT_KEY, correlation.id, RequestTrace.CONTEXT_KEY, trace))
     }
 
     private fun accessLog(

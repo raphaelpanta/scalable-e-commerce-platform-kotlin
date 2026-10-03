@@ -47,12 +47,14 @@ spring:
                 - Path=/api/v1/identity/sessions,/api/v1/identity/sessions/refresh,/api/v1/identity/password-resets,/api/v1/identity/password-resets/complete
                 - Method=POST
               metadata: { auth: anonymous, tier: auth, response-timeout: 5000 }
+            # Registration and e-mail verification are credential-adjacent: each registration sends a verification
+            # e-mail, so they share the per-source-address `auth` budget with sign-in and password resets (T169).
             - id: identity-registration
               uri: ${IDENTITY_URL:http://localhost:8080}
               predicates:
                 - Path=/api/v1/identity/accounts,/api/v1/identity/accounts/verify-email
                 - Method=POST
-              metadata: { auth: anonymous, tier: standard, response-timeout: 10000 }
+              metadata: { auth: anonymous, tier: auth, response-timeout: 5000 }
             - id: identity-sign-out
               uri: ${IDENTITY_URL:http://localhost:8080}
               predicates:
@@ -105,7 +107,7 @@ spring:
             - id: catalog-creations
               uri: ${CATALOG_URL:http://localhost:8080}
               predicates:
-                - Path=/api/v1/catalog/products,/api/v1/catalog/products/*/withdrawal,/api/v1/catalog/products/*/stock-adjustments,/api/v1/catalog/categories
+                - Path=/api/v1/catalog/products,/api/v1/catalog/products/*/withdrawal,/api/v1/catalog/products/*/stock-adjustments,/api/v1/catalog/categories,/api/v1/catalog/categories/*/withdrawal
                 - Method=POST
               metadata: { auth: operator, tier: operator, response-timeout: 15000 }
             - id: catalog-updates
@@ -241,6 +243,12 @@ management:
       # /actuator/health/liveness and /actuator/health/readiness
       probes:
         enabled: true
+  # Histogram buckets for http.server.requests (http_server_requests_seconds_bucket), so the Service RED dashboard
+  # computes the gateway's p95 with histogram_quantile like the services' (FR-026).
+  metrics:
+    distribution:
+      percentiles-histogram:
+        "[http.server.requests]": true
   # Same telemetry settings as platform-core's defaults for the services: every request traced, and short OTLP
   # timeouts so that a missing collector costs a throttled warning, not slow requests. Log lines reach the logs
   # endpoint through the OTEL appender of logback-spring.xml.
@@ -265,8 +273,11 @@ management:
       export:
         url: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/metrics
 
-# The container image sets -Dnetworkaddress.cache.ttl=5 (research.md section 2): service names resolve to every
-# instance and removed instances drop out of DNS within seconds, so routes need no change when scaling.
+# Upstream DNS (routing.UpstreamResolver, an HttpClientCustomizer): service names resolve to every instance through
+# Reactor Netty's DNS resolver, answers are cached for at most 5 s and addresses are used round-robin, so added and
+# removed instances are picked up within seconds and routes need no change when scaling. Without it Reactor Netty
+# would keep an answer for the record's own TTL. The container image also sets -Dnetworkaddress.cache.ttl=5 for any
+# lookup through the JDK resolver (research.md section 2).
 logging:
   structured:
     format:

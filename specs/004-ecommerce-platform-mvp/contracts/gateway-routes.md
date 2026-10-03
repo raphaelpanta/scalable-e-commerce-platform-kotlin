@@ -11,9 +11,9 @@ instances can be added or removed without changing gateway configuration (FR-024
 
 | Public route prefix | Target service (DNS name) | Auth requirement | Rate limit tier |
 | --- | --- | --- | --- |
-| `/api/v1/identity/` (register, verify, sign in, reset, profile, addresses) | `identity-service` | anonymous for register, sign in, verify, reset; authenticated (shopper or operator) for profile, addresses, notification preferences and sign-out; shopper for account deletion | `auth` for credential endpoints, `standard` otherwise |
+| `/api/v1/identity/` (register, verify, sign in, reset, profile, addresses) | `identity-service` | anonymous for register, sign in, verify, reset; authenticated (shopper or operator) for profile, addresses, notification preferences and sign-out; shopper for account deletion | `auth` for the anonymous credential endpoints (register, verify e-mail, sign in, refresh, password reset), `standard` otherwise |
 | `/api/v1/catalog/` (GET products, categories, search) | `catalog-service` | anonymous | `browse` |
-| `/api/v1/catalog/` (POST, PUT, PATCH, DELETE: products, categories, stock, images) | `catalog-service` | operator | `operator` |
+| `/api/v1/catalog/` (POST, PUT, PATCH, DELETE: products, categories, stock, images, product and category withdrawal) | `catalog-service` | operator | `operator` |
 | `/api/v1/cart` | `cart-service` | anonymous (identified by `X-Cart-Token`) or authenticated (shopper or operator) for the account cart; `POST /api/v1/cart/merge` requires an authenticated caller (shopper or operator) | `standard` |
 | `/api/v1/orders/` | `order-service` | shopper (place, list, get, cancel); operator for `POST /{id}/status` and reading any order | `checkout` for `POST /api/v1/orders`, `standard` otherwise, `operator` for operator calls |
 | `/api/v1/payments/` | `payment-service` | operator or owning shopper (attempts, refunds); operator only for `/simulator/rules` | `standard` |
@@ -33,11 +33,14 @@ Notes:
 
 Limits are per client key (source address for anonymous calls, account id for authenticated
 calls) and are configuration, not contract. Exceeding a limit returns 429 `application/problem+json`
-with `Retry-After`. Default values for the MVP:
+with `Retry-After`. Registration (`POST /api/v1/identity/accounts`) and e-mail verification
+(`POST /api/v1/identity/accounts/verify-email`) are in the `auth` tier: they are anonymous and
+credential-adjacent, and each registration sends a verification e-mail, so the per-address budget
+also limits mass registration and mail flooding. Default values for the MVP:
 
 | Tier | Default limit | Purpose |
 | --- | --- | --- |
-| `auth` | 10 requests per minute per source address | Credential stuffing; complements account throttling (FR-006) |
+| `auth` | 10 requests per minute per source address | Credential stuffing, mass registration and verification-mail flooding; complements account throttling (FR-006) |
 | `browse` | 600 requests per minute per client | Read-heavy catalogue traffic |
 | `standard` | 120 requests per minute per client | Normal authenticated use |
 | `checkout` | 20 requests per minute per account | Order placement, protects stock and payment |
