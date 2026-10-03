@@ -33,12 +33,12 @@ import io.kotest.property.checkAll
 import java.time.Duration
 import java.util.UUID
 
-private const val CORRELATION = "3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13"
-private val ORDER =
+internal const val CORRELATION = "3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13"
+internal val ORDER =
     OrderReference(OrderId(UUID.fromString("0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10")), "ORD-20261002-0001")
-private val UNAVAILABLE = DeliveryFailure(FailureCategory.CHANNEL_UNAVAILABLE, "SMTP refused the message (451)")
+internal val UNAVAILABLE = DeliveryFailure(FailureCategory.CHANNEL_UNAVAILABLE, "SMTP refused the message (451)")
 
-private fun contact(
+internal fun contact(
     sms: Boolean = false,
     anonymised: Boolean = false,
 ): RecipientContact =
@@ -58,16 +58,20 @@ private fun contact(
         anonymised = anonymised,
     )
 
-private fun source(account: AccountId = AccountId(UUID.randomUUID())) =
+internal fun source(account: AccountId = AccountId(UUID.randomUUID())) =
     EventSource(EventId(UUID.randomUUID()), account, CORRELATION)
 
-private fun shipped(
+/** An operator, the only caller of the failed view and of retries. */
+internal val OPERATOR =
+    Caller(AccountId(UUID.fromString("7d1f9a40-5c2e-4b8a-9e63-0f4d2c8b1a57")), setOf(CallerRole.OPERATOR))
+
+internal fun shipped(
     source: EventSource,
     snapshot: RecipientContact? = null,
 ) = NotificationTrigger.MessageRequested(source, snapshot, TemplateData.OrderShipped(ORDER))
 
 /** Everything a use-case test needs, wired with fakes that all pass through [gate]. */
-private class World(
+internal class World(
     var lookup: ContactLookup = ContactLookup.Found(contact()),
     val email: ScriptedChannel = ScriptedChannel(SendResult.Delivered),
     val text: ScriptedChannel = ScriptedChannel(SendResult.Delivered),
@@ -80,16 +84,18 @@ private class World(
     val outcomes = RecordingOutcomes(gate)
     val transactions = DirectTransactions(gate)
     val lookups = mutableListOf<Pair<AccountId, String>>()
-    val produce =
-        ProduceNotificationFromEvent(notifications, recipients, { account, correlation ->
+    val contacts =
+        RecipientLookupPort { account, correlation ->
             gate.pass()
             lookups += account to correlation
             lookup
-        }, clock)
+        }
+    val produce = ProduceNotificationFromEvent(notifications, recipients, contacts, clock)
     val deliver =
         AttemptDelivery(
             notifications,
             AttemptDelivery.Channels(email, text),
+            contacts,
             outcomes,
             transactions,
             clock,
@@ -111,7 +117,7 @@ private class World(
  * Runs [scenario] once to count the port calls, then once per call with that call failing after it suspended: the
  * failure must reach the caller every time (the consumer transaction rolls back and the event is redelivered).
  */
-private suspend fun everyPortFailurePropagates(
+internal suspend fun everyPortFailurePropagates(
     world: (Gate) -> World,
     scenario: suspend (World) -> Unit,
 ) {
@@ -162,13 +168,17 @@ class ProduceNotificationFromEventSpec :
             world.produce(shipped(source(), contact(sms = true))) shouldBe 2
         }
 
-        test("when identity cannot answer and there is no snapshot, the event fails so that it is retried") {
+        test("when identity cannot answer and there is no snapshot, one email is queued awaiting its recipient") {
             val world = World(lookup = ContactLookup.Unavailable)
             val source = source()
-            val failure = shouldThrow<RecipientUnavailableException> { world.produce(shipped(source)) }
-            failure.message shouldBe "contact details of account ${source.accountId} are unavailable"
-            world.notifications.stored.values
-                .shouldBeEmpty()
+            world.produce(shipped(source)) shouldBe 1
+            val queued = world.only()
+            queued.awaitingRecipient shouldBe true
+            queued.status shouldBe DeliveryStatus.QUEUED
+            queued.channel shouldBe NotificationChannel.EMAIL
+            queued.recipient.shouldBeNull()
+            queued.nextAttemptAt shouldBe world.clock.now
+            world.produce(shipped(source)) shouldBe 0
         }
 
         test("an anonymised account (identity or read model) gets one suppressed record and nothing is sent") {
@@ -325,6 +335,7 @@ class AttemptDeliverySpec :
                 AttemptDelivery(
                     world.notifications,
                     AttemptDelivery.Channels(suppressing, world.text),
+                    world.contacts,
                     world.outcomes,
                     world.transactions,
                     world.clock,
@@ -360,7 +371,7 @@ class RetryAndQueriesSpec :
             failed.status shouldBe DeliveryStatus.FAILED
 
             failedWorld.clock.advance(Duration.ofMinutes(5))
-            val requeued = failedWorld.retry(failed.id).getOrNull()
+            val requeued = failedWorld.retry(OPERATOR, failed.id).getOrNull()
             requeued?.status shouldBe DeliveryStatus.QUEUED
             requeued?.attempts shouldBe 0
             requeued?.nextAttemptAt shouldBe failedWorld.clock.now
@@ -371,11 +382,11 @@ class RetryAndQueriesSpec :
 
         test("retrying an unknown notification is not found; any other status is refused") {
             val world = World()
-            world.retry(NotificationId(UUID.randomUUID())).leftOrNull() shouldBe RetryRefusal.NotFound
+            world.retry(OPERATOR, NotificationId(UUID.randomUUID())).leftOrNull() shouldBe RetryRefusal.NotFound
             world.produce(shipped(source()))
-            world.retry(world.only().id).leftOrNull() shouldBe RetryRefusal.NotFailed(DeliveryStatus.QUEUED)
+            world.retry(OPERATOR, world.only().id).leftOrNull() shouldBe RetryRefusal.NotFailed(DeliveryStatus.QUEUED)
             world.deliver.deliverDue(10)
-            world.retry(world.only().id).leftOrNull() shouldBe RetryRefusal.NotFailed(DeliveryStatus.SENT)
+            world.retry(OPERATOR, world.only().id).leftOrNull() shouldBe RetryRefusal.NotFailed(DeliveryStatus.SENT)
         }
 
         test("a retry that loses a race reports the status that won") {
@@ -393,7 +404,7 @@ class RetryAndQueriesSpec :
                         return false
                     }
                 }
-            RetryFailed(racing, world.clock)(failed.id).leftOrNull() shouldBe
+            RetryFailed(racing, world.clock)(OPERATOR, failed.id).leftOrNull() shouldBe
                 RetryRefusal.NotFailed(DeliveryStatus.SUPPRESSED)
             val vanishing =
                 object : NotificationRepository by world.notifications {
@@ -406,7 +417,7 @@ class RetryAndQueriesSpec :
                         expected: DeliveryStatus,
                     ): Boolean = false
                 }
-            RetryFailed(vanishing, world.clock)(failed.id).leftOrNull() shouldBe
+            RetryFailed(vanishing, world.clock)(OPERATOR, failed.id).leftOrNull() shouldBe
                 RetryRefusal.NotFailed(DeliveryStatus.FAILED)
         }
 
@@ -425,7 +436,9 @@ class RetryAndQueriesSpec :
                 own.page shouldBe 0
                 own.size shouldBe 2
                 PageRequest(3, 20).offset shouldBe 60L
-                ListFailed(world.notifications)(FailedFilter(account), PageRequest(0, 20)).totalItems shouldBe 0L
+                ListFailed(world.notifications)(OPERATOR, FailedFilter(account), PageRequest(0, 20))
+                    .getOrNull()
+                    ?.totalItems shouldBe 0L
             }
         }
 
@@ -500,11 +513,11 @@ class PortFailureSpec :
             everyPortFailurePropagates({ World(email = failing(), policy = RetryPolicy(1), gate = it) }) { world ->
                 world.produce(shipped(source()))
                 world.deliver.deliverDue(10)
-                world.retry(world.only().id).isRight() shouldBe true
-                world.retry(NotificationId(UUID.randomUUID())).leftOrNull() shouldBe RetryRefusal.NotFound
+                world.retry(OPERATOR, world.only().id).isRight() shouldBe true
+                world.retry(OPERATOR, NotificationId(UUID.randomUUID())).leftOrNull() shouldBe RetryRefusal.NotFound
                 val page = PageRequest(0, 20)
                 ListOwn(world.notifications)(OwnFilter(world.only().accountId), page).totalItems shouldBe 1L
-                ListFailed(world.notifications)(FailedFilter(), page).totalItems shouldBe 0L
+                ListFailed(world.notifications)(OPERATOR, FailedFilter(), page).getOrNull()?.totalItems shouldBe 0L
             }
         }
 
@@ -524,7 +537,12 @@ class PortFailureSpec :
             val second = ListOwn(world.notifications)(OwnFilter(account), PageRequest(1, 2))
             second.page shouldBe 1
             second.items shouldHaveSize 1
-            val failed = ListFailed(world.notifications)
+            val listFailed = ListFailed(world.notifications)
+
+            suspend fun failed(
+                filter: FailedFilter,
+                page: PageRequest,
+            ): Page<Notification> = listFailed(OPERATOR, filter, page).getOrNull() ?: error("forbidden")
             failed(FailedFilter(account), PageRequest(1, 2)).page shouldBe 1
             failed(FailedFilter(channel = NotificationChannel.SMS), all).totalItems shouldBe 0L
             failed(FailedFilter(kind = NotificationKind.ORDER_SHIPPED), all).totalItems shouldBe 3L
@@ -540,8 +558,20 @@ class PortFailureSpec :
                 NotificationTrigger.AccountRegistered(source(), contact(), TemplateData.AccountVerification(link))
             world.produce(registered) shouldBe 1
             registered.snapshot shouldBe contact()
-            shouldThrow<RecipientUnavailableException> {
-                world.produce(registered.copy(source = source(), snapshot = null))
+            world.only().awaitingRecipient shouldBe false
+            world.produce(registered.copy(source = source(), snapshot = null)) shouldBe 1
+            world.notifications.stored.values
+                .map { it.awaitingRecipient } shouldBe listOf(false, true)
+        }
+
+        test("a deferred recipient propagates every port failure, from production to delivery") {
+            everyPortFailurePropagates({ World(lookup = ContactLookup.Unavailable, gate = it) }) { world ->
+                world.produce(shipped(source())) shouldBe 1
+                world.deliver.deliverDue(10) shouldBe 1
+                world.lookup = ContactLookup.Found(contact())
+                world.clock.advance(Duration.ofMinutes(1))
+                world.deliver.deliverDue(10) shouldBe 1
+                world.only().status shouldBe DeliveryStatus.SENT
             }
         }
     })

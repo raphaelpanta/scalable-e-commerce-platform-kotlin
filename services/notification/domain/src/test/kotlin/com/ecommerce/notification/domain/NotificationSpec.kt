@@ -313,6 +313,61 @@ class NotificationSpec :
             }
         }
 
+        context("recipient resolved after queueing (identity unavailable, no snapshot)") {
+            test("a deferred message is one queued email without an address, due now, with the email content") {
+                checkAll(DomainArbs.templateData, DomainArbs.instant) { data, at ->
+                    val source = EventSource(DomainArbs.eventId.one(), DomainArbs.accountId.one(), CORRELATION)
+                    val deferred = NotificationPlanner.deferred(source, data, at)
+                    deferred.channel shouldBe NotificationChannel.EMAIL
+                    deferred.status shouldBe DeliveryStatus.QUEUED
+                    deferred.awaitingRecipient shouldBe true
+                    deferred.recipient.shouldBeNull()
+                    deferred.content shouldBe Templates.render(data, NotificationChannel.EMAIL)
+                    deferred.nextAttemptAt shouldBe at
+                    deferred.createdAt shouldBe at
+                    deferred.attempts shouldBe 0
+                    deferred.kind shouldBe data.kind
+                    deferred.orderId shouldBe Templates.orderOf(data)
+                    deferred.sourceEventId shouldBe source.eventId
+                    deferred.accountId shouldBe source.accountId
+                    deferred.correlationId shouldBe CORRELATION
+                }
+            }
+
+            test("resolution addresses the message when the contact permits its channel, else suppresses it") {
+                checkAll(DomainArbs.notification(), DomainArbs.contact, DomainArbs.instant) { queued, contact, at ->
+                    val waiting =
+                        queued.copy(recipient = null, awaitingRecipient = true, nextAttemptAt = at)
+                    val resolved = waiting.resolveRecipient(contact).getOrNull() ?: error("refused")
+                    val decision =
+                        ChannelSelection.select(waiting.kind, contact).firstOrNull { it.channel == waiting.channel }
+                    resolved.awaitingRecipient shouldBe false
+                    if (decision is ChannelDecision.Deliver) {
+                        resolved shouldBe waiting.copy(recipient = decision.address, awaitingRecipient = false)
+                    } else {
+                        resolved.status shouldBe DeliveryStatus.SUPPRESSED
+                        resolved.recipient.shouldBeNull()
+                        resolved.content shouldBe MessageContent(waiting.content.subject, "")
+                        resolved.nextAttemptAt.shouldBeNull()
+                        resolved.attempts shouldBe waiting.attempts
+                    }
+                }
+            }
+
+            test("only a queued message awaiting its recipient can be resolved; a retry keeps it awaiting") {
+                checkAll(DomainArbs.notification(), DomainArbs.contact, notTerminal) { queued, contact, status ->
+                    queued.resolveRecipient(contact).leftOrNull() shouldBe
+                        TransitionRefused(DeliveryStatus.QUEUED, "resolve the recipient")
+                    val terminal = queued.copy(status = status, awaitingRecipient = true)
+                    terminal.resolveRecipient(contact).leftOrNull() shouldBe
+                        TransitionRefused(status, "resolve the recipient")
+                    val failed = queued.copy(status = DeliveryStatus.FAILED, awaitingRecipient = true)
+                    failed.requeue(DomainArbs.instant.one()).getOrNull()?.awaitingRecipient shouldBe true
+                    queued.awaitingRecipient shouldBe false
+                }
+            }
+        }
+
         context("recipient read model") {
             test("registration, verification and anonymisation") {
                 checkAll(DomainArbs.accountId) { account ->

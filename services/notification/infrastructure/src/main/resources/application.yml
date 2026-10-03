@@ -45,6 +45,12 @@ notification:
     max-attempts: 5
     initial-delay: 30s
     max-delay: 10m
+  retention:
+    # Data-model section 5 / FR-007: sent, failed and suppressed notifications (and their delivery attempts) older
+    # than this are deleted by NotificationPurgeJob every purge-interval; queued ones are never purged.
+    notifications: 90d
+    batch-size: 500
+    purge-interval: 1h
 
 management:
   server:

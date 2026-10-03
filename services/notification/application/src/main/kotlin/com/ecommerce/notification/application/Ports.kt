@@ -106,6 +106,18 @@ interface NotificationRepository {
     ): Page<Notification>
 }
 
+/** The retention side of the notification store (data-model section 5). */
+fun interface NotificationRetentionRepository {
+    /**
+     * Deletes up to [limit] terminal notifications (`sent`, `failed`, `suppressed`) created before [cutoff], with
+     * their attempt history; `queued` ones are never deleted. Returns how many notifications were deleted.
+     */
+    suspend fun deleteTerminalCreatedBefore(
+        cutoff: Instant,
+        limit: Int,
+    ): Int
+}
+
 /** The recipient read model (data-model §3.6 `Recipient`). */
 interface RecipientReadModel {
     suspend fun find(accountId: AccountId): Recipient?

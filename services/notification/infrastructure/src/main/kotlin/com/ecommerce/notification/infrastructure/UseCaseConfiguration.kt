@@ -41,6 +41,7 @@ class UseCaseConfiguration {
         notifications: NotificationRepository,
         email: EmailSenderPort,
         sms: SmsSenderPort,
+        contacts: RecipientLookupPort,
         outcomes: DeliveryOutcomePublisher,
         transactions: Transactions,
         clock: Clock,
@@ -49,6 +50,7 @@ class UseCaseConfiguration {
         AttemptDelivery(
             notifications,
             AttemptDelivery.Channels(email, sms),
+            contacts,
             outcomes,
             transactions,
             clock,

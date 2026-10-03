@@ -36,16 +36,14 @@ sealed interface NotificationTrigger {
     ) : NotificationTrigger
 }
 
-/** Identity could not answer and the event carries no recipient snapshot: the event must be retried. */
-class RecipientUnavailableException(
-    accountId: AccountId,
-) : RuntimeException("contact details of account $accountId are unavailable")
-
 /**
  * Produces the notifications of one consumed event (T091). Runs inside the idempotent consumer's transaction, so
  * a redelivered `eventId` never reaches it; it also skips an event that already produced notifications (FR-019).
  * Contact details come from identity ([RecipientLookupPort]); when identity cannot answer, the recipient snapshot
- * of the event is used instead. Returns the number of notifications created.
+ * of the event is used instead, and without a snapshot the message is queued with its recipient still to resolve
+ * ([NotificationPlanner.deferred]): the delivery job looks the contact up again, so the event is never dead-lettered
+ * and no `AccountRegistered` or `PasswordResetRequested` message is lost (FR-018, FR-019). Returns the number of
+ * notifications created.
  */
 class ProduceNotificationFromEvent(
     private val notifications: NotificationRepository,
@@ -81,28 +79,37 @@ class ProduceNotificationFromEvent(
         snapshot: RecipientContact?,
         data: TemplateData,
     ): Int {
-        val existing = notifications.keysForEvent(source.eventId)
-        if (existing.isNotEmpty()) return 0
+        if (notifications.keysForEvent(source.eventId).isNotEmpty()) return 0
         val recipient = recipients.find(source.accountId)
-        val contact = if (recipient?.anonymised == true) RecipientContact.ANONYMISED else contactOf(source, snapshot)
+        val at = clock.now()
+        val plan = { contact: RecipientContact ->
+            NotificationPlanner.plan(source, data, contact, recipient, emptySet(), at)
+        }
         val planned =
-            contact?.let { NotificationPlanner.plan(source, data, it, recipient, existing, clock.now()) }.orEmpty()
+            if (recipient?.anonymised == true) {
+                plan(RecipientContact.ANONYMISED)
+            } else {
+                when (val lookup = contacts.lookup(source.accountId, source.correlationId)) {
+                    is ContactLookup.Found -> {
+                        plan(lookup.contact)
+                    }
+
+                    ContactLookup.Unknown -> {
+                        emptyList()
+                    }
+
+                    ContactLookup.Unavailable -> {
+                        // The event's snapshot decides; without one, the delivery job resolves the recipient.
+                        snapshot?.let(plan) ?: listOf(NotificationPlanner.deferred(source, data, at))
+                    }
+                }
+            }
         var created = 0
         for (notification in planned) {
             if (notifications.insertIfAbsent(notification)) created++
         }
         return created
     }
-
-    private suspend fun contactOf(
-        source: EventSource,
-        snapshot: RecipientContact?,
-    ): RecipientContact? =
-        when (val lookup = contacts.lookup(source.accountId, source.correlationId)) {
-            is ContactLookup.Found -> lookup.contact
-            ContactLookup.Unknown -> null
-            ContactLookup.Unavailable -> snapshot ?: throw RecipientUnavailableException(source.accountId)
-        }
 
     private suspend fun stopMessaging(accountId: AccountId) {
         recipients.save(recipientOf(accountId).anonymise())

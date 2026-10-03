@@ -27,10 +27,13 @@ data class DedupeKey(
  * | queued | attempt fails, budget left | queued, [nextAttemptAt] after the retry delay |
  * | queued | attempt fails, budget used or permanent failure | failed |
  * | queued | recipient anonymised | suppressed |
+ * | queued, [awaitingRecipient] | contact resolved, channel permitted | queued with its address |
+ * | queued, [awaitingRecipient] | contact resolved, channel not permitted | suppressed |
  * | failed | operator retry | queued, attempts reset |
  *
- * Every other transition is refused. [recipient] and [content] are personal data: `toString()` is a log-safe
- * summary without them.
+ * Every other transition is refused. [awaitingRecipient] marks a message queued while identity could not tell its
+ * contact details (and the event carried no snapshot, FR-018/FR-019): the delivery job resolves the recipient before
+ * the first send. [recipient] and [content] are personal data: `toString()` is a log-safe summary without them.
  */
 data class Notification(
     val id: NotificationId,
@@ -50,6 +53,7 @@ data class Notification(
     val lastFailure: DeliveryFailure? = null,
     val sentAt: Instant? = null,
     val failedAt: Instant? = null,
+    val awaitingRecipient: Boolean = false,
 ) {
     val dedupeKey: DedupeKey get() = DedupeKey(sourceEventId, kind, channel)
 
@@ -96,6 +100,28 @@ data class Notification(
     fun suppress(): Either<TransitionRefused, Notification> =
         whenQueued("suppress") { copy(status = DeliveryStatus.SUPPRESSED, nextAttemptAt = null) }
 
+    /**
+     * The contact of a notification queued while it was unknown ([awaitingRecipient]) is now [contact]: the message
+     * gets its address when [contact] still permits its channel, and is suppressed (without its body) otherwise
+     * (anonymised account, no email address, channel switched off). Refused for any other notification.
+     */
+    fun resolveRecipient(contact: RecipientContact): Either<TransitionRefused, Notification> =
+        if (status == DeliveryStatus.QUEUED && awaitingRecipient) {
+            val decision = ChannelSelection.select(kind, contact).firstOrNull { it.channel == channel }
+            if (decision is ChannelDecision.Deliver) {
+                copy(recipient = decision.address, awaitingRecipient = false).right()
+            } else {
+                copy(
+                    status = DeliveryStatus.SUPPRESSED,
+                    content = content.copy(body = ""),
+                    nextAttemptAt = null,
+                    awaitingRecipient = false,
+                ).right()
+            }
+        } else {
+            TransitionRefused(status, RESOLVE).left()
+        }
+
     /** An operator re-queues a failed notification at [at]: the retry budget starts again (notification.yaml). */
     fun requeue(at: Instant): Either<TransitionRefused, Notification> =
         if (status == DeliveryStatus.FAILED) {
@@ -114,6 +140,10 @@ data class Notification(
     /** Log-safe summary: identifiers and state only, never the recipient or the content. */
     override fun toString(): String =
         "Notification(id=$id, kind=${kind.wire}, channel=${channel.wire}, status=${status.wire}, attempts=$attempts)"
+
+    private companion object {
+        const val RESOLVE = "resolve the recipient"
+    }
 
     private fun whenQueued(
         action: String,

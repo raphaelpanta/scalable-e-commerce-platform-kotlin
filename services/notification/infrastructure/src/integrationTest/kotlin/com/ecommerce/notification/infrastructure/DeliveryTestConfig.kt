@@ -7,6 +7,7 @@ import com.github.tomakehurst.wiremock.client.WireMock.aResponse
 import com.github.tomakehurst.wiremock.client.WireMock.get
 import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration.options
+import com.github.tomakehurst.wiremock.stubbing.Scenario
 import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.test.context.DynamicPropertyRegistrar
@@ -20,6 +21,7 @@ private const val SMTP_REFUSED = 451
 private const val ALWAYS = 100
 private const val HTTP_OK = 200
 private const val HTTP_LAST_SUCCESS = 299
+private const val HTTP_UNAVAILABLE = 503
 
 /**
  * The outside world of the integration layer, all bean-managed so that it stops with the context: Mailpit (chaos
@@ -56,11 +58,7 @@ object IdentityStub {
         identity: WireMockServer,
         accountId: UUID,
         email: String,
-    ) = contact(
-        identity,
-        accountId,
-        """"email":"$email","phoneVerified":false,"channels":["email"],"anonymised":false""",
-    )
+    ) = contact(identity, accountId, emailOnly(email))
 
     fun smsOptedIn(
         identity: WireMockServer,
@@ -83,19 +81,54 @@ object IdentityStub {
         """"email":"anon-4f9c2d71@anonymised.invalid","phoneVerified":false,"channels":[],"anonymised":true""",
     )
 
+    /**
+     * Identity answers 503 to the first [failures] contact lookups of [accountId], then the email-only contact (a
+     * WireMock scenario per account, so that tests running in parallel do not share the outage).
+     */
+    fun unavailableThenEmailOnly(
+        identity: WireMockServer,
+        accountId: UUID,
+        email: String,
+        failures: Int,
+    ) {
+        val path = "/internal/accounts/$accountId/contact"
+        val scenario = "identity-outage-$accountId"
+        for (failure in 0 until failures) {
+            identity.stubFor(
+                get(urlEqualTo(path))
+                    .inScenario(scenario)
+                    .whenScenarioStateIs(if (failure == 0) Scenario.STARTED else "down-$failure")
+                    .willReturn(aResponse().withStatus(HTTP_UNAVAILABLE))
+                    .willSetStateTo(if (failure == failures - 1) "up" else "down-${failure + 1}"),
+            )
+        }
+        identity.stubFor(
+            get(urlEqualTo(path))
+                .inScenario(scenario)
+                .whenScenarioStateIs("up")
+                .willReturn(contactResponse(accountId, emailOnly(email))),
+        )
+    }
+
+    private fun emailOnly(email: String) =
+        """"email":"$email","phoneVerified":false,"channels":["email"],"anonymised":false"""
+
     private fun contact(
         identity: WireMockServer,
         accountId: UUID,
         members: String,
     ) {
         identity.stubFor(
-            get(urlEqualTo("/internal/accounts/$accountId/contact")).willReturn(
-                aResponse()
-                    .withHeader("Content-Type", "application/json")
-                    .withBody("""{"accountId":"$accountId",$members}"""),
-            ),
+            get(urlEqualTo("/internal/accounts/$accountId/contact")).willReturn(contactResponse(accountId, members)),
         )
     }
+
+    private fun contactResponse(
+        accountId: UUID,
+        members: String,
+    ) = aResponse()
+        .withHeader("Content-Type", "application/json")
+        .withBody("""{"accountId":"$accountId",$members}""")
 }
 
 /** Mailpit's chaos API (`PUT /api/v1/chaos`), the way the acceptance suite makes the email channel fail. */
