@@ -1,14 +1,10 @@
-package com.ecommerce.__name__.infrastructure
+package com.ecommerce.notification.infrastructure
 
 import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
-import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
-import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
-import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Tag
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.boot.test.context.SpringBootTest
@@ -17,25 +13,25 @@ import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.annotation.Import
 
 /**
- * Provider side: replays every pact of the repository root `build/pacts` (`pact.folder`) against the running
- * __name__ service. Tagged `provider`, so it runs in `contractVerify`, after every consumer test of the build; with
- * no pact for this provider yet the verification is skipped, not failed.
+ * Provider side of every pact whose provider is `notification`, against the running service. Today that is the platform
+ * probe's health pact (no other service calls notification over HTTP). Shared by [NotificationProviderVerificationTest]
+ * (pacts of `build/pacts`) and [NotificationBrokerVerificationTest] (pacts of the Pact Broker), which only choose the
+ * pact source; both are tagged `provider` and run in `contractVerify`.
  */
-@Tag("provider")
-@Provider("__name__")
-@PactFolder("\${pact.folder}")
-@IgnoreNoPactsToVerify
 @SpringBootTest(webEnvironment = RANDOM_PORT, properties = ["management.server.port="])
-@Import(PostgresContainerConfig::class)
-class HealthProviderVerificationTest(
-    @LocalServerPort private val port: Int,
-) {
+@Import(PostgresContainerConfig::class, ContractTestConfig::class)
+// Abstract: JUnit runs only the subclasses, which choose the pact source (folder or broker).
+@Suppress("AbstractClassCanBeConcreteClass")
+abstract class NotificationProviderStates {
+    @LocalServerPort
+    protected var port: Int = 0
+
     @BeforeEach
     fun target(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", port)
     }
 
-    @State("the __name__ service is running")
+    @State("the notification service is running")
     fun serviceRunning() {
         // The Spring context and its database are already up; nothing to arrange.
     }

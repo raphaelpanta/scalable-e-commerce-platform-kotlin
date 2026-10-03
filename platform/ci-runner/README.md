@@ -60,6 +60,7 @@ gh secret set PACT_BROKER_PASSWORD         # PACT_BROKER_BASIC_AUTH_PASSWORD of 
 | `REGISTRY_USERNAME`, `REGISTRY_PASSWORD` | secrets | push step only | registry basic-auth credentials |
 | `PACT_BROKER_URL` | secret | contract steps | base URL of the broker; unset skips every broker step |
 | `PACT_BROKER_USERNAME`, `PACT_BROKER_PASSWORD` | secrets | contract steps | broker basic-auth credentials |
+| `PACT_CAN_I_DEPLOY_RETRIES` | variable (optional) | `can-i-deploy` | polls every 10 s while verification results are unknown (default 24) |
 
 ### Register the runner
 
@@ -101,6 +102,65 @@ The runner container uses the **host network** and the host's Docker socket. Hen
 To pull images from another machine, bind the registry to a reachable interface (`REGISTRY_BIND_ADDRESS`), run
 `init-registry.sh --host <name>:<port>`, install `data/certs/registry.crt` as `ca.crt` under
 `/etc/docker/certs.d/<name>:<port>/` on that machine and `docker login` there.
+
+### Pact Broker webhooks (provider pipelines on consumer publication)
+
+A consumer pipeline publishes its pacts (`service-ci.yml`, step "Publish the consumer pacts"). When the content of a
+pact changed, the broker fires the event `contract_content_changed`; one webhook per provider turns it into a
+`workflow_dispatch` of that provider's workflow (`.github/workflows/<provider>.yml`), whose `gate` job then runs
+`<Ctx>BrokerVerificationTest` against exactly that pact (inputs `pact-url` and `consumer`, passed to the build as
+`PACT_URL` and `PACT_CONSUMER`) and publishes the verification result. The consumer's `can-i-deploy` step waits for that
+result (`--retry-while-unknown`, `PACT_CAN_I_DEPLOY_RETRIES` x 10 s). A broken contract therefore fails the provider run,
+naming the consumer and the interaction, and the consumer's `can-i-deploy`, naming the pact.
+
+1. Create a fine-grained personal access token (or a GitHub App installation token) restricted to this repository with
+   **Actions: read and write** and nothing else; it is what the broker sends to the GitHub API. Rotate it like the
+   runner token.
+2. The broker only calls hosts it is allowed to: `docker-compose.yml` sets `PACT_BROKER_WEBHOOK_SCHEME_WHITELIST=https`
+   and `PACT_BROKER_WEBHOOK_HOST_WHITELIST=api.github.com`.
+3. Create one webhook per provider (`identity`, `catalog`, `cart`, `order`, `payment`, `notification`); the `reason`
+   names the event, the consumer, its version and branch:
+
+```bash
+GH_REPO=owner/repository             # this repository
+GH_DISPATCH_TOKEN=github_pat_...     # step 1; never commit it
+for provider in identity catalog cart order payment notification; do
+  curl -fsS -u "$PACT_BROKER_USERNAME:$PACT_BROKER_PASSWORD" -H 'Content-Type: application/json' \
+    -X PUT "http://localhost:9292/webhooks/ecommerce-dispatch-$provider" --data @- <<JSON
+{
+  "description": "Run the $provider pipeline when a consumer changes a pact",
+  "provider": { "name": "$provider" },
+  "events": [ { "name": "contract_content_changed" } ],
+  "request": {
+    "method": "POST",
+    "url": "https://api.github.com/repos/$GH_REPO/actions/workflows/$provider.yml/dispatches",
+    "headers": {
+      "Accept": "application/vnd.github+json",
+      "Authorization": "Bearer $GH_DISPATCH_TOKEN",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "ref": "main",
+      "inputs": {
+        "reason": "contract_content_changed \${pactbroker.consumerName} \${pactbroker.consumerVersionNumber} on \${pactbroker.consumerVersionBranch}",
+        "pact-url": "\${pactbroker.pactUrl}",
+        "consumer": "\${pactbroker.consumerName}"
+      }
+    }
+  }
+}
+JSON
+done
+```
+
+`PUT /webhooks/<id>` with a fixed id (letters, digits and dashes, at least 16 characters) keeps the command
+idempotent; the `${pactbroker.*}` placeholders are expanded by the broker, not by the shell. Check one with
+`curl -u ... -X POST http://localhost:9292/webhooks/ecommerce-dispatch-catalog/execute` (a run of `catalog` appears with
+the reason in its summary) and read the delivery logs under `/webhooks/ecommerce-dispatch-catalog`. The dispatched run
+checks out `main`, so it verifies the provider's main version against the changed pact; `workflow_dispatch` can only be
+triggered with a token that has write access to the repository, so it does not widen who can run code on the runner.
+Without webhooks nothing breaks: each provider pipeline still verifies the broker's pacts (consumer versions on `main`,
+deployed or released, and on the same branch) whenever it runs.
 
 ## Public-repository safeguards
 

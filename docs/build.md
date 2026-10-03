@@ -19,6 +19,7 @@ gradle/
 config/
   detekt/detekt.yml             # detekt rules on top of the defaults, zero findings allowed
   architecture/                 # Konsist rules, written once and run inside every service
+  conformance/                  # OpenApiContract, compiled into every service's integrationTest
 build-logic/                    # included build with the convention plugins and their TestKit tests
   src/main/kotlin/*.gradle.kts  # kotlin-domain, kotlin-application, kotlin-service, kotlin-boot-app,
                                 #   kotlin-library, quality, pitest, pact, docker-image, plus the internal
@@ -124,6 +125,20 @@ layer in every module of the repository:
 ./gradlew -q contractTest contractVerify   # every pact of the repository, written and verified
 ```
 
+### OpenAPI conformance (integration layer)
+
+Each service's `<Ctx>ContractConformanceIT` exercises every operation of `contracts/openapi/<ctx>.yaml` with its
+success and documented error statuses and routes each exchange through `OpenApiContract.check`
+(`config/conformance`, added to the `integrationTest` source set by `kotlin-service`; the validator
+`com.atlassian.oai:openapi-request-validator-core` is an `integrationTest` dependency only, it is built on Jackson 2).
+A response must match the documented status, media type, headers and schema of its operation; a request the service
+accepted (2xx) must match the contract, a refused one (4xx) may break it on purpose. Objects accept members their
+schema does not list unless it says `additionalProperties: false` (JSON Schema semantics). `verify` then fails for
+every violation and for every documented (`operationId`, status) pair no exchange produced, unless the test defers
+it with the reason (`"* 429"`: the gateway's rate limiting; `503`: an unavailable database). So a new operation or
+error status in a contract fails the build until it is exercised or explicitly deferred. The file is resolved from
+the module directory (`../../../contracts/openapi/<ctx>.yaml`).
+
 ## Contract tests
 
 Pact JVM consumer and provider tests share one source set, `src/contractTest/kotlin`, and two tasks of the `pact`
@@ -161,10 +176,32 @@ Pact broker (optional, environment variables read when the test JVM starts):
 | `PACT_BROKER_USERNAME`, `PACT_BROKER_PASSWORD` | `-Dpactbroker.auth.username`, `-Dpactbroker.auth.password` |
 | `GITHUB_SHA` (else `git rev-parse HEAD`) | `-Dpact.provider.version`, only with a broker URL |
 | `PACT_PUBLISH_RESULTS=true` | `-Dpact.verifier.publishResults=true`, only with a broker URL; otherwise always `false` |
+| `PACT_PROVIDER_BRANCH` | `-Dpact.provider.branch` (branch of the published results) and `-Dpactbroker.providerBranch` (`matchingBranch` selector), only with a broker URL |
+| `PACT_URL`, `PACT_CONSUMER` | `-Dpact.filter.pacturl`, `-Dpact.filter.consumers`, only with a broker URL: a run a broker webhook dispatched verifies only that pact (classes with `@AllowOverridePactUrl`) |
 
 Credentials are not task inputs, so they never reach a cache key. Pacts loaded with `@PactFolder` are never
-published; a provider that verifies broker pacts adds a class with `@PactBroker` (it reads `pactbroker.url` and the
-credentials) guarded by `@EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")`.
+published. Every service verifies broker pacts too: its provider states, message producers and `@TestTemplate` live in
+an abstract `<Ctx>ProviderStates` (Spring test context, field injection), extended by `<Ctx>ProviderVerificationTest`
+(`@PactFolder`, `@IgnoreNoPactsToVerify`) and `<Ctx>BrokerVerificationTest`:
+
+```kotlin
+@Tag("provider")
+@Provider("catalog")
+@PactBroker                       // pactbroker.url and the credentials, as above
+@AllowOverridePactUrl             // PACT_URL / PACT_CONSUMER of a webhook-dispatched run
+@IgnoreNoPactsToVerify
+@EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
+class CatalogBrokerVerificationTest : CatalogProviderStates() {
+    companion object {
+        @JvmStatic
+        @PactBrokerConsumerVersionSelectors
+        fun consumerVersionSelectors(): SelectorBuilder = SelectorBuilder().mainBranch().deployedOrReleased() // + matchingBranch()
+    }
+}
+```
+
+Without `PACT_BROKER_URL` the broker classes are skipped (JUnit reports them as disabled); `newService` generates the
+same three classes.
 
 Unit tests of a single module, for example the application module of the catalogue:
 

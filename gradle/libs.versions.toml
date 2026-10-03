@@ -38,6 +38,10 @@ bouncycastle = "1.86"
 # latest, 2.31.1-alpha on 2026-10-03, needs 1.65.0 and would split the API from the Boot-managed SDK). Bump together
 # with Spring Boot.
 opentelemetry-logback-appender = "2.28.1-alpha"
+# OpenAPI 3.1 request/response validator of the integration layer (T138); latest on Maven Central 2026-10-03 (the
+# artifact moved from swagger-request-validator-core, whose 3.0.0 is only a relocation). Jackson 2 based: kept off the
+# runtime classpath, integrationTest only.
+openapi-request-validator = "3.0.0"
 
 [libraries]
 # Gradle plugins consumed by build-logic
@@ -117,6 +121,9 @@ testcontainers-kafka = { module = "org.testcontainers:testcontainers-kafka", ver
 
 # Logback appender that turns every log event into an OpenTelemetry log record (exported over OTLP to Loki)
 opentelemetry-logback-appender = { module = "io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0", version.ref = "opentelemetry-logback-appender" }
+
+# OpenAPI request/response validator (integrationTest of the service modules, contract conformance)
+openapi-request-validator-core = { module = "com.atlassian.oai:openapi-request-validator-core", version.ref = "openapi-request-validator" }
 
 [bundles]
 kotest = ["kotest-runner-junit5", "kotest-assertions-core", "kotest-property"]

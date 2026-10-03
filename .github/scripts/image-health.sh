@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # T149 (feature 004, user story 9, AC3): start the freshly built image of one service with the minimum environment it
 # needs to boot WITHOUT the rest of the platform, wait up to HEALTH_TIMEOUT seconds (default 90) for the management port's
-# `/actuator/health` to answer {"status":"UP"...}, print the last log lines on failure and always stop what it started.
+# readiness group `/actuator/health/readiness` to answer {"status":"UP"}, print the last log lines on failure and always
+# stop what it started.
 #
 # Usage: image-health.sh <service> <image>
 #   service  gateway | identity | catalog | cart | order | payment | notification
 #   image    the image reference to run, e.g. cart:3f2a... (it must already exist in the local engine)
 #
 # Why this is enough (docs/service-conventions.md section 2, docs/ci-cd.md "Start-and-health check"):
-#   - a service reports UP when its own database answers (the CheckServiceHealth use case probes PostgreSQL with a
-#     two-second timeout; Kafka, the identity JWKS and the observability stack are not part of the health result), so
+#   - a service reports ready once it has started and migrated its own database (catalog's readiness group also probes
+#     PostgreSQL with a two-second timeout; Kafka, the identity JWKS and the observability stack are not part of it), so
 #     the script starts ONE throw-away postgres:18-alpine sidecar on a private network, with random credentials, and
 #     points the service at it through <CTX>_DB_HOST/_DB_USER/_DB_PASSWORD; Flyway migrates the empty database
 #     (SEED=false). INTERNAL_API_TOKEN is random. Kafka and the OTLP collector stay on their localhost defaults
@@ -90,7 +91,7 @@ docker run "${run_args[@]}" "$image" >/dev/null
 
 probe() {
   docker exec "$app" bash -c \
-    'exec 3<>/dev/tcp/127.0.0.1/8081 && printf "GET /actuator/health HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 && cat <&3' 2>/dev/null
+    'exec 3<>/dev/tcp/127.0.0.1/8081 && printf "GET /actuator/health/readiness HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 && cat <&3' 2>/dev/null
 }
 
 deadline=$((SECONDS + timeout))
@@ -105,7 +106,7 @@ while true; do
     exit 0
   fi
   if [ "$SECONDS" -ge "$deadline" ]; then
-    echo "::error::$service did not report {\"status\":\"UP\"} on :8081/actuator/health within ${timeout}s"
+    echo "::error::$service did not report {\"status\":\"UP\"} on :8081/actuator/health/readiness within ${timeout}s"
     exit 1
   fi
   sleep 2

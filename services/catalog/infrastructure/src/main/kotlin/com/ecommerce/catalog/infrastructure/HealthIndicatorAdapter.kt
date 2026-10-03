@@ -8,8 +8,11 @@ import org.springframework.boot.health.contributor.ReactiveHealthIndicator
 import org.springframework.stereotype.Component
 import reactor.core.publisher.Mono
 
-/** Inbound adapter: exposes the [CheckServiceHealth] use case as an Actuator health contributor. */
-@Component
+/**
+ * Inbound adapter: exposes the [CheckServiceHealth] use case as the Actuator health contributor `db` (bean name
+ * suffix `HealthIndicator` dropped), a member of the overall health and of the readiness group.
+ */
+@Component("dbHealthIndicator")
 class HealthIndicatorAdapter(
     private val checkServiceHealth: CheckServiceHealth,
 ) : ReactiveHealthIndicator {

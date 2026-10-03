@@ -40,10 +40,20 @@ management:
         include: health,prometheus
   endpoint:
     health:
+      # No components and no details: /actuator/health answers {"status":"...","groups":["liveness","readiness"]},
+      # the two groups answer exactly {"status":"..."} (FR-026, docs/service-conventions.md section 2).
+      show-components: never
       show-details: never
-      # The body stays exactly {"status":"..."}; liveness/readiness groups can be enabled per environment.
+      # /actuator/health/liveness (the process is alive) and /actuator/health/readiness (traffic may come); the
+      # image HEALTHCHECK and Compose probe the readiness group. Add a database contributor to readiness once the
+      # service has one (services/catalog: HealthProbe adapter `db`).
       probes:
-        enabled: false
+        enabled: true
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState
   health:
     # The built-in R2DBC indicator has no timeout and hangs while the database is unreachable; database
     # health belongs in a HealthProbe adapter with a timeout, as in services/catalog (DatabaseHealthProbe).

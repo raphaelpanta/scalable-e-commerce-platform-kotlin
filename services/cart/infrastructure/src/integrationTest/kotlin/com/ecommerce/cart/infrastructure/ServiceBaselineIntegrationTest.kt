@@ -5,19 +5,32 @@ import org.junit.jupiter.api.Test
 import org.springframework.test.json.JsonCompareMode
 import java.time.Duration
 
+private const val UP = """{"status":"UP"}"""
+private const val HEALTH_WITH_GROUPS = """{"status":"UP","groups":["liveness","readiness"]}"""
+
 private val TIMEOUT: Duration = Duration.ofSeconds(10)
 
 class ServiceBaselineIntegrationTest : CartIntegrationTest() {
+    /**
+     * The overall health lists the probe groups next to its status; the readiness and liveness groups answer exactly
+     * `{"status":"UP"}` on the management port (FR-026, US8/AC5; the test runs management on the server port).
+     */
     @Test
-    fun healthIsUp() {
-        client
-            .get()
-            .uri("/actuator/health")
-            .exchange()
-            .expectStatus()
-            .isOk
-            .expectBody()
-            .json("""{"status":"UP"}""", JsonCompareMode.STRICT)
+    fun healthReadinessAndLivenessAreUp() {
+        mapOf(
+            "/actuator/health" to HEALTH_WITH_GROUPS,
+            "/actuator/health/readiness" to UP,
+            "/actuator/health/liveness" to UP,
+        ).forEach { (path, body) ->
+            client
+                .get()
+                .uri(path)
+                .exchange()
+                .expectStatus()
+                .isOk
+                .expectBody()
+                .json(body, JsonCompareMode.STRICT)
+        }
     }
 
     @Test

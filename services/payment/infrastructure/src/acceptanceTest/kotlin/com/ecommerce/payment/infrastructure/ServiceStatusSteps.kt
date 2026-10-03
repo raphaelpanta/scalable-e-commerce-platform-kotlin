@@ -6,6 +6,7 @@ import io.cucumber.java.en.Then
 import io.cucumber.java.en.When
 import io.cucumber.spring.CucumberContextConfiguration
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT
 import org.springframework.boot.test.web.server.LocalServerPort
@@ -51,7 +52,8 @@ class ServiceStatusSteps(
     @Then("the service reports that it is healthy")
     fun theServiceReportsThatItIsHealthy() {
         answer.statusCode() shouldBe HTTP_OK
-        answer.body() shouldBe """{"status":"UP"}"""
+        // Boot lists the probe groups next to the status; only the status matters here.
+        answer.body() shouldContain "\"status\":\"UP\""
     }
 
     private companion object {

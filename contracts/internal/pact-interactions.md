@@ -815,11 +815,12 @@ JWKS example. It is not a separate Pact file: the only HTTP dependency of the co
 
 ## 5. Health pact
 
-Existing since feature 002 (template `HealthConsumerPactTest`), unchanged and present in every service.
+Existing since feature 002 (template `HealthConsumerPactTest`) and present in every service. Since T129 the probe asks
+the readiness group, the path the image `HEALTHCHECK`, the Compose health check and the CI start-and-health step use.
 
 | Consumer | Provider | Description | Provider state | Request | Expected response |
 |---|---|---|---|---|---|
-| `platform-probe` | each service (`identity`, `catalog`, `cart`, `order`, `payment`, `notification`) | `a health check` | `the <ctx> service is running` (for example `the identity service is running`) | `GET /actuator/health`, `Accept: application/json` (management port 8081 in Compose; the test uses the mock server) | `200`, body `{"status":"UP"}` |
+| `platform-probe` | each service (`identity`, `catalog`, `cart`, `order`, `payment`, `notification`) | `a health check` | `the <ctx> service is running` (for example `the identity service is running`) | `GET /actuator/health/readiness`, `Accept: application/json` (management port 8081 in Compose; the test uses the mock server) | `200`, body contains `"status":"UP"` (the pact's body is `{"status":"UP"}`; Pact allows further members in a response, and the probe reads only `status`) |
 
 Note: the catalog module that exists today uses the state text `the catalogue service is running`
 (`services/catalog/.../HealthConsumerPactTest.kt`); the consumer and the provider verification of that module already

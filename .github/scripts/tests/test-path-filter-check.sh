@@ -60,6 +60,10 @@ for s in $SERVICES; do
   grep -v '^[[:space:]]*#' "$f" | grep -q 'pull_request_target' && _t_fail "$s.yml: pull_request_target must never be used"
   need "$f" '  push:' '    branches: [main]' "$s.yml must trigger on push to main"
   grep -q '^  pull_request:' "$f" || _t_fail "$s.yml must trigger on pull_request"
+  # T130: a Pact Broker webhook dispatches the provider's pipeline with a reason (and the pact to verify)
+  need "$f" '  workflow_dispatch:' '      reason:' '      pact-url:' '      consumer:' "$s.yml must accept workflow_dispatch with reason, pact-url and consumer"
+  # shellcheck disable=SC2016  # literal workflow expressions
+  need "$f" 'reason: ${{ inputs.reason || github.event_name }}' 'pact-url: ${{ inputs.pact-url' "$s.yml must pass the dispatch inputs to service-ci"
   [ "$(grep -c "      - 'services/$s/\*\*'" "$f")" = 2 ] || _t_fail "$s.yml: services/$s/** must filter push and pull_request"
   for p in 'libs/**' 'build-logic/**' 'gradle/**' 'contracts/**' 'platform/docker/**' \
     '.github/workflows/service-ci.yml' ".github/workflows/$s.yml"; do
@@ -106,6 +110,16 @@ grep -q 'platform/docker/Dockerfile' "$S" || _t_fail "service-ci.yml must build 
 grep -q 'BUILDAH_FORMAT: docker' "$S" || _t_fail "service-ci.yml must set BUILDAH_FORMAT=docker"
 grep -q -- '--password-stdin' "$S" || _t_fail "service-ci.yml must docker login with --password-stdin"
 grep -q 'can-i-deploy' "$S" || _t_fail "service-ci.yml must run can-i-deploy"
+# T130: can-i-deploy waits for the verification a webhook-dispatched provider run publishes; the broker verification
+# gets the provider branch and the pact a webhook named; only the service's own pacts are published
+# shellcheck disable=SC2016  # literal workflow text
+need "$S" '--retry-while-unknown "$RETRIES"' 'PACT_CAN_I_DEPLOY_RETRIES' "service-ci.yml: can-i-deploy must retry while unknown"
+# shellcheck disable=SC2016  # literal workflow text
+need "$S" 'PACT_PROVIDER_BRANCH:' 'PACT_URL: ${{ inputs.pact-url }}' 'PACT_CONSUMER: ${{ inputs.consumer }}' \
+  "service-ci.yml: provider verification needs the branch and the dispatched pact"
+# shellcheck disable=SC2016  # literal workflow text
+need "$S" 'build/pacts/"$SERVICE"-*.json' 'platform-probe-"$SERVICE".json' '--build-url' \
+  "service-ci.yml: publish only the service's own pacts"
 need "$S" 'trivy' 'osv-scanner' 'syft' "service-ci.yml must scan (trivy, osv-scanner) and produce an SBOM (syft)"
 need "$S" '--exit-code 1' '--severity CRITICAL' "service-ci.yml: Trivy must fail on CRITICAL"
 # shellcheck disable=SC2016  # literal shell text of the workflow
