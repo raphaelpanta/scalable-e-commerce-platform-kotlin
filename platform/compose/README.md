@@ -134,6 +134,8 @@ With podman set `BUILDAH_FORMAT=docker` so the `HEALTHCHECK` survives.
 Every service container is bounded (`SERVICE_MEM_LIMIT`, default 768m, and `SERVICE_CPUS`, default 1.0) so that the
 JVM's `MaxRAMPercentage=50` sizes the heap to the container (384 MiB) and leaves room for its off-heap memory (an earlier
 640m limit with a 75 % heap was OOM-killed under load); databases get `DB_MEM_LIMIT` (256m), Kafka
-`KAFKA_MEM_LIMIT` (1g) with `KAFKA_HEAP_OPTS`, and each observability container `OBS_MEM_LIMIT` (512m). The whole
+`KAFKA_MEM_LIMIT` (1g) with `KAFKA_HEAP_OPTS`, and each observability container `OBS_MEM_LIMIT` (512m) except Tempo, `TEMPO_MEM_LIMIT` (1g: every request is
+traced, and 512m was OOM-killed in a loop under the performance suite). The image also caps the JVM's direct memory
+(`-XX:MaxDirectMemorySize=128m`, platform/docker/README.md). The whole
 `core` + `observability` stack needs about 9 GiB; on a smaller engine VM start `core` alone first. `GATEWAY_PORT`
 moves the published gateway port when 8080 is taken on the host.

@@ -332,7 +332,8 @@ services:
 
   tempo:
     image: grafana/tempo:3.1.0
-    mem_limit: ${OBS_MEM_LIMIT:-512m}
+    # Every request is traced: under the performance suite 512m OOM-killed Tempo in a loop (WAL replay included).
+    mem_limit: ${TEMPO_MEM_LIMIT:-1g}
     restart: unless-stopped
     profiles: [observability]
     networks: [internal]

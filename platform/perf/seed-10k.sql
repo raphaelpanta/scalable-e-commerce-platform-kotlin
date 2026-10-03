@@ -9,7 +9,8 @@
 --   image id     9e4f0000-0000-4000-9000-<n, 12 digits>
 --   SKU          PERF-<n, 6 digits>                         PERF-000001 .. PERF-010000
 --   name         "<adjective> <noun> <n>"                   searchable by the adjective and the noun lists below
---   price_minor  990 .. 99990                               990 + (n * 7919) mod 99001
+--   price_minor  990 .. 99990, always a multiple of 10       (99 + (n * 7919) mod 9901) * 10
+--                (so no order total ends in 13 or 14, the minor digits the payment simulator declines)
 --   stock        5 .. 500                                   5 + (n * 37) mod 496
 --   category     round robin over the three seed categories
 
@@ -44,7 +45,7 @@ SELECT ('9e4f0000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid,
        'PERF-' || lpad(n::text, 6, '0'),
        adjective || ' ' || noun || ' ' || n,
        'Synthetic load-test item ' || lpad(n::text, 6, '0') || ' (' || lower(adjective) || ' ' || lower(noun) || ').',
-       990 + ((n::bigint * 7919) % 99001),
+       (99 + ((n::bigint * 7919) % 9901)) * 10,
        'BRL',
        category_id,
        'active',

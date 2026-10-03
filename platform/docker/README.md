@@ -70,9 +70,11 @@ Base images are pinned by digest; refresh them deliberately.
 
 ## Runtime settings
 
-- `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50 -Dnetworkaddress.cache.ttl=5`: heap sized to half the container memory limit
-  (the other half is the JVM's off-heap memory: metaspace, code cache, thread stacks, Netty buffers; 75 % of 640 MiB was
-  OOM-killed by the kernel under load) and a 5 s JVM DNS cache so that DNS-based discovery notices added and removed replicas quickly.
+- `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50 -XX:MaxDirectMemorySize=128m -Dnetworkaddress.cache.ttl=5`: heap sized to
+  half the container memory limit (the other half is the JVM's off-heap memory: metaspace, code cache, thread stacks,
+  Netty buffers; 75 % of 640 MiB was OOM-killed by the kernel under load), Netty's pooled direct buffers capped at
+  128 MiB (they default to the heap size; uncapped, catalog and cart were OOM-killed at 768 MiB under 1,000 browsing
+  users) and a 5 s JVM DNS cache so that DNS-based discovery notices added and removed replicas quickly.
 - `HEALTHCHECK` probes `GET /actuator/health/readiness` on port 8081 (bash `/dev/tcp`, the JRE image has no curl) and
   expects `"status":"UP"`. Compose declares the same check (`x-app` in `platform/compose/docker-compose.yml`) and uses it for
   `depends_on: condition: service_healthy` and `docker compose ps`; the CI start-and-health step

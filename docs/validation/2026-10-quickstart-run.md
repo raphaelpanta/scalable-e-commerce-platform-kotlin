@@ -151,3 +151,67 @@ run, `Start-Class` of cart, uid 10001.
 
 **SC-006 is met on this machine**: the cold `--profile core up -d --build` is healthy in under 4 minutes. The floor is
 the single Gradle compilation (about 2 minutes) plus the start of the last JVM behind its health check.
+
+## 10. Acceptance suite against the rebuilt stack (2026-10-03, T131)
+
+Stack: the images of section 9, `core` + `observability`, started with the rate-limit override
+(`COMPOSE_FILE=docker-compose.yml:../perf/compose.perf.yml platform/compose/scripts/smoke.sh --no-build --keep`, every
+smoke check PASS), gateway on 18080. Runner: `GATEWAY_URL=http://localhost:18080 ./gradlew -q :acceptance:test` with
+`MAILPIT_URL=http://localhost:8025`, `GRAFANA_URL=http://localhost:3000`, `GRAFANA_PASSWORD` from `.env`, the default
+operator credentials.
+
+Final results (scenario outlines expanded; durations are the Gradle wall time):
+
+| Feature | `not @slow and not @chaos` | `@slow and not @chaos` | `@chaos` | Total |
+|---|---|---|---|---|
+| `account.feature` (US3) | 6 passed | 1 passed | | 7 |
+| `authorisation-sweep.feature` (SC-010) | 47 passed | | | 47 |
+| `catalogue-browsing.feature` (US1) | 4 passed | | | 4 |
+| `catalogue-operations.feature` (US7) | 9 passed | | | 9 |
+| `checkout.feature` (US4) | 6 passed | 2 passed | | 8 |
+| `notifications.feature` (US6) | | 4 passed | 1 passed | 5 |
+| `order-tracking.feature` (US5) | 5 passed | 1 passed | | 6 |
+| `platform-observability.feature` (US8) | 2 passed | 3 passed | | 5 |
+| `shopping-cart.feature` (US2) | 6 passed | | | 6 |
+| **Passed / failed** | **85 / 0** (72 s) | **11 / 0** (147 s) | **1 / 0** (464 s) | **97 / 0** |
+
+How it got there:
+
+| Run | Result | Cause and fix |
+|---|---|---|
+| fast, 1st | 55 passed, 30 failed | identity was OOM-killed by the kernel (640m limit, heap at 75 %): 503 on every registration afterwards. The image now sizes the heap at 50 % and Compose bounds services at 768m (`platform/docker/Dockerfile`, `platform/compose/docker-compose.yml`). |
+| fast, 2nd | 83 passed, 2 failed | (1) "Retrying a checkout with the same idempotency key" never recorded its order, so "the order has exactly 1 payment charge" had none to look up: step defect, fixed in `CheckoutSteps` (the same-order step records it). (2) "The history shows the shopper's own orders" failed its 2nd checkout with 422 "cart is empty": a genuine cart defect. Order clears the cart synchronously and the late `OrderPaid` of the 1st order then took the same product, put back by the shopper for the 2nd order, out of the cart again. The `OrderPaid` consumer now leaves lines added after `paidAt` alone (`services/cart`, domain, application and integration tests; module checks green). |
+| fast, 3rd | 85 passed | |
+| slow, 1st | 9 passed, 2 failed | both `@sms` scenarios: phone verification answered 503 "The SMS channel is unavailable" because identity's SMS simulator sends through SMTP and Compose gave `SMTP_HOST` only to notification. Identity now gets `SMTP_HOST=mailpit` and waits for Mailpit. |
+| slow, 2nd | 11 passed | |
+| chaos | 1 passed | Mailpit refused every recipient until the confirmation used up its retries (about 7.5 minutes). |
+
+Also added for the new `withdrawCategory` operation (T136): `Paths.categoryWithdrawal` and a "withdraw a category" row in
+both outlines of the authorisation sweep (47 sweep scenarios, all refused as expected). No scenario had to be declared
+impossible by contract.
+
+## 11. Performance suite (2026-10-03, T151, SC-002, SC-003)
+
+`platform/perf/seed-10k-apply.sh` then `platform/perf/run.sh --no-seed` (k6 `grafana/k6:1.7.0` in the Podman machine,
+reaching the gateway through `host.containers.internal:18080`), the stack of section 10 with the rate-limit override.
+The k6 container shares the 8-CPU engine VM with the 20 containers of the stack.
+
+| VUs (browse/checkout) | Browse p95 all / list / search / detail | Browse failed | Orders | Checkout error rate | Stock refusals | Thresholds |
+|---|---|---|---|---|---|---|
+| 1,000 / 100 (specified) | 5,746 / 5,870 / 5,707 / 5,614 ms | 46.6 % (504) | 137 | 41.0 % (503) | 0 | all 6 FAIL |
+| 400 / 40 | 2,340 / 2,487 / 2,412 / 2,089 ms | 0 % | 1,249 | 0 % | 0 | 4 latency FAIL, 2 error PASS |
+| 200 / 20 | 552 / 591 / 599 / 477 ms | 0 % | 956 | 0 % | 0 | all 6 PASS |
+
+The gateway serves about 150 requests per second on this machine at every load level: the catalog service is pinned
+at its 1-CPU quota and its database at about 2 CPUs. **SC-002/SC-003 are met at 200 browsing + 20 checkout users and
+not at the specified 1,000 + 100** on this single machine; the full profile needs a scaled catalogue or more CPU than a
+laptop VM shared with the load generator. Details and the reading of the numbers: `platform/perf/README.md`,
+"Recorded results".
+
+Defects found and fixed on the way: catalog, cart and Tempo were OOM-killed during the first 1,000-user run (the JVM's
+direct buffers defaulted to the heap size; Tempo had 512 MiB): `-XX:MaxDirectMemorySize=128m` in the image and
+`TEMPO_MEM_LIMIT` (1g) in Compose; no service restarted in the later runs, Tempo still restarted at 400 users (every
+request is traced). The 10k dataset's prices are now multiples of 10, so no order total ends in 13 or 14 (the
+simulator's decline rule), which had produced `payment-declined` checkout failures. The dataset was removed again
+afterwards (`seed-10k-apply.sh --remove`); the catalogue holds the 20 seed products plus the products the acceptance
+scenarios created.
