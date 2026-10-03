@@ -290,6 +290,7 @@ paths:
                 page: 0
                 size: 20
                 totalItems: 1
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
     post:
       operationId: addOwnAddress
