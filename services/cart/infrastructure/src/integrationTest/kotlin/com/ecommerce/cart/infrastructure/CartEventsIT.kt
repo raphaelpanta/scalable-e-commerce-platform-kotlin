@@ -113,9 +113,22 @@ class CartEventsIT(
         val markerProduct = catalog.product()
         addToAccount(marker, markerProduct, 1)
         send(orderPaid(marker, orderId, markerProduct to 1))
-        await().atMost(EVENT_TIMEOUT).until { quantities(marker)?.isEmpty() == true }
+        // The marker's order bought its whole cart: the cart is deleted, not kept empty (data-model section 1).
+        await().atMost(EVENT_TIMEOUT).until { quantities(marker) == null }
 
         quantities(account) shouldBe mapOf(beans to 2)
+        val emptied =
+            client
+                .get()
+                .uri("/api/v1/cart")
+                .header(HttpHeaders.AUTHORIZATION, bearer(marker))
+                .exchange()
+                .expectStatus()
+                .isOk
+                .expectBody(JSON_OBJECT)
+                .returnResult()
+                .responseBody
+        (emptied?.get("lines") as List<*>).isEmpty() shouldBe true
     }
 
     @Test

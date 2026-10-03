@@ -13,15 +13,28 @@ import java.time.Instant
 /** Message used when a queued notification has no address left (it cannot be delivered). */
 internal const val NO_ADDRESS = "No recipient address is available."
 
+/** Message used when identity still cannot tell the contact of a notification awaiting its recipient. */
+internal const val CONTACT_UNAVAILABLE = "The recipient's contact details are unavailable."
+
+/** Message used when identity no longer knows the account of a notification awaiting its recipient. */
+internal const val UNKNOWN_ACCOUNT = "The recipient account is unknown."
+
 /**
  * One delivery round (T091, FR-019): claims the queued notifications that are due, hands each to its channel and
  * records the outcome. The send happens outside any transaction; the new status, the attempt row and the
  * `NotificationSent`/`NotificationFailed` event are then written in one transaction, and only while the
  * notification is still `queued` (a concurrent suppression wins). Returns the number of notifications claimed.
+ *
+ * A notification queued while identity could not answer ([Notification.awaitingRecipient], T158) first has its
+ * contact looked up again ([contacts]): it is then sent, or suppressed when the contact does not permit its channel;
+ * while identity still cannot answer, the lookup counts as a failed attempt of the retry schedule, so the message
+ * ends `failed` (visible to operators, who may retry it) rather than lost.
  */
+@Suppress("LongParameterList") // one port per collaborator of a delivery round, plus the settings
 class AttemptDelivery(
     private val notifications: NotificationRepository,
     private val channels: Channels,
+    private val contacts: RecipientLookupPort,
     private val outcomes: DeliveryOutcomePublisher,
     private val transactions: Transactions,
     private val clock: Clock,
@@ -46,15 +59,51 @@ class AttemptDelivery(
         return claimed.size
     }
 
-    private suspend fun deliver(notification: Notification) {
-        val result = send(notification)
+    private suspend fun deliver(claimed: Notification) {
+        if (!claimed.awaitingRecipient) return attempt(claimed, claimed)
+        when (val lookup = contacts.lookup(claimed.accountId, claimed.correlationId)) {
+            is ContactLookup.Found -> {
+                claimed.resolveRecipient(lookup.contact).onRight { resolved ->
+                    if (resolved.status == DeliveryStatus.QUEUED) {
+                        attempt(claimed, resolved)
+                    } else {
+                        record(claimed, resolved, clock.now())
+                    }
+                }
+            }
+
+            ContactLookup.Unknown -> {
+                fail(claimed, DeliveryFailure(FailureCategory.INVALID_RECIPIENT, UNKNOWN_ACCOUNT))
+            }
+
+            ContactLookup.Unavailable -> {
+                fail(claimed, DeliveryFailure(FailureCategory.CHANNEL_UNAVAILABLE, CONTACT_UNAVAILABLE))
+            }
+        }
+    }
+
+    /** Sends [ready] ([claimed] with its recipient) and records the outcome against the claimed state. */
+    private suspend fun attempt(
+        claimed: Notification,
+        ready: Notification,
+    ) {
+        val result = send(ready)
         val at = clock.now()
         val next =
             when (result) {
-                SendResult.Delivered -> notification.recordSuccess(at)
-                is SendResult.Failed -> notification.recordFailure(at, result.failure, settings.policy)
+                SendResult.Delivered -> ready.recordSuccess(at)
+                is SendResult.Failed -> ready.recordFailure(at, result.failure, settings.policy)
             }
-        next.onRight { updated -> record(notification, updated, at) }
+        next.onRight { updated -> record(claimed, updated, at) }
+    }
+
+    /** Records an attempt of [claimed] that failed before reaching a channel. */
+    private suspend fun fail(
+        claimed: Notification,
+        failure: DeliveryFailure,
+    ) {
+        val at = clock.now()
+        claimed.recordFailure(at, failure, settings.policy).onRight { updated -> record(claimed, updated, at) }
     }
 
     private suspend fun send(notification: Notification): SendResult {

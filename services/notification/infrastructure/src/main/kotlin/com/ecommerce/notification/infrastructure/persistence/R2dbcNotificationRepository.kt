@@ -2,6 +2,7 @@ package com.ecommerce.notification.infrastructure.persistence
 
 import com.ecommerce.notification.application.FailedFilter
 import com.ecommerce.notification.application.NotificationRepository
+import com.ecommerce.notification.application.NotificationRetentionRepository
 import com.ecommerce.notification.application.OwnFilter
 import com.ecommerce.notification.application.Page
 import com.ecommerce.notification.application.PageRequest
@@ -192,16 +193,17 @@ class R2dbcNotificationRepository(
         const val INSERT =
             "INSERT INTO notifications (id, source_event_id, kind, channel, account_id, recipient_address, subject, " +
                 "body, order_id, correlation_id, status, attempts, next_attempt_at, last_attempt_at, " +
-                "last_error_category, last_error, created_at, sent_at, failed_at) VALUES (:id, :sourceEventId, " +
-                ":kind, :channel, :accountId, :recipient, :subject, :body, :orderId, :correlationId, :status, " +
-                ":attempts, :nextAttemptAt, :lastAttemptAt, :errorCategory, :error, :createdAt, :sentAt, :failedAt) " +
-                "ON CONFLICT (source_event_id, kind, channel) DO NOTHING"
+                "last_error_category, last_error, created_at, sent_at, failed_at, awaiting_recipient) VALUES (:id, " +
+                ":sourceEventId, :kind, :channel, :accountId, :recipient, :subject, :body, :orderId, :correlationId, " +
+                ":status, :attempts, :nextAttemptAt, :lastAttemptAt, :errorCategory, :error, :createdAt, :sentAt, " +
+                ":failedAt, :awaitingRecipient) ON CONFLICT (source_event_id, kind, channel) DO NOTHING"
 
         const val UPDATE =
             "UPDATE notifications SET recipient_address = :recipient, subject = :subject, body = :body, " +
                 "status = :status, attempts = :attempts, next_attempt_at = :nextAttemptAt, " +
                 "last_attempt_at = :lastAttemptAt, last_error_category = :errorCategory, last_error = :error, " +
-                "sent_at = :sentAt, failed_at = :failedAt WHERE id = :id AND status = :expected"
+                "sent_at = :sentAt, failed_at = :failedAt, awaiting_recipient = :awaitingRecipient " +
+                "WHERE id = :id AND status = :expected"
 
         // The sub-select locks the due rows and skips rows another instance is claiming right now.
         const val CLAIM =
@@ -224,6 +226,7 @@ class R2dbcNotificationRepository(
                 .bindOrNull("error", notification.lastFailure?.reason, String::class.java)
                 .bindOrNull("sentAt", notification.sentAt, Instant::class.java)
                 .bindOrNull("failedAt", notification.failedAt, Instant::class.java)
+                .bind("awaitingRecipient", notification.awaitingRecipient)
 
         fun toNotification(row: Readable): Notification =
             Notification(
@@ -244,6 +247,7 @@ class R2dbcNotificationRepository(
                 lastFailure = failureOf(row),
                 sentAt = row.optional("sent_at"),
                 failedAt = row.optional("failed_at"),
+                awaitingRecipient = row.required("awaiting_recipient"),
             )
 
         fun failureOf(row: Readable): DeliveryFailure? {
@@ -283,3 +287,26 @@ private suspend fun DatabaseClient.selectWhere(
         .all()
         .collectList()
         .awaitSingle()
+
+/**
+ * [NotificationRetentionRepository] on `notifications`: terminal rows only (data-model section 5), oldest first; their
+ * `delivery_attempts` rows go with them (`ON DELETE CASCADE`), and rows another purge is deleting are skipped.
+ */
+class R2dbcNotificationRetention(
+    private val database: DatabaseClient,
+) : NotificationRetentionRepository {
+    override suspend fun deleteTerminalCreatedBefore(
+        cutoff: Instant,
+        limit: Int,
+    ): Int =
+        database
+            .sql(
+                "DELETE FROM notifications WHERE id IN (SELECT id FROM notifications WHERE status <> 'queued' " +
+                    "AND created_at < :cutoff ORDER BY created_at LIMIT :limit FOR UPDATE SKIP LOCKED)",
+            ).bind("cutoff", cutoff)
+            .bind("limit", limit)
+            .fetch()
+            .rowsUpdated()
+            .awaitSingle()
+            .toInt()
+}

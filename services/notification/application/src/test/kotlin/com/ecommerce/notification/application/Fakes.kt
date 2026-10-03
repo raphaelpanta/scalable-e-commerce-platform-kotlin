@@ -35,7 +35,8 @@ class Gate(
 /** In-memory [NotificationRepository] with the semantics of the R2DBC adapter. */
 class InMemoryNotifications(
     private val gate: Gate = Gate(),
-) : NotificationRepository {
+) : NotificationRepository,
+    NotificationRetentionRepository {
     val stored = linkedMapOf<NotificationId, Notification>()
     val attempts = mutableListOf<DeliveryAttempt>()
     val forgotten = mutableListOf<AccountId>()
@@ -134,6 +135,26 @@ class InMemoryNotifications(
                 .sortedByDescending { it.failedAt },
             page,
         )
+    }
+
+    /** The (cutoff, limit) of every purge batch asked for. */
+    val purges = mutableListOf<Pair<Instant, Int>>()
+
+    override suspend fun deleteTerminalCreatedBefore(
+        cutoff: Instant,
+        limit: Int,
+    ): Int {
+        gate.pass()
+        purges += cutoff to limit
+        val expired =
+            stored.values
+                .filter { it.status != DeliveryStatus.QUEUED && it.createdAt < cutoff }
+                .take(limit)
+                .map { it.id }
+                .toSet()
+        expired.forEach { stored.remove(it) }
+        attempts.removeAll { it.notificationId in expired }
+        return expired.size
     }
 
     private fun page(

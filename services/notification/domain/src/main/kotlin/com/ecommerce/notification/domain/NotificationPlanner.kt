@@ -36,6 +36,35 @@ object NotificationPlanner {
             .filterNot { it.dedupeKey in alreadyProduced }
     }
 
+    /**
+     * The message for [data] when identity could not tell the contact details and the event carried no snapshot: one
+     * `queued` email without an address, [Notification.awaitingRecipient], due at once. The delivery job resolves the
+     * recipient before sending (and suppresses it when the contact turns out not to permit email), so the event is
+     * never lost (FR-018, FR-019). Email only: it is the default channel and the only one of the security kinds; SMS
+     * needs preferences that could not be read.
+     */
+    fun deferred(
+        source: EventSource,
+        data: TemplateData,
+        at: Instant,
+    ): Notification =
+        Notification(
+            id = NotificationId.random(),
+            sourceEventId = source.eventId,
+            kind = data.kind,
+            channel = NotificationChannel.EMAIL,
+            accountId = source.accountId,
+            recipient = null,
+            content = Templates.render(data, NotificationChannel.EMAIL),
+            orderId = Templates.orderOf(data),
+            correlationId = source.correlationId,
+            status = DeliveryStatus.QUEUED,
+            attempts = 0,
+            createdAt = at,
+            nextAttemptAt = at,
+            awaitingRecipient = true,
+        )
+
     private fun notificationFor(
         source: EventSource,
         data: TemplateData,

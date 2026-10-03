@@ -8,16 +8,25 @@ import com.ecommerce.platform.testing.ProblemAssertions.expectProblem
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpHeaders
+import java.time.Duration
 import java.util.UUID
 
 private const val CART_TOKEN = "X-Cart-Token"
 private const val BAD_REQUEST = 400
 private const val TEAPOT_STOCK = 3
+private const val TWO_DEVICE_TEAPOT_STOCK = 5
+private const val DEVICE_A_TEAPOTS = 2
+private const val DEVICE_B_TEAPOTS = 4
+private val EVENT_TIMEOUT: Duration = Duration.ofSeconds(30)
 
-/** `mergeCart`: summing and capping, consuming the anonymous cart (a second merge is 404) and `CartMerged` (T040). */
+/**
+ * `mergeCart`: summing and capping, consuming the anonymous cart (a second merge is 404) and `CartMerged` (T040); two
+ * devices' anonymous carts merged one after the other into the same account cart (edge case "two devices", T163).
+ */
 class CartMergeIT(
     @Autowired private val recorded: RecordedEvents,
 ) : CartIntegrationTest() {
@@ -109,6 +118,87 @@ class CartMergeIT(
             .header(CART_TOKEN, token)
             .exchange()
             .expectProblem(ProblemType.NOT_FOUND)
+    }
+
+    @Test
+    fun `two devices merge their anonymous carts one after the other, quantities summed and capped at the stock`() {
+        val account = UUID.randomUUID()
+        val teapot = catalog.product(available = TWO_DEVICE_TEAPOT_STOCK, sku = "TEA-POT-2", name = "Teapot")
+        val coffee = catalog.product()
+        val mug = catalog.product()
+        val deviceA = add(teapot, DEVICE_A_TEAPOTS).shouldNotBeNull()
+        add(coffee, 1, deviceA)
+        val deviceB = add(teapot, DEVICE_B_TEAPOTS).shouldNotBeNull()
+        add(mug, 1, deviceB)
+
+        val first = mergeOk(bearer(account), deviceA)
+        first.cart.quantities() shouldBe mapOf(teapot.toString() to DEVICE_A_TEAPOTS, coffee.toString() to 1)
+        first.capped shouldBe emptyList<Json>()
+
+        val second = mergeOk(bearer(account), deviceB)
+        second.cart["id"] shouldBe first.cart["id"]
+        second.cart.quantities() shouldBe
+            mapOf(teapot.toString() to TWO_DEVICE_TEAPOT_STOCK, coffee.toString() to 1, mug.toString() to 1)
+        second.capped shouldBe
+            listOf(
+                mapOf(
+                    "productId" to teapot.toString(),
+                    "requestedQuantity" to DEVICE_A_TEAPOTS + DEVICE_B_TEAPOTS,
+                    "appliedQuantity" to TWO_DEVICE_TEAPOT_STOCK,
+                ),
+            )
+
+        mergedLineCounts(UUID.fromString(second.cart["id"] as String)) shouldBe listOf(2, second.cart.lines().size)
+        listOf(deviceA, deviceB).forEach { token -> merge(bearer(account), token).expectProblem(ProblemType.NOT_FOUND) }
+        accountCart(account).quantities() shouldBe second.cart.quantities()
+    }
+
+    private fun Json.quantities(): Map<Any?, Any?> = lines().associate { it["productId"] to it["quantity"] }
+
+    /** `lineCount` of the two `CartMerged` events of [cartId], in publication order. */
+    private fun mergedLineCounts(cartId: UUID): List<Int> {
+        await().atMost(EVENT_TIMEOUT).until {
+            recorded.on(Topic.CART).count { it.envelope.aggregateId == cartId } == 2
+        }
+        return recorded
+            .on(Topic.CART)
+            .filter { it.envelope.aggregateId == cartId }
+            .map { it.envelope.payload["lineCount"].asInt() }
+    }
+
+    private fun accountCart(account: UUID): Json =
+        client
+            .get()
+            .uri("/api/v1/cart")
+            .header(HttpHeaders.AUTHORIZATION, bearer(account))
+            .exchange()
+            .expectStatus()
+            .isOk
+            .expectBody(JSON_OBJECT)
+            .returnResult()
+            .responseBody
+            .shouldNotBeNull()
+
+    /** The cart and capped lines of a successful merge. */
+    private data class Merged(
+        val cart: Json,
+        val capped: List<*>,
+    )
+
+    @Suppress("UNCHECKED_CAST")
+    private fun mergeOk(
+        authorization: String,
+        token: String,
+    ): Merged {
+        val body =
+            merge(authorization, token)
+                .expectStatus()
+                .isOk
+                .expectBody(JSON_OBJECT)
+                .returnResult()
+                .responseBody
+                .shouldNotBeNull()
+        return Merged(body["cart"] as Json, body["cappedLines"] as List<*>)
     }
 
     @Test

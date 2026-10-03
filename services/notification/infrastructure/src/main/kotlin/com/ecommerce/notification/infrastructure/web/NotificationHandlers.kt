@@ -5,7 +5,10 @@ import arrow.core.left
 import arrow.core.nonEmptyListOf
 import arrow.core.raise.either
 import arrow.core.right
+import com.ecommerce.notification.application.Caller
+import com.ecommerce.notification.application.CallerRole
 import com.ecommerce.notification.application.FailedFilter
+import com.ecommerce.notification.application.Forbidden
 import com.ecommerce.notification.application.ListFailed
 import com.ecommerce.notification.application.ListOwn
 import com.ecommerce.notification.application.OwnFilter
@@ -21,7 +24,9 @@ import com.ecommerce.notification.domain.NotificationKind
 import com.ecommerce.platform.core.problem.Problem
 import com.ecommerce.platform.core.result.ValidationError
 import com.ecommerce.platform.problem.toServerResponse
-import com.ecommerce.platform.security.requireOperator
+import com.ecommerce.platform.security.AccountPrincipal
+import com.ecommerce.platform.security.Role
+import com.ecommerce.platform.security.requireAccount
 import com.ecommerce.platform.security.requireShopper
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
@@ -46,11 +51,25 @@ fun notificationRoutes(handlers: NotificationHandlers) =
         POST("/api/v1/notifications/{notificationId}/retry", handlers::retry)
     }
 
+/** The use-case caller of an authenticated request. */
+fun AccountPrincipal.toCaller(): Caller =
+    Caller(
+        AccountId(accountId),
+        roles
+            .map {
+                when (it) {
+                    Role.SHOPPER -> CallerRole.SHOPPER
+                    Role.OPERATOR -> CallerRole.OPERATOR
+                }
+            }.toSet(),
+    )
+
 /**
  * Handlers of `listOwnNotifications` (shopper), `listFailedNotifications` (operator) and `retryFailedNotification`
- * (operator). Roles are checked first (401/403 problems, deny by default); malformed parameters answer 400
- * `validation`. Bodies follow the contract's `Notification` schema: no message body and no recipient address,
- * `accountId` for operators only.
+ * (operator). An anonymous request is refused first (401); the shopper listing checks its role here, while the
+ * operator use cases receive the caller and refuse non-operators themselves ([Forbidden], answered 403, deny by
+ * default). Malformed parameters answer 400 `validation`. Bodies follow the contract's `Notification` schema: no
+ * message body and no recipient address, `accountId` for operators only.
  */
 class NotificationHandlers(
     private val ownNotifications: ListOwn,
@@ -71,7 +90,7 @@ class NotificationHandlers(
 
     suspend fun listFailed(request: ServerRequest): ServerResponse =
         either {
-            requireOperator().bind()
+            val caller = requireAccount().bind().toCaller()
             val filter =
                 FailedFilter(
                     accountId = uuid(request, "accountId").bind()?.let(::AccountId),
@@ -80,14 +99,14 @@ class NotificationHandlers(
                     failedFrom = instant(request, "failedFrom").bind(),
                     failedTo = instant(request, "failedTo").bind(),
                 )
-            failedNotifications(filter, page(request).bind())
+            failedNotifications(caller, filter, page(request).bind()).mapLeft(::problemOf).bind()
         }.toServerResponse(request) { ok(NotificationViews.page(it, operator = true)) }
 
     suspend fun retry(request: ServerRequest): ServerResponse =
         either {
-            requireOperator().bind()
+            val caller = requireAccount().bind().toCaller()
             val id = parseUuid("notificationId", request.pathVariable("notificationId")).bind()
-            retryFailed(NotificationId(id)).mapLeft(::problemOf).bind()
+            retryFailed(caller, NotificationId(id)).mapLeft(::problemOf).bind()
         }.toServerResponse(request) { requeued ->
             ServerResponse
                 .status(HttpStatus.ACCEPTED)
@@ -101,6 +120,10 @@ class NotificationHandlers(
     private companion object {
         fun problemOf(refusal: RetryRefusal): Problem =
             when (refusal) {
+                Forbidden -> {
+                    Problem.forbidden("This operation requires the operator role.")
+                }
+
                 RetryRefusal.NotFound -> {
                     Problem.notFound("No notification exists with the given id.")
                 }
