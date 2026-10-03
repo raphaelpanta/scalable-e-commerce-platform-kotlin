@@ -14,6 +14,7 @@ import com.ecommerce.platform.messaging.envelope.payloadAs
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.springframework.kafka.annotation.KafkaListener
 import org.springframework.kafka.support.Acknowledgment
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -51,7 +52,7 @@ class CartEventListeners(
     private suspend fun orderPaid(envelope: ReceivedEnvelope) {
         val paid = envelope.payloadAs<OrderPaidPayload>()
         val ordered = paid.lines.map { OrderedItem(ProductId(it.productId), it.quantity) }
-        removeOrderedLines(AccountId(paid.accountId), ordered).getOrElse { failure ->
+        removeOrderedLines(AccountId(paid.accountId), ordered, paid.paidAt).getOrElse { failure ->
             error("OrderPaid ${envelope.eventId} could not update the cart: $failure")
         }
     }
@@ -61,6 +62,8 @@ class CartEventListeners(
 data class OrderPaidPayload(
     val accountId: UUID,
     val lines: List<OrderLinePayload>,
+    /** Lines added to the cart after this instant were not part of the order (required by events.yaml). */
+    val paidAt: Instant? = null,
 )
 
 /** The part of events.yaml `OrderLine` the cart reads. */

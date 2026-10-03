@@ -10,6 +10,7 @@ import com.ecommerce.cart.domain.Money
 import com.ecommerce.cart.domain.OrderedItem
 import com.ecommerce.cart.domain.PricedCart
 import java.time.Duration
+import java.time.Instant
 
 /** Attempts of a background change that lost an optimistic-locking race before it gives up. */
 internal const val CONFLICT_ATTEMPTS: Int = 3
@@ -76,7 +77,8 @@ class ClearAccountCart(
 
 /**
  * `OrderPaid` consumer: takes the ordered quantities out of the account's cart (same end state as the clear); a cart
- * left without lines is deleted.
+ * left without lines is deleted. Lines added after [paidAt] (the shopper buying the same product again before the
+ * event arrived) are not touched.
  */
 class RemoveOrderedLines(
     private val store: CartStore,
@@ -84,8 +86,9 @@ class RemoveOrderedLines(
     suspend operator fun invoke(
         accountId: AccountId,
         ordered: List<OrderedItem>,
+        paidAt: Instant? = null,
     ): Either<CartError, Unit> =
-        store.changeAccountCartForOrder(accountId) { cart -> cart.removeOrdered(ordered, store.now()) }
+        store.changeAccountCartForOrder(accountId) { cart -> cart.removeOrdered(ordered, store.now(), paidAt) }
 }
 
 /** `AccountDeleted` consumer: discards the account's cart (data-model section 1, deletion). */

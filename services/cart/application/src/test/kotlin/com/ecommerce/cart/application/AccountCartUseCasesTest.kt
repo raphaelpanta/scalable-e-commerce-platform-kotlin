@@ -14,6 +14,7 @@ import io.kotest.property.arbitrary.int
 import io.kotest.property.arbitrary.list
 import io.kotest.property.checkAll
 import java.time.Duration
+import java.time.Instant
 
 class AccountCartUseCasesTest :
     FunSpec({
@@ -119,6 +120,22 @@ class AccountCartUseCasesTest :
             remove(account, listOf(OrderedItem(productId(), 1))).value()
             harness.carts.updates shouldBe 1
             harness.carts.deletes shouldBe 0
+        }
+
+        test("an order paid leaves the lines added after its payment alone") {
+            val account = accountId()
+            val paidAt = Instant.parse("2026-10-03T21:00:00Z")
+            val again = line(quantity = 1).copy(addedAt = paidAt.plusSeconds(2))
+            val harness = Harness()
+            harness.carts.store(accountCart(account, again))
+
+            RemoveOrderedLines(harness.store)(account, listOf(OrderedItem(again.productId, 1)), paidAt).value()
+
+            harness.carts
+                .ofAccount(account)
+                .shouldNotBeNull()
+                .lines shouldContainExactly listOf(again)
+            harness.carts.updates shouldBe 0
         }
 
         test("an order that buys every remaining unit deletes the account cart; other units keep it") {

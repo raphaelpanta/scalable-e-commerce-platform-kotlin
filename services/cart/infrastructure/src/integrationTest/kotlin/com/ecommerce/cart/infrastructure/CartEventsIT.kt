@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpHeaders
 import org.springframework.kafka.core.KafkaTemplate
 import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -20,6 +21,7 @@ private val QUERY_TIMEOUT: Duration = Duration.ofSeconds(10)
 private const val SEND_TIMEOUT_SECONDS = 10L
 private const val UNIT_PRICE = 2450L
 private const val BEANS_HELD = 3
+private const val LATE_EVENT_SECONDS = 60L
 
 /** The `OrderPaid` and `AccountDeleted` consumers (group `cart`), each effective once per `eventId`. */
 class CartEventsIT(
@@ -73,6 +75,7 @@ class CartEventsIT(
         orderId: UUID,
         vararg lines: Pair<UUID, Int>,
         eventId: UUID = UUID.randomUUID(),
+        paidAt: Instant = Instant.now(),
     ): Envelope<Map<String, Any>> =
         EnvelopeFixtures.envelope(
             EventType.OrderPaid,
@@ -91,6 +94,7 @@ class CartEventsIT(
                     },
                 "orderStatus" to "placed",
                 "paymentStatus" to "approved",
+                "paidAt" to paidAt.toString(),
             ),
             aggregateId = orderId,
             eventId = eventId,
@@ -129,6 +133,26 @@ class CartEventsIT(
                 .returnResult()
                 .responseBody
         (emptied?.get("lines") as List<*>).isEmpty() shouldBe true
+    }
+
+    @Test
+    fun `a late order paid leaves the product the shopper put back in the cart after paying`() {
+        val account = UUID.randomUUID()
+        val product = catalog.product()
+        val paidAt = Instant.now().minusSeconds(LATE_EVENT_SECONDS)
+        // The order's synchronous clear emptied the cart at payment; the shopper then adds the same product again.
+        addToAccount(account, product, 1)
+
+        val orderId = UUID.randomUUID()
+        send(orderPaid(account, orderId, product to 1, paidAt = paidAt))
+        // Same key, same partition: once the marker's effect is visible, the late event was handled.
+        val marker = UUID.randomUUID()
+        val markerProduct = catalog.product()
+        addToAccount(marker, markerProduct, 1)
+        send(orderPaid(marker, orderId, markerProduct to 1))
+        await().atMost(EVENT_TIMEOUT).until { quantities(marker) == null }
+
+        quantities(account) shouldBe mapOf(product to 1)
     }
 
     @Test

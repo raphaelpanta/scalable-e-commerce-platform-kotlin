@@ -299,6 +299,24 @@ class CartSpec :
                 after.updatedAt shouldBe LATER
             }
 
+            test("a line added after the payment is not taken out by that order's late event") {
+                val boughtBefore = line(quantity = 2)
+                val boughtAgain = line(quantity = 1).copy(addedAt = LATER)
+                val atPayment = line(quantity = 1).copy(addedAt = LATER)
+                val cart = cartOf(listOf(boughtBefore, boughtAgain, atPayment))
+                val paidAt = LATER.minusSeconds(1)
+                val ordered = cart.lines.map { OrderedItem(it.productId, 1) }
+
+                val after = cart.removeOrdered(ordered, LATER, paidAt)
+
+                after.lines shouldContainExactly
+                    listOf(boughtBefore.copy(quantity = quantity(1)), boughtAgain, atPayment)
+                cart.removeOrdered(ordered, LATER, LATER).lines shouldContainExactly
+                    listOf(boughtBefore.copy(quantity = quantity(1)))
+                cart.removeOrdered(listOf(OrderedItem(boughtAgain.productId, 1)), LATER, paidAt) shouldBeSameInstanceAs
+                    cart
+            }
+
             test("an order that bought nothing from the cart leaves it untouched") {
                 checkAll(arbCart) { cart ->
                     cart.removeOrdered(listOf(OrderedItem(productId(), 1)), LATER) shouldBeSameInstanceAs cart

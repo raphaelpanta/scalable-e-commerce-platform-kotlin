@@ -111,17 +111,20 @@ data class Cart(
 
     /**
      * Takes the [ordered] quantities out of the cart (payment approved, `OrderPaid`): a line loses the units bought
-     * and disappears when none remain. The cart is returned unchanged (same version) when nothing was bought from it.
+     * and disappears when none remain. A line added after [paidAt] cannot belong to that order and is left alone: the
+     * order's synchronous clear already emptied the cart and the shopper put the product back for a new purchase
+     * before the late event arrived. The cart is returned unchanged (same version) when nothing was bought from it.
      */
     fun removeOrdered(
         ordered: List<OrderedItem>,
         now: Instant,
+        paidAt: Instant? = null,
     ): Cart {
         val bought = ordered.groupingBy { it.productId }.fold(0) { sum, item -> sum + item.quantity }
         val remaining =
             lines.mapNotNull { line ->
                 val units = bought[line.productId] ?: 0
-                if (units == 0) {
+                if (units == 0 || (paidAt != null && line.addedAt.isAfter(paidAt))) {
                     line
                 } else {
                     Quantity.of(line.quantity.value - units).getOrNull()?.let { line.copy(quantity = it) }

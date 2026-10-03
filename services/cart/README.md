@@ -6,7 +6,8 @@ the catalog's internal pricing API, with an opaque `revision` (ADR 0003), the me
 internal API order uses at checkout (`contracts/internal/cart-internal.yaml`), the `OrderPaid` and `AccountDeleted`
 consumers and the hourly purge of anonymous carts idle for 30 days. An order that empties an account cart (the
 internal clear after payment approval, or `OrderPaid` taking the bought units out) deletes the cart row (data-model
-§1); the account then reads an empty cart again and its next add creates a new cart.
+§1); the account then reads an empty cart again and its next add creates a new cart. `OrderPaid` leaves lines added
+after its `paidAt` alone: the shopper may have put the same product back for a new purchase before the event arrived.
 
 Package root: `com.ecommerce.cart`.
 
