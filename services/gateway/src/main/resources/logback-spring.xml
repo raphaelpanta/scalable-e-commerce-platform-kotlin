@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Logging of the gateway (docs/service-conventions.md section 7); the services get the same file from platform-core.
+  Two appenders on the root logger:
+  - CONSOLE: Spring Boot's structured console appender, unchanged: the format comes from
+    `logging.structured.format.console` (`ecs` in application.yml), so the ECS JSON lines (service, traceId, spanId,
+    correlationId) stay exactly what Boot writes without this file.
+  - OTEL: the OpenTelemetry Logback bridge. Each event becomes an OTLP log record (body = message, severity, trace
+    context, MDC `correlationId`, key-value pairs such as `originalCorrelationId`, thread), exported by Boot's
+    `management.opentelemetry.logging.export.otlp.*` to the collector and on to Loki. It receives its OpenTelemetry
+    instance from observability.OpenTelemetryAppenderInstaller once the context is up; earlier events are buffered.
+  Nothing is captured that the console line does not already carry: no message arguments, no code locations.
+-->
+<configuration>
+	<include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+	<include resource="org/springframework/boot/logging/logback/structured-console-appender.xml"/>
+
+	<appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
+		<captureExperimentalAttributes>true</captureExperimentalAttributes>
+		<captureCodeAttributes>false</captureCodeAttributes>
+		<captureMarkerAttribute>false</captureMarkerAttribute>
+		<captureKeyValuePairAttributes>true</captureKeyValuePairAttributes>
+		<captureArguments>false</captureArguments>
+		<captureMdcAttributes>correlationId,originalCorrelationId</captureMdcAttributes>
+	</appender>
+
+	<root level="INFO">
+		<appender-ref ref="CONSOLE"/>
+		<appender-ref ref="OTEL"/>
+	</root>
+</configuration>

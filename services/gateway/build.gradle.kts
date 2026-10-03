@@ -10,6 +10,8 @@ dependencies {
     implementation(libs.spring.boot.starter.security)
     implementation(libs.spring.boot.starter.oauth2.resource.server)
     implementation(libs.spring.boot.starter.opentelemetry)
+    // Logback events as OpenTelemetry log records for Loki (logback-spring.xml, OpenTelemetryAppenderInstaller)
+    implementation(libs.opentelemetry.logback.appender)
 
     testImplementation(libs.spring.boot.starter.security.test)
     testImplementation(libs.spring.security.oauth2.jose)

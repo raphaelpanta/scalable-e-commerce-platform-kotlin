@@ -8,3 +8,19 @@ logging:
     # Testcontainers stops the database while R2DBC connections are still open; the resulting "Connection
     # reset" is expected at shutdown and would otherwise print at ERROR level (Principle VIII).
     io.r2dbc.postgresql.client.ReactorNettyClient: off
+
+management:
+  # No collector in tests: the OTLP exporters of platform-core's defaults (metrics, traces and the log records of
+  # the OTEL Logback appender) stay off.
+  otlp:
+    metrics:
+      export:
+        enabled: false
+  tracing:
+    export:
+      otlp:
+        enabled: false
+  logging:
+    export:
+      otlp:
+        enabled: false

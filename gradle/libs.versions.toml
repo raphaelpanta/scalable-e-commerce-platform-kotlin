@@ -33,6 +33,11 @@ foojay-resolver = "1.0.0"
 # Feature 004 additions (resolved on Maven Central 2026-10-02)
 arrow = "2.2.3"
 bouncycastle = "1.86"
+# Logback -> OpenTelemetry log bridge (Loki). The Spring Boot BOM manages only the OpenTelemetry core (1.62.0 in Boot
+# 4.1.1), not the instrumentation line: 2.28.1-alpha is the newest release built on opentelemetry-api 1.62.0 (the
+# latest, 2.31.1-alpha on 2026-10-03, needs 1.65.0 and would split the API from the Boot-managed SDK). Bump together
+# with Spring Boot.
+opentelemetry-logback-appender = "2.28.1-alpha"
 
 [libraries]
 # Gradle plugins consumed by build-logic
@@ -89,6 +94,7 @@ spring-boot-starter-kafka = { module = "org.springframework.boot:spring-boot-sta
 spring-boot-starter-kafka-test = { module = "org.springframework.boot:spring-boot-starter-kafka-test" }
 spring-boot-starter-mail = { module = "org.springframework.boot:spring-boot-starter-mail" }
 spring-boot-starter-opentelemetry = { module = "org.springframework.boot:spring-boot-starter-opentelemetry" }
+opentelemetry-sdk-testing = { module = "io.opentelemetry:opentelemetry-sdk-testing" }
 spring-boot-starter-validation = { module = "org.springframework.boot:spring-boot-starter-validation" }
 spring-boot-starter-security-test = { module = "org.springframework.boot:spring-boot-starter-security-test" }
 spring-kafka = { module = "org.springframework.kafka:spring-kafka" }
@@ -107,6 +113,9 @@ spring-cloud-starter-loadbalancer = { module = "org.springframework.cloud:spring
 arrow-core = { module = "io.arrow-kt:arrow-core", version.ref = "arrow" }
 bcprov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 testcontainers-kafka = { module = "org.testcontainers:testcontainers-kafka", version.ref = "testcontainers" }
+
+# Logback appender that turns every log event into an OpenTelemetry log record (exported over OTLP to Loki)
+opentelemetry-logback-appender = { module = "io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0", version.ref = "opentelemetry-logback-appender" }
 
 [bundles]
 kotest = ["kotest-runner-junit5", "kotest-assertions-core", "kotest-property"]

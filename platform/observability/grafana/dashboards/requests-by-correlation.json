@@ -43,7 +43,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum(count_over_time({service=~\"$service\"} | json | correlationId=\"$correlationId\" [$__range]))",
+          "expr": "sum(count_over_time({service=~\"$service\"} | correlationId=\"$correlationId\" [$__range]))",
           "queryType": "instant"
         }
       ],
@@ -97,7 +97,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "count(sum by (service) (count_over_time({service=~\"$service\"} | json | correlationId=\"$correlationId\" [$__range])))",
+          "expr": "count(sum by (service) (count_over_time({service=~\"$service\"} | correlationId=\"$correlationId\" [$__range])))",
           "queryType": "instant"
         }
       ],
@@ -151,7 +151,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum(count_over_time({service=~\"$service\"} | json | correlationId=\"$correlationId\" | log_level=\"ERROR\" [$__range]))",
+          "expr": "sum(count_over_time({service=~\"$service\", level=\"ERROR\"} | correlationId=\"$correlationId\" [$__range]))",
           "queryType": "instant"
         }
       ],
@@ -200,7 +200,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Enter the `X-Correlation-Id` of a request in **Correlation id**. Lines carry the ECS fields `service`, `traceId`, `spanId`, `correlationId`; click **Open trace in Tempo** on a line to follow the trace."
+        "content": "Enter the `X-Correlation-Id` of a request in **Correlation id**. Lines are OpenTelemetry log records: labels `service` and `level`, structured metadata `correlationId`, `traceId`, `spanId`. Query: `{service=~\".+\"} | correlationId=\"<id>\"`. Click **Open trace in Tempo** in a line's details to follow the trace."
       }
     },
     {
@@ -224,7 +224,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (service) (count_over_time({service=~\"$service\"} | json | correlationId=\"$correlationId\" [$__auto]))",
+          "expr": "sum by (service) (count_over_time({service=~\"$service\"} | correlationId=\"$correlationId\" [$__auto]))",
           "legendFormat": "{{service}}",
           "queryType": "range"
         }
@@ -277,7 +277,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{service=~\"$service\"} | json | correlationId=\"$correlationId\"",
+          "expr": "{service=~\"$service\"} | correlationId=\"$correlationId\"",
           "queryType": "range",
           "maxLines": 1000
         }

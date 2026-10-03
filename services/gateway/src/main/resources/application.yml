@@ -241,15 +241,25 @@ management:
       # /actuator/health/liveness and /actuator/health/readiness
       probes:
         enabled: true
+  # Same telemetry settings as platform-core's defaults for the services: every request traced, and short OTLP
+  # timeouts so that a missing collector costs a throttled warning, not slow requests. Log lines reach the logs
+  # endpoint through the OTEL appender of logback-spring.xml.
+  tracing:
+    sampling:
+      probability: 1.0
   opentelemetry:
     tracing:
       export:
         otlp:
           endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+          connect-timeout: 1s
+          timeout: 5s
     logging:
       export:
         otlp:
           endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/logs
+          connect-timeout: 1s
+          timeout: 5s
   otlp:
     metrics:
       export:

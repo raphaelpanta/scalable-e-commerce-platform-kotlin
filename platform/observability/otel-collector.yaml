@@ -20,31 +20,30 @@ processors:
     limit_percentage: 80
     spike_limit_percentage: 25
   batch: {}
-  # Loki indexes a small set of resource attributes (service.name becomes the label service_name). The dashboards use the
-  # shorter label `service`, which loki.yaml also declares as an index label, so it is copied here.
+  # Log records come from the OpenTelemetry Logback appender of every service and of the gateway (logback-spring.xml):
+  # body = the log message, severity, the trace context of the request, attributes `correlationId` (MDC) and the
+  # key-value pairs of the line (`originalCorrelationId`, the gateway's method/path/status/durationMs), resource
+  # `service.name`. Loki stores the record attributes as structured metadata (`trace_id`/`span_id` natively) and
+  # indexes the resource attributes named in loki.yaml.
   transform/logs:
     error_mode: ignore
     log_statements:
-      - context: resource
-        statements:
-          - set(attributes["service"], attributes["service.name"]) where attributes["service"] == nil
-      - context: log
-        statements:
-          # Services log ECS JSON (fields service, traceId, spanId, correlationId). When the record body is such a JSON
-          # document, lift the correlation fields into attributes (Loki structured metadata) so they are filterable
-          # without parsing, and keep the body untouched for `| json`.
-          - set(cache, ParseJSON(body)) where IsString(body) and IsMatch(body, "^[ ]*[{]")
-          - set(attributes["correlationId"], cache["correlationId"]) where cache["correlationId"] != nil
-          - set(attributes["traceId"], cache["traceId"]) where cache["traceId"] != nil
-          - set(attributes["spanId"], cache["spanId"]) where cache["spanId"] != nil
-          # Records emitted with an active span carry the trace context natively.
-          - set(attributes["traceId"], trace_id.string) where attributes["traceId"] == nil and trace_id.string != "00000000000000000000000000000000"
-          - set(attributes["spanId"], span_id.string) where attributes["spanId"] == nil and span_id.string != "0000000000000000"
+      # The dashboards use the short label `service` (Loki's default label is service_name).
+      - set(resource.attributes["service"], resource.attributes["service.name"]) where resource.attributes["service"] == nil
+      # `level` (INFO, WARN, ERROR...) becomes an index label below; traceId/spanId keep the ECS console names, so
+      # one query style works for both, and the Loki data source links traceId to Tempo.
+      - set(log.attributes["level"], log.severity_text) where log.severity_text != nil and log.severity_text != ""
+      - set(log.attributes["traceId"], log.trace_id.string) where log.trace_id.string != "00000000000000000000000000000000"
+      - set(log.attributes["spanId"], log.span_id.string) where log.span_id.string != "0000000000000000"
+  # Loki can index resource attributes only: moving `level` to the resource splits each batch by level, so loki.yaml
+  # can make it a label next to `service`.
+  groupbyattrs/level:
+    keys: [level]
 
 exporters:
-  otlphttp/loki:
+  otlp_http/loki:
     endpoint: http://loki:3100/otlp
-  otlp/tempo:
+  otlp_grpc/tempo:
     endpoint: tempo:4317
     tls:
       insecure: true
@@ -62,12 +61,12 @@ service:
   pipelines:
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, transform/logs, batch]
-      exporters: [otlphttp/loki]
+      processors: [memory_limiter, transform/logs, groupbyattrs/level, batch]
+      exporters: [otlp_http/loki]
     traces:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [otlp/tempo]
+      exporters: [otlp_grpc/tempo]
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]

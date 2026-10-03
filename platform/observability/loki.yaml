@@ -36,10 +36,13 @@ limits_config:
   otlp_config:
     resource_attributes:
       attributes_config:
-        # `service` (copied from service.name by the collector) is an index label next to the default ones.
+        # `service` (copied from service.name by the collector) and `level` (the record's severity, moved to the
+        # resource by the collector) are index labels next to the default ones. Record attributes such as
+        # `correlationId`, `traceId` and `spanId` are structured metadata: `{service=~".+"} | correlationId="<id>"`.
         - action: index_label
           attributes:
             - service
+            - level
 
 compactor:
   working_directory: /loki/compactor

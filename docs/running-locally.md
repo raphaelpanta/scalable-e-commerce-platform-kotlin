@@ -57,8 +57,12 @@ working.
 Send `-H "X-Correlation-Id: $(uuidgen)"` with a request (the gateway generates one when missing and echoes it in the
 response). Then in Grafana open **Dashboards > E-commerce platform > Requests by correlation id**, enter the id and read
 the lines of every service; **Open trace in Tempo** on a line jumps to the trace. The same query works in Explore with
-the Loki data source: `{service=~".+"} | json | correlationId="<id>"`. Per-service request rate, error rate and p95
-latency are on the **Service RED** dashboard. Container logs of one service: `docker compose logs -f <service>`.
+the Loki data source: `{service=~".+"} | correlationId="<id>"`. Every service and the gateway send their log lines
+as OpenTelemetry log records (Logback `OTEL` appender, `logback-spring.xml`) through the collector to Loki: the body
+is the message, `service` and `level` are labels, `correlationId`, `traceId`, `spanId` (and `originalCorrelationId`
+when the gateway refused a client value) are structured metadata, so no `| json` stage is needed. Lines can arrive up
+to a few seconds after the request (batched export). Per-service request rate, error rate and p95 latency are on the
+**Service RED** dashboard. Container logs of one service (ECS JSON): `docker compose logs -f <service>`.
 
 ## Rebuild one service
 

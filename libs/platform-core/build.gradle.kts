@@ -21,9 +21,13 @@ dependencies {
     implementation(libs.spring.boot.starter.oauth2.resource.server)
     implementation(libs.spring.boot.starter.actuator)
     implementation(libs.spring.boot.starter.opentelemetry)
+    // Logback events as OpenTelemetry log records for Loki (logback-spring.xml, OpenTelemetryLogbackAutoConfiguration)
+    implementation(libs.opentelemetry.logback.appender)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.context.propagation)
     implementation(libs.micrometer.registry.prometheus)
+
+    testImplementation(libs.opentelemetry.sdk.testing)
 
     testFixturesApi(libs.testcontainers.postgresql)
     testFixturesApi(libs.testcontainers.kafka)

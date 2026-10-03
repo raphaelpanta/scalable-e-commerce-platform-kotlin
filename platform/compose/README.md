@@ -75,7 +75,7 @@ Prometheus discovers replicas with `dns_sd_configs`. Services are built from the
 
 | Signal | Path |
 |---|---|
-| Logs | services (OTLP/HTTP) -> `otel-collector` -> Loki native OTLP endpoint; the collector copies `service.name` to `service` and lifts `correlationId`, `traceId`, `spanId` from ECS JSON bodies into attributes |
+| Logs | gateway and services: Logback `OTEL` appender (`logback-spring.xml`) -> OTLP/HTTP -> `otel-collector` -> Loki native OTLP endpoint; the collector copies `service.name` to the label `service`, turns the severity into the label `level` and adds `traceId`/`spanId` from the record's trace context; `correlationId` is structured metadata: `{service=~".+"} \| correlationId="<id>"`. The console keeps ECS JSON (`docker compose logs`) |
 | Traces | services (OTLP/HTTP) -> `otel-collector` -> Tempo (OTLP gRPC) |
 | Metrics | Prometheus **pulls** `/actuator/prometheus` on port 8081 of `gateway` and the six services (DNS service discovery, every replica); OTLP metrics received by the collector are exposed on `otel-collector:8889` (`prometheus` exporter) and pulled as well; Tempo writes span metrics and service graphs to Prometheus (remote write) |
 
