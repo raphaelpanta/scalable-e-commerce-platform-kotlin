@@ -63,10 +63,13 @@ COPY --from=layers /layers/extracted/dependencies/ ./
 COPY --from=layers /layers/extracted/spring-boot-loader/ ./
 COPY --from=layers /layers/extracted/snapshot-dependencies/ ./
 COPY --from=layers /layers/extracted/application/ ./
-# MaxRAMPercentage sizes the heap from the container limit; networkaddress.cache.ttl=5 keeps JVM DNS lookups short-lived
+# MaxRAMPercentage sizes the heap from the container limit, leaving the other half for what a Spring Boot service needs
+# besides the heap (metaspace, code cache, thread stacks, Netty direct buffers, about 250 to 300 MB measured): at 75 % of
+# a 640 MiB limit the kernel OOM-killed identity under the acceptance suite (2026-10-03). networkaddress.cache.ttl=5
+# keeps JVM DNS lookups short-lived
 # so that platform DNS discovery (Compose service names, later Kubernetes Services) drops removed replicas within
 # 5 seconds (research.md section 2, FR-024, SC-008).
-ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -Dnetworkaddress.cache.ttl=5"
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=50 -Dnetworkaddress.cache.ttl=5"
 EXPOSE 8080 8081
 # The JRE image ships neither curl nor wget; bash's /dev/tcp is enough for the actuator probe. Every service and the
 # gateway expose the readiness health group on the management port 8081 (docs/service-conventions.md section 2): the

@@ -123,15 +123,17 @@ services never turn healthy and `depends_on: service_healthy` blocks the stack.
 ## Building the images
 
 `docker compose --profile core up -d --build` builds the seven service images from `platform/docker/Dockerfile`.
-They share one BuildKit cache mount for Gradle (`sharing=locked`, so concurrent builds wait for each other); the
-scripts also set `COMPOSE_PARALLEL_LIMIT=1` so images build one at a time, which is the fastest option on a single
-machine because the shared cache is warm after the first image. With podman set `BUILDAH_FORMAT=docker` so the
-`HEALTHCHECK` survives.
+Their `build` stage compiles all seven boot jars in one Gradle invocation and is identical for every image, so with
+`COMPOSE_PARALLEL_LIMIT=1` (set by the scripts) the first image runs Gradle and the six others reuse the stage from the
+layer cache: a cold `up --build` takes about 4 minutes on the development machine (`platform/docker/README.md`,
+"Start-up time"). The Gradle user home is a cache mount (`sharing=locked`, so concurrent builds wait for each other).
+With podman set `BUILDAH_FORMAT=docker` so the `HEALTHCHECK` survives.
 
 ## Resource limits
 
-Every service container is bounded (`SERVICE_MEM_LIMIT`, default 640m, and `SERVICE_CPUS`, default 1.0) so that the
-JVM's `MaxRAMPercentage=75` sizes the heap to the container; databases get `DB_MEM_LIMIT` (256m), Kafka
+Every service container is bounded (`SERVICE_MEM_LIMIT`, default 768m, and `SERVICE_CPUS`, default 1.0) so that the
+JVM's `MaxRAMPercentage=50` sizes the heap to the container (384 MiB) and leaves room for its off-heap memory (an earlier
+640m limit with a 75 % heap was OOM-killed under load); databases get `DB_MEM_LIMIT` (256m), Kafka
 `KAFKA_MEM_LIMIT` (1g) with `KAFKA_HEAP_OPTS`, and each observability container `OBS_MEM_LIMIT` (512m). The whole
-`core` + `observability` stack needs about 8 GiB; on a smaller engine VM start `core` alone first. `GATEWAY_PORT`
+`core` + `observability` stack needs about 9 GiB; on a smaller engine VM start `core` alone first. `GATEWAY_PORT`
 moves the published gateway port when 8080 is taken on the host.

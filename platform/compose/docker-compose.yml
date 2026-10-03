@@ -37,9 +37,10 @@ x-app: &app
   restart: unless-stopped
   stop_grace_period: 30s
   profiles: [core]
-  # Bound every service so the JVM (MaxRAMPercentage=75) sizes itself to the container, not to the whole engine VM;
-  # seven unbounded JVMs exhausted an 8 GiB Podman machine.
-  mem_limit: ${SERVICE_MEM_LIMIT:-640m}
+  # Bound every service so the JVM (MaxRAMPercentage=50) sizes itself to the container, not to the whole engine VM;
+  # seven unbounded JVMs exhausted an 8 GiB Podman machine. 768m = a 384 MiB heap plus the JVM's off-heap memory; at
+  # 640m with a 75 % heap the kernel OOM-killed identity under the acceptance suite.
+  mem_limit: ${SERVICE_MEM_LIMIT:-768m}
   cpus: ${SERVICE_CPUS:-1.0}
   # Probe the readiness health group on the management port (the JRE image has no curl; bash's /dev/tcp is enough), the
   # same check as the image HEALTHCHECK; declared here so it also applies to images built before the Dockerfile
