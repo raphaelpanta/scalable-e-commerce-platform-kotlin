@@ -102,11 +102,16 @@ services:
     environment:
       <<: *service-env
       SEED: ${SEED:-true}
+      # The simulated SMS channel of phone verification mirrors every SMS to Mailpit (services/identity/README.md)
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
     networks: [internal]
     depends_on:
       identity-db:
         condition: service_healthy
       kafka:
+        condition: service_healthy
+      mailpit:
         condition: service_healthy
 
   identity-db:
