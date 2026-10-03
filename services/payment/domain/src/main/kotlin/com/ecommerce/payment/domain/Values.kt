@@ -96,13 +96,18 @@ enum class DeclineCategory(
     }
 }
 
-/** Outcome of one payment attempt: approved and declined are final, pending means the provider was unreachable. */
+/**
+ * Outcome of one payment attempt (data-model section 3.5): approved and declined are final, pending means the provider
+ * was unreachable and a retry is expected, voided is final too: a pending attempt that will never be resolved because
+ * its order was cancelled (or expired), or because a retry superseded it. A voided attempt publishes no event.
+ */
 enum class PaymentOutcome(
     val wire: String,
 ) {
     APPROVED("approved"),
     DECLINED("declined"),
     PENDING("pending"),
+    VOIDED("voided"),
     ;
 
     companion object {

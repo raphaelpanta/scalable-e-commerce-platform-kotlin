@@ -8,15 +8,19 @@ import com.ecommerce.payment.domain.PageRequest
 import com.ecommerce.payment.domain.PaymentAttempt
 import com.ecommerce.payment.domain.PaymentAttemptId
 import com.ecommerce.payment.domain.PaymentEvent
+import com.ecommerce.payment.domain.Recipient
 import com.ecommerce.payment.domain.RefundId
 import com.ecommerce.payment.domain.RefundRecord
 import java.time.Instant
 
-/** Persistence of charge attempts: unique per idempotency key, at most one approved charge per order. */
+/**
+ * Persistence of charge attempts: unique per idempotency key, at most one approved charge per order, at most one
+ * retry per attempt.
+ */
 interface PaymentAttemptRepository {
     /**
-     * Stores a new attempt; false (and nothing stored) when an attempt with the same idempotency key, or a second
-     * approved charge of the same order, already exists.
+     * Stores a new attempt; false (and nothing stored) when an attempt with the same idempotency key, a second
+     * approved charge of the same order, or a second retry of the same attempt already exists.
      */
     suspend fun insert(attempt: PaymentAttempt): Boolean
 
@@ -35,6 +39,50 @@ interface PaymentAttemptRepository {
         orderId: OrderId,
         page: PageRequest,
     ): Page<PaymentAttempt>
+
+    /** The pending attempts of [orderId]. */
+    suspend fun findPendingOf(orderId: OrderId): List<PaymentAttempt>
+
+    /**
+     * Up to [limit] pending attempts created at or before [createdUpTo] whose attempt number is below [maxAttempts],
+     * oldest first: the attempts the retry job is due to retry.
+     */
+    suspend fun findDueForRetry(
+        createdUpTo: Instant,
+        maxAttempts: Int,
+        limit: Int,
+    ): List<PaymentAttempt>
+
+    /** Voids the attempt [id] if it is still pending; false (nothing changed) when it is not pending. */
+    suspend fun markVoided(id: PaymentAttemptId): Boolean
+}
+
+/**
+ * What the payment context remembers of a cancelled order (data-model section 3.5): that it is cancelled, and the
+ * owner's contact snapshot of its `OrderCancelled` event, which the `RefundRecorded` of a late approval must carry.
+ * Personal data: its [toString] reveals nothing but the order.
+ */
+data class CancelledOrderRecord(
+    val orderId: OrderId,
+    val recipient: Recipient,
+    val recordedAt: Instant,
+) {
+    override fun toString(): String = "CancelledOrderRecord(orderId=$orderId, recordedAt=$recordedAt)"
+}
+
+/** Persistence of the cancelled orders, and the per-order lock that orders charges against cancellations. */
+interface CancelledOrderRepository {
+    /**
+     * Serialises, until the running transaction ends, every transaction that settles a charge of [orderId] or applies
+     * its cancellation, so that a charge and a cancellation always see each other's outcome. Must run inside
+     * [Transactions.run].
+     */
+    suspend fun lock(orderId: OrderId)
+
+    /** Remembers [order] as cancelled; false (nothing changed) when it already was. */
+    suspend fun remember(order: CancelledOrderRecord): Boolean
+
+    suspend fun find(orderId: OrderId): CancelledOrderRecord?
 }
 
 /** Persistence of refunds: unique per idempotency key and per refunded charge. */

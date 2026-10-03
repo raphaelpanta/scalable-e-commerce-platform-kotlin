@@ -10,6 +10,7 @@ import com.ecommerce.platform.messaging.testing.RecordedEventsConfig
 import com.ecommerce.platform.testing.InternalToken
 import com.ecommerce.platform.testing.JwtFixture
 import com.ecommerce.platform.testing.PostgresTestConfig
+import org.awaitility.Awaitility.await
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT
@@ -30,6 +31,9 @@ private val CLIENT_TIMEOUT = java.time.Duration.ofSeconds(30)
 private val QUERY_TIMEOUT = java.time.Duration.ofSeconds(10)
 private const val SEND_TIMEOUT_SECONDS = 10L
 
+/** How long an event may take through Kafka and a consumer. */
+val EVENT_WAIT: java.time.Duration = java.time.Duration.ofSeconds(30)
+
 const val CHARGES = "/internal/charges"
 const val REFUNDS = "/internal/refunds"
 const val PAYMENTS = "/api/v1/payments"
@@ -38,6 +42,7 @@ const val IDEMPOTENCY_KEY = "Idempotency-Key"
 const val CORRELATION_HEADER = "X-Correlation-Id"
 const val APPROVE_TOKEN = "tok_sim_approve_4242"
 const val UNREACHABLE_TOKEN = "tok_sim_unreachable"
+const val UNREACHABLE_FOREVER_TOKEN = "tok_sim_unreachable_forever"
 const val SHOPPER = "shopper"
 const val OPERATOR = "operator"
 
@@ -67,6 +72,7 @@ data class Charge(
  */
 @SpringBootTest(webEnvironment = RANDOM_PORT, properties = ["management.server.port="])
 @Import(PostgresTestConfig::class, KafkaTestConfig::class, RecordedEventsConfig::class)
+@Suppress("TooManyFunctions") // the shared requests, events and queries of every integration test of the module
 open class PaymentIntegrationTest {
     @LocalServerPort
     protected var port: Int = 0
@@ -165,6 +171,64 @@ open class PaymentIntegrationTest {
                 EnvelopeJson.write(envelope),
             ).get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         return eventId
+    }
+
+    /** `OrderPlacedPayload` of [charge], as the order service publishes it. */
+    protected fun orderPlaced(charge: Charge): Map<String, Any?> =
+        mapOf(
+            "orderId" to charge.orderId.toString(),
+            "orderNumber" to "ORD-20261002-0001",
+            "accountId" to charge.owner.toString(),
+            "total" to mapOf("amountMinor" to charge.amountMinor, "currency" to "BRL"),
+            "orderStatus" to "placed",
+            "paymentStatus" to "pending",
+            "paymentMethodRef" to charge.token,
+            "idempotencyKey" to charge.key.toString(),
+            "recipient" to recipient(charge.owner),
+        )
+
+    /** `OrderCancelledPayload` of [charge]'s order, cancelled with [paymentStatus]. */
+    protected fun orderCancelled(
+        charge: Charge,
+        paymentId: String?,
+        paymentStatus: String = "approved",
+    ): Map<String, Any?> =
+        mapOf(
+            "orderId" to charge.orderId.toString(),
+            "orderNumber" to "ORD-20261002-0001",
+            "accountId" to charge.owner.toString(),
+            "lines" to listOf(mapOf("productId" to UUID.randomUUID().toString(), "quantity" to 1)),
+            "total" to mapOf("amountMinor" to charge.amountMinor, "currency" to "BRL"),
+            "orderStatus" to "cancelled",
+            "paymentStatus" to paymentStatus,
+            "reason" to if (paymentStatus == "approved") "SHOPPER_REQUEST" else "PAYMENT_EXPIRED",
+            "refundRequired" to (paymentStatus == "approved"),
+            "paymentId" to paymentId,
+            "cancelledAt" to "2026-10-02T10:45:00Z",
+            "recipient" to recipient(charge.owner),
+        )
+
+    /** The `RecipientSnapshot` of [owner]. */
+    protected fun recipient(owner: UUID): Map<String, Any?> =
+        mapOf(
+            "accountId" to owner.toString(),
+            "email" to "ada@example.test",
+            "phone" to null,
+            "preferredChannels" to listOf("email"),
+        )
+
+    /** The outcomes of the attempts of [charge]'s order, by attempt number. */
+    protected fun attemptsOf(charge: Charge): List<Any?> =
+        column(
+            "SELECT outcome FROM payment_attempts WHERE order_id = :id ORDER BY attempt_number, created_at",
+            "id" to charge.orderId,
+        )
+
+    /** Waits until the `payment` consumer processed [eventId]. */
+    protected fun awaitProcessed(eventId: UUID) {
+        await().atMost(EVENT_WAIT).until {
+            column("SELECT consumer FROM processed_event WHERE event_id = :id", "id" to eventId) == listOf("payment")
+        }
     }
 
     /** Rows of a one-column query, for assertions on the database. */

@@ -210,7 +210,7 @@ components:
       traits: [{$ref: '#/components/messageTraits/keyed'}]
       payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: PaymentPending}, producer: {const: payment}, payload: {$ref: '#/components/schemas/PaymentOutcomePayload'}}}]}
     PaymentApproved:
-      summary: Provider approved the charge; order sets paymentStatus approved.
+      summary: Provider approved the charge (the first attempt, or a later retry of a pending one with its own paymentId); order sets paymentStatus approved while it is still pending.
       traits: [{$ref: '#/components/messageTraits/keyed'}]
       payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: PaymentApproved}, producer: {const: payment}, payload: {$ref: '#/components/schemas/PaymentOutcomePayload'}}}]}
     PaymentDeclined:
@@ -218,7 +218,7 @@ components:
       traits: [{$ref: '#/components/messageTraits/keyed'}]
       payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: PaymentDeclined}, producer: {const: payment}, payload: {$ref: '#/components/schemas/PaymentOutcomePayload'}}}]}
     RefundRecorded:
-      summary: Refund recorded with the provider after cancellation of an order whose paymentStatus was approved.
+      summary: Refund recorded with the provider after cancellation of an order whose paymentStatus was approved, or automatically for a charge approved after its order was cancelled (an approval racing the cancellation).
       traits: [{$ref: '#/components/messageTraits/keyed'}]
       payload: {allOf: [{$ref: '#/components/schemas/Envelope'}, {properties: {type: {const: RefundRecorded}, producer: {const: payment}, payload: {$ref: '#/components/schemas/RefundRecordedPayload'}}}]}
     NotificationSent:

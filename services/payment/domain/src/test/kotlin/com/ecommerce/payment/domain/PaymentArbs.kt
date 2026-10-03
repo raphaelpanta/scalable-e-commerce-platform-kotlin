@@ -45,6 +45,7 @@ object PaymentArbs {
             .map { "tok_" + it.joinToString("") }
             .filter {
                 it != SimulatedPaymentRules.UNREACHABLE_TOKEN &&
+                    it != SimulatedPaymentRules.UNREACHABLE_FOREVER_TOKEN &&
                     !it.startsWith(SimulatedPaymentRules.DECLINE_TOKEN_PREFIX)
             }.map(::token)
 
@@ -60,10 +61,10 @@ object PaymentArbs {
             ChargeRequest(orderId.bind(), accountId.bind(), amount.bind(), plainToken.bind(), key.bind())
         }
 
-    /** The decision of a provider: approved, declined with a category, or unreachable. */
+    /** The decision of a provider: approved, declined with a category, or unreachable (never voided). */
     val decision: Arb<ProviderDecision> =
         arbitrary {
-            when (Arb.enum<PaymentOutcome>().bind()) {
+            when (Arb.element(PaymentOutcome.APPROVED, PaymentOutcome.DECLINED, PaymentOutcome.PENDING).bind()) {
                 PaymentOutcome.APPROVED -> {
                     ProviderDecision.Approved(
                         reference("sim_ch_" + Arb.long(0L..999_999L).bind()),
@@ -74,11 +75,15 @@ object PaymentArbs {
                     ProviderDecision.Declined(category.bind(), reference("sim_ch_declined"))
                 }
 
-                PaymentOutcome.PENDING -> {
+                else -> {
                     ProviderDecision.Unreachable
                 }
             }
         }
+
+    /** First attempts left pending by an unreachable provider. */
+    val pendingAttempt: Arb<PaymentAttempt> =
+        arbitrary { PaymentAttempt.charge(attemptId.bind(), chargeRequest.bind(), ProviderDecision.Unreachable, NOW) }
 
     val attempt: Arb<PaymentAttempt> =
         arbitrary { PaymentAttempt.charge(attemptId.bind(), chargeRequest.bind(), decision.bind(), NOW) }

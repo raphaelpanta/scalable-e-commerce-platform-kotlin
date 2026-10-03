@@ -18,6 +18,15 @@ spring:
     # Restores thread locals (such as an MDC correlation id) on Reactor operators.
     context-propagation: auto
 
+payment:
+  retry:
+    # A pending charge (provider unreachable) is retried once it is this old, up to max-attempts attempts per order
+    # (the first included); the job looks for due attempts every interval, batch-size at a time.
+    delay: ${PAYMENT_RETRY_DELAY:60s}
+    max-attempts: ${PAYMENT_RETRY_MAX_ATTEMPTS:3}
+    interval: 10s
+    batch-size: 100
+
 # platform.security.* (JWKS_URI, JWT_ISSUER, JWT_AUDIENCE, INTERNAL_API_TOKEN) and the Kafka connection
 # (KAFKA_BOOTSTRAP_SERVERS, consumer group `payment`) come from the platform defaults. Every public path requires a
 # bearer token, so no public path is declared; /internal/** is guarded by X-Internal-Token.

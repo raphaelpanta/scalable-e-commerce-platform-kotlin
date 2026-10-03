@@ -77,3 +77,14 @@ Feature: Place an order and pay
     When the shopper submits the same checkout again because no answer arrived
     Then both answers describe the same order
     And the shopper has exactly 1 order
+
+  @slow
+  Scenario: A pending payment is resolved by a later retry of the payment
+    Given a product "Milk frother" priced at 35.00 with 5 units in stock
+    And the shopper has 1 "Milk frother" in the cart
+    When the shopper checks out paying with a card while the payment provider is unreachable
+    Then the order is placed with its payment pending
+    And a later retry of the payment approves the order
+    And the order has 2 payment attempts, the latest approved and the earlier ones voided
+    And "Milk frother" has 4 units left in stock
+    And the shopper has exactly 1 order

@@ -39,6 +39,13 @@ object Environment {
     val deliveryFailureBudget: Duration =
         Duration.ofMinutes(variable("NOTIFICATION_FAILURE_TIMEOUT_MINUTES", "15").toLong())
 
+    /**
+     * How long a pending payment may take to be resolved by the payment service's retry job: its delay (60 seconds
+     * by default, `PAYMENT_RETRY_DELAY` of the payment service) plus the job's interval and the event delivery.
+     */
+    val paymentRetryBudget: Duration =
+        Duration.ofSeconds(variable("PAYMENT_RETRY_TIMEOUT_SECONDS", "150").toLong())
+
     private fun variable(
         name: String,
         default: String,

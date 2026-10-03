@@ -46,6 +46,7 @@ value class IdempotencyKey(
 
     companion object {
         private const val REFUND_NAMESPACE = "payment:refund-of-order:"
+        private const val RETRY_NAMESPACE = "payment:retry-of:"
 
         /**
          * The key of the refund that an `OrderCancelled` event triggers for [orderId]: derived from the order, so a
@@ -53,5 +54,12 @@ value class IdempotencyKey(
          */
         fun refundOf(orderId: OrderId): IdempotencyKey =
             IdempotencyKey(UUID.nameUUIDFromBytes((REFUND_NAMESPACE + orderId).toByteArray(Charsets.UTF_8)))
+
+        /**
+         * The key of the retry of the attempt keyed [previous]: derived from it, so the checkout key stays on the
+         * first attempt only and every attempt of the chain keeps a key of its own.
+         */
+        fun retryOf(previous: IdempotencyKey): IdempotencyKey =
+            IdempotencyKey(UUID.nameUUIDFromBytes((RETRY_NAMESPACE + previous).toByteArray(Charsets.UTF_8)))
     }
 }

@@ -56,11 +56,16 @@ data class CancelledOrder(
 
 /** What the `OrderCancelled` consumer did. */
 sealed interface CancellationRefund {
-    /** The payment was not approved: nothing to refund (a pending payment is left to expire). */
+    /** The order has neither an approved charge nor a pending attempt here: nothing to refund or void. */
     data object NotRequired : CancellationRefund
 
-    /** The order has no approved charge in this service. */
+    /** The event says the payment was approved, but the order has no approved charge in this service. */
     data object NoApprovedCharge : CancellationRefund
+
+    /** The order's pending [attempts] were voided (terminal, no event); there is nothing to refund. */
+    data class Voided(
+        val attempts: List<PaymentAttempt>,
+    ) : CancellationRefund
 
     /** The refund was recorded now and `RefundRecorded` published. */
     data class Refunded(
@@ -84,22 +89,43 @@ sealed interface CancellationRefund {
 }
 
 /**
- * `OrderCancelled` (FR-016): an order cancelled with its payment approved gets one full refund of its approved
- * charge, under a key derived from the order, and one `RefundRecorded`. A refund that already exists (the
- * synchronous `POST /internal/refunds`, or a redelivery) is not repeated; if its event still waits for the owner's
- * contact, the event is published now.
+ * `OrderCancelled` (FR-016, data-model section 3.5, conventions section 8), under the order's lock: the order is
+ * remembered as cancelled (with the owner's contact snapshot), its pending attempts are voided (terminal, no event,
+ * so no retry resolves them later), and its approved charge, if any, gets one full refund under a key derived from the
+ * order and one `RefundRecorded`. The refund does not depend on the event's `refundRequired`: an approval that raced
+ * the cancellation (the order cancelled while its payment was still pending) is refunded the same way. A refund that
+ * already exists (the synchronous `POST /internal/refunds`, a late-approval refund, or a redelivery) is not repeated;
+ * if its event still waits for the owner's contact, the event is published now.
  */
-class RefundCancelledOrder(
+class SettleCancelledOrder(
     private val ledger: PaymentLedger,
     private val recordRefund: RecordRefund,
     private val clock: Clock,
 ) {
-    suspend operator fun invoke(order: CancelledOrder): CancellationRefund {
-        val charge = if (order.refundRequired) approvedChargeOf(order) else null
+    suspend operator fun invoke(order: CancelledOrder): CancellationRefund =
+        ledger.transactions.run {
+            ledger.cancellations.lock(order.orderId)
+            ledger.cancellations.remember(CancelledOrderRecord(order.orderId, order.recipient, clock.instant()))
+            val voided = voidPending(order)
+            settle(order, approvedChargeOf(order), voided)
+        }
+
+    private suspend fun voidPending(order: CancelledOrder): List<PaymentAttempt> =
+        ledger.attempts
+            .findPendingOf(order.orderId)
+            .filter { ledger.attempts.markVoided(it.id) }
+            .map { it.void() }
+
+    private suspend fun settle(
+        order: CancelledOrder,
+        charge: PaymentAttempt?,
+        voided: List<PaymentAttempt>,
+    ): CancellationRefund {
         val existing = charge?.let { ledger.refunds.findByAttempt(it.id) }
         return when {
-            !order.refundRequired -> CancellationRefund.NotRequired
-            charge == null -> CancellationRefund.NoApprovedCharge
+            charge == null && order.refundRequired -> CancellationRefund.NoApprovedCharge
+            charge == null && voided.isEmpty() -> CancellationRefund.NotRequired
+            charge == null -> CancellationRefund.Voided(voided)
             existing == null -> refund(order, charge)
             existing.awaitingAnnouncement -> announce(existing, order.recipient)
             else -> CancellationRefund.AlreadyRefunded(existing)
@@ -124,15 +150,14 @@ class RefundCancelledOrder(
     private suspend fun announce(
         refund: RefundRecord,
         recipient: Recipient,
-    ): CancellationRefund =
-        ledger.transactions.run {
-            val now = clock.instant()
-            if (ledger.refunds.markAnnounced(refund.id, now)) {
-                val announced = refund.copy(announcedAt = now)
-                ledger.events.publish(PaymentEvent.RefundRecorded(announced, recipient))
-                CancellationRefund.Announced(announced)
-            } else {
-                CancellationRefund.AlreadyRefunded(refund)
-            }
+    ): CancellationRefund {
+        val now = clock.instant()
+        return if (ledger.refunds.markAnnounced(refund.id, now)) {
+            val announced = refund.copy(announcedAt = now)
+            ledger.events.publish(PaymentEvent.RefundRecorded(announced, recipient))
+            CancellationRefund.Announced(announced)
+        } else {
+            CancellationRefund.AlreadyRefunded(refund)
         }
+    }
 }

@@ -2,6 +2,7 @@ package com.ecommerce.payment.infrastructure
 
 import com.ecommerce.payment.application.AuthoriseCharge
 import com.ecommerce.payment.application.ChargePlacedOrder
+import com.ecommerce.payment.application.ChargeSettlement
 import com.ecommerce.payment.application.GetPaymentAttempt
 import com.ecommerce.payment.application.GetRefund
 import com.ecommerce.payment.application.GetSimulatorRules
@@ -10,13 +11,15 @@ import com.ecommerce.payment.application.ListRefundsForOrder
 import com.ecommerce.payment.application.PaymentIds
 import com.ecommerce.payment.application.PaymentLedger
 import com.ecommerce.payment.application.RecordRefund
-import com.ecommerce.payment.application.RefundCancelledOrder
+import com.ecommerce.payment.application.RetryPendingCharges
+import com.ecommerce.payment.application.SettleCancelledOrder
 import com.ecommerce.payment.domain.PaymentProviderPort
 import com.ecommerce.payment.domain.SimulatedPaymentRules
 import com.ecommerce.payment.domain.SimulatorRules
 import com.ecommerce.payment.infrastructure.messaging.OutboxPaymentEventPublisher
 import com.ecommerce.payment.infrastructure.messaging.PaymentEventHandlers
 import com.ecommerce.payment.infrastructure.messaging.PaymentEventListeners
+import com.ecommerce.payment.infrastructure.persistence.R2dbcCancelledOrderRepository
 import com.ecommerce.payment.infrastructure.persistence.R2dbcPaymentAttemptRepository
 import com.ecommerce.payment.infrastructure.persistence.R2dbcRefundRepository
 import com.ecommerce.payment.infrastructure.persistence.R2dbcTransactions
@@ -27,6 +30,7 @@ import com.ecommerce.payment.infrastructure.web.PaymentQueryHandlers
 import com.ecommerce.platform.messaging.consumer.EventListenerSupport
 import com.ecommerce.platform.messaging.envelope.EnvelopeFactory
 import com.ecommerce.platform.messaging.outbox.OutboxPublisher
+import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.r2dbc.core.DatabaseClient
@@ -37,6 +41,7 @@ import java.time.Duration
 
 /** Wires the framework-free use cases to their adapters: R2DBC, the outbox, the simulated provider. */
 @Configuration(proxyBeanMethods = false)
+@EnableConfigurationProperties(PaymentProperties::class)
 @Suppress("TooManyFunctions") // one factory per use case and adapter keeps the wiring explicit
 class UseCaseConfiguration {
     /** UTC with microsecond ticks: the precision PostgreSQL keeps, so stored and returned instants are equal. */
@@ -63,17 +68,10 @@ class UseCaseConfiguration {
         PaymentLedger(
             R2dbcPaymentAttemptRepository(database),
             R2dbcRefundRepository(database),
+            R2dbcCancelledOrderRepository(database),
             OutboxPaymentEventPublisher(outbox, envelopes),
             R2dbcTransactions(TransactionalOperator.create(transactionManager)),
         )
-
-    @Bean
-    fun authoriseCharge(
-        ledger: PaymentLedger,
-        provider: PaymentProviderPort,
-        ids: PaymentIds,
-        clock: Clock,
-    ): AuthoriseCharge = AuthoriseCharge(ledger, provider, ids, clock)
 
     @Bean
     fun recordRefund(
@@ -82,6 +80,32 @@ class UseCaseConfiguration {
         ids: PaymentIds,
         clock: Clock,
     ): RecordRefund = RecordRefund(ledger, provider, ids, clock)
+
+    @Bean
+    fun chargeSettlement(
+        ledger: PaymentLedger,
+        recordRefund: RecordRefund,
+    ): ChargeSettlement = ChargeSettlement(ledger, recordRefund)
+
+    @Bean
+    fun authoriseCharge(
+        ledger: PaymentLedger,
+        provider: PaymentProviderPort,
+        ids: PaymentIds,
+        clock: Clock,
+        settlement: ChargeSettlement,
+    ): AuthoriseCharge = AuthoriseCharge(ledger, provider, ids, clock, settlement)
+
+    @Bean
+    @Suppress("LongParameterList") // the use case's own collaborators, injected one by one like every factory here
+    fun retryPendingCharges(
+        ledger: PaymentLedger,
+        provider: PaymentProviderPort,
+        ids: PaymentIds,
+        clock: Clock,
+        properties: PaymentProperties,
+        settlement: ChargeSettlement,
+    ): RetryPendingCharges = RetryPendingCharges(ledger, provider, ids, clock, properties.retry.policy, settlement)
 
     @Bean
     fun internalPaymentHandlers(
@@ -109,7 +133,7 @@ class UseCaseConfiguration {
         recordRefund: RecordRefund,
         clock: Clock,
     ): PaymentEventHandlers =
-        PaymentEventHandlers(ChargePlacedOrder(authoriseCharge), RefundCancelledOrder(ledger, recordRefund, clock))
+        PaymentEventHandlers(ChargePlacedOrder(authoriseCharge), SettleCancelledOrder(ledger, recordRefund, clock))
 
     @Bean
     fun paymentEventListeners(

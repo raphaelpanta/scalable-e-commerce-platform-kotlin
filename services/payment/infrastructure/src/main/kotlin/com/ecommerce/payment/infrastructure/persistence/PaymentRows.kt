@@ -1,5 +1,6 @@
 package com.ecommerce.payment.infrastructure.persistence
 
+import com.ecommerce.payment.application.CancelledOrderRecord
 import com.ecommerce.payment.domain.AccountId
 import com.ecommerce.payment.domain.DeclineCategory
 import com.ecommerce.payment.domain.IdempotencyKey
@@ -10,6 +11,7 @@ import com.ecommerce.payment.domain.PaymentAttemptId
 import com.ecommerce.payment.domain.PaymentMethodRef
 import com.ecommerce.payment.domain.PaymentOutcome
 import com.ecommerce.payment.domain.ProviderReference
+import com.ecommerce.payment.domain.Recipient
 import com.ecommerce.payment.domain.RefundId
 import com.ecommerce.payment.domain.RefundRecord
 import io.r2dbc.spi.Readable
@@ -51,6 +53,22 @@ internal fun Readable.toAttempt(): PaymentAttempt =
         providerReference = get("provider_reference", String::class.java)?.let(::ProviderReference),
         idempotencyKey = IdempotencyKey(required("idempotency_key", UUID::class.java)),
         createdAt = required("created_at", Instant::class.java),
+        attemptNumber = required("attempt_number", Int::class.javaObjectType),
+        previousAttemptId = get("previous_attempt_id", UUID::class.java)?.let(::PaymentAttemptId),
+    )
+
+/** A `cancelled_orders` row as the record of a cancelled order. */
+internal fun Readable.toCancelledOrder(): CancelledOrderRecord =
+    CancelledOrderRecord(
+        orderId = OrderId(required("order_id", UUID::class.java)),
+        recipient =
+            Recipient(
+                accountId = AccountId(required("account_id", UUID::class.java)),
+                email = required("email", String::class.java),
+                phone = get("phone", String::class.java),
+                preferredChannels = required("preferred_channels", Array<String>::class.java).toList(),
+            ),
+        recordedAt = required("recorded_at", Instant::class.java),
     )
 
 /** A `refunds` row as a refund. */

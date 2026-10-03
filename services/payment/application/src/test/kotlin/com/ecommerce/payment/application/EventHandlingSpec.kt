@@ -66,7 +66,7 @@ class EventHandlingSpec :
             val backend = Backend()
             val charge = backend.approvedCharge()
 
-            val outcome = backend.refundCancelledOrder(cancelled(charge))
+            val outcome = backend.settleCancelledOrder(cancelled(charge))
 
             val refund = outcome.shouldBeInstanceOf<CancellationRefund.Refunded>().refund
             refund.attemptId shouldBe charge.id
@@ -75,7 +75,7 @@ class EventHandlingSpec :
             refund.announcedAt shouldBe NOW
             backend.events.published shouldContainExactly listOf(PaymentEvent.RefundRecorded(refund, ADA_CONTACT))
 
-            backend.refundCancelledOrder(cancelled(charge)) shouldBe CancellationRefund.AlreadyRefunded(refund)
+            backend.settleCancelledOrder(cancelled(charge)) shouldBe CancellationRefund.AlreadyRefunded(refund)
             backend.refunds.stored.values shouldHaveSize 1
             backend.events.published shouldHaveSize 1
         }
@@ -90,29 +90,28 @@ class EventHandlingSpec :
                 fresh.stored(charge)
                 fresh.stored(pendingOfOrder)
                 fresh
-                    .refundCancelledOrder(cancelled(charge, paymentId = named))
+                    .settleCancelledOrder(cancelled(charge, paymentId = named))
                     .shouldBeInstanceOf<CancellationRefund.Refunded>()
                     .refund.attemptId shouldBe charge.id
             }
             val foreign = backend.approvedCharge()
             backend
-                .refundCancelledOrder(cancelled(charge, paymentId = foreign.id))
+                .settleCancelledOrder(cancelled(charge, paymentId = foreign.id))
                 .shouldBeInstanceOf<CancellationRefund.Refunded>()
                 .refund.attemptId shouldBe charge.id
         }
 
         test("OrderCancelled without an approved payment, or without a charge here, refunds nothing") {
             val backend = Backend()
-            val charge = backend.approvedCharge()
             val declined =
                 backend.stored(
                     attemptFor(chargeRequest(), ProviderDecision.Declined(DeclineCategory.CARD_REJECTED, CHARGE_REF)),
                 )
 
-            backend.refundCancelledOrder(cancelled(charge, refundRequired = false)) shouldBe
+            backend.settleCancelledOrder(cancelled(declined, refundRequired = false)) shouldBe
                 CancellationRefund.NotRequired
-            backend.refundCancelledOrder(cancelled(declined)) shouldBe CancellationRefund.NoApprovedCharge
-            backend.refundCancelledOrder(
+            backend.settleCancelledOrder(cancelled(declined)) shouldBe CancellationRefund.NoApprovedCharge
+            backend.settleCancelledOrder(
                 CancelledOrder(newOrder(), true, null, ADA_CONTACT),
             ) shouldBe CancellationRefund.NoApprovedCharge
             backend.refunds.stored.values
@@ -131,7 +130,7 @@ class EventHandlingSpec :
             val laterBackend = Backend()
             laterBackend.stored(charge)
             laterBackend.stored(early.value)
-            val clocked = RefundCancelledOrder(laterBackend.ledger, laterBackend.recordRefund, fixedClock(LATER))
+            val clocked = SettleCancelledOrder(laterBackend.ledger, laterBackend.recordRefund, fixedClock(LATER))
 
             val announced = clocked(cancelled(charge)).shouldBeInstanceOf<CancellationRefund.Announced>().refund
 
@@ -159,8 +158,72 @@ class EventHandlingSpec :
                 )
             backend.refunds.announcedElsewhere = true
 
-            backend.refundCancelledOrder(cancelled(charge)) shouldBe CancellationRefund.AlreadyRefunded(refund)
+            backend.settleCancelledOrder(cancelled(charge)) shouldBe CancellationRefund.AlreadyRefunded(refund)
             backend.events.published.shouldBeEmpty()
+        }
+
+        test("OrderCancelled remembers the order with the owner's contact, under the order's lock, once") {
+            val backend = Backend()
+            val orderId = newOrder()
+
+            backend.settleCancelledOrder(CancelledOrder(orderId, false, null, ADA_CONTACT)) shouldBe
+                CancellationRefund.NotRequired
+            backend.settleCancelledOrder(CancelledOrder(orderId, false, null, ADA_CONTACT.copy(email = "x@y.test")))
+
+            backend.cancellations.stored.values
+                .toList() shouldContainExactly
+                listOf(CancelledOrderRecord(orderId, ADA_CONTACT, NOW))
+            backend.cancellations.locks shouldContainExactly listOf(orderId, orderId)
+            backend.events.published.shouldBeEmpty()
+        }
+
+        test("OrderCancelled of an order whose payment is pending voids the pending attempt, without an event") {
+            val backend = Backend()
+            val pending = backend.stored(attemptFor(chargeRequest(), ProviderDecision.Unreachable))
+            val other = backend.stored(attemptFor(chargeRequest(), ProviderDecision.Unreachable))
+
+            val outcome = backend.settleCancelledOrder(cancelled(pending, refundRequired = false, paymentId = null))
+
+            outcome shouldBe CancellationRefund.Voided(listOf(pending.void()))
+            backend.attempts.stored[pending.id] shouldBe pending.void()
+            backend.attempts.stored[other.id] shouldBe other
+            backend.events.published.shouldBeEmpty()
+            backend.refunds.stored.values
+                .shouldBeEmpty()
+            backend.settleCancelledOrder(cancelled(pending, refundRequired = false)) shouldBe
+                CancellationRefund.NotRequired
+        }
+
+        test("a pending attempt voided meanwhile by another writer is not reported as voided here") {
+            val backend = Backend()
+            val pending = backend.stored(attemptFor(chargeRequest(), ProviderDecision.Unreachable))
+            backend.attempts.voidedElsewhere = true
+
+            backend.settleCancelledOrder(cancelled(pending, refundRequired = false)) shouldBe
+                CancellationRefund.NotRequired
+        }
+
+        test("OrderCancelled refunds an approval that raced the cancellation, even when no refund was required") {
+            val backend = Backend()
+            val charge = backend.approvedCharge()
+            val pending = backend.stored(attemptFor(chargeRequest(charge.orderId), ProviderDecision.Unreachable))
+
+            val outcome = backend.settleCancelledOrder(cancelled(charge, refundRequired = false, paymentId = null))
+
+            val refund = outcome.shouldBeInstanceOf<CancellationRefund.Refunded>().refund
+            refund.attemptId shouldBe charge.id
+            refund.idempotencyKey shouldBe IdempotencyKey.refundOf(charge.orderId)
+            backend.attempts.stored[pending.id] shouldBe pending.void()
+            backend.events.published shouldContainExactly listOf(PaymentEvent.RefundRecorded(refund, ADA_CONTACT))
+        }
+
+        test("a pending attempt is voided even when the expected approved charge is missing") {
+            val backend = Backend()
+            val pending = backend.stored(attemptFor(chargeRequest(), ProviderDecision.Unreachable))
+
+            backend.settleCancelledOrder(cancelled(pending, paymentId = null)) shouldBe
+                CancellationRefund.NoApprovedCharge
+            backend.attempts.stored[pending.id] shouldBe pending.void()
         }
 
         test("a refund refused by a concurrent writer is reported, not thrown") {
@@ -175,7 +238,7 @@ class EventHandlingSpec :
                     NOW,
                 )
 
-            backend.refundCancelledOrder(cancelled(charge)) shouldBe
+            backend.settleCancelledOrder(cancelled(charge)) shouldBe
                 CancellationRefund.Refused(PaymentError.AlreadyRefunded)
             backend.events.published.shouldBeEmpty()
         }

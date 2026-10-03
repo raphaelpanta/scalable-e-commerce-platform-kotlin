@@ -28,6 +28,12 @@ management:
       export:
         enabled: false
 
+# The retry job looks for due pending charges often, so a test does not wait for its 10-second interval; the delay
+# keeps its 60-second default, so the pending attempts the other tests create stay pending.
+payment:
+  retry:
+    interval: 200ms
+
 platform:
   messaging:
     outbox:

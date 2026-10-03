@@ -33,7 +33,6 @@ import com.ecommerce.order.infrastructure.PactValues.ATTEMPT_PENDING
 import com.ecommerce.order.infrastructure.PactValues.KEY_1
 import com.ecommerce.order.infrastructure.PactValues.KEY_2
 import com.ecommerce.order.infrastructure.PactValues.KEY_3
-import com.ecommerce.order.infrastructure.PactValues.KEY_REFUND
 import com.ecommerce.order.infrastructure.PactValues.ORDER_1
 import com.ecommerce.order.infrastructure.PactValues.ORDER_2
 import com.ecommerce.order.infrastructure.PactValues.ORDER_3
@@ -51,7 +50,6 @@ import org.junit.jupiter.api.extension.ExtendWith
 import java.util.UUID
 
 private const val CHARGES = "/internal/charges"
-private const val REFUNDS = "/internal/refunds"
 private const val IDEMPOTENCY_KEY = "Idempotency-Key"
 private const val APPROVED_TOKEN = "tok_sim_approve_4242"
 private const val UNREACHABLE_TOKEN = "tok_sim_unreachable"
@@ -78,13 +76,6 @@ private fun PactDslWithState.charging(
 ) = internalRequest(description, "POST", CHARGES)
     .headers(IDEMPOTENCY_KEY, key)
     .jsonBody(body)
-
-private val REFUND_BODY: DslPart =
-    json { body ->
-        body.stringValue("orderId", ORDER_1)
-        body.stringValue("attemptId", ATTEMPT_APPROVED)
-        body.money("amount", TOTAL_1)
-    }
 
 private fun approvedAttempt(
     body: LambdaDslObject,
@@ -116,22 +107,6 @@ private fun approvedAttempt(
     }
 }
 
-private fun refundRecord(
-    body: LambdaDslObject,
-    exact: Boolean,
-) {
-    if (exact) body.stringValue("refundId", REFUND) else body.uuid("refundId", UUID.fromString(REFUND))
-    body.stringValue("orderId", ORDER_1)
-    body.stringValue("attemptId", ATTEMPT_APPROVED)
-    body.money("amount", TOTAL_1)
-    body.stringValue("status", "recorded")
-    if (exact) {
-        body.stringValue("createdAt", "2026-10-02T11:00:00Z")
-    } else {
-        body.stringMatcher("createdAt", PactValues.TIMESTAMP_REGEX, "2026-10-02T11:00:00Z")
-    }
-}
-
 private fun paymentState(
     paymentId: String,
     orderId: String,
@@ -151,8 +126,9 @@ private fun MessagePactBuilder.paymentEvent(
         .toPact(V4Pact::class.java)
 
 /**
- * Consumer side of order -> payment: the charge and refund calls (pact-interactions.md section 2.4) through the real
- * [PaymentClient], and the payment events order consumes (section 3.2) through the real [OrderEventHandlers].
+ * Consumer side of order -> payment: the charge calls (pact-interactions.md section 2.4) through the real
+ * [PaymentClient], and the payment events order consumes (section 3.2) through the real [OrderEventHandlers]. Refunds
+ * are recorded by payment's `OrderCancelled` consumer, so order makes no refund call.
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(providerName = "payment", pactVersion = PactSpecVersion.V4)
@@ -235,47 +211,6 @@ class PaymentConsumerPactTest {
                 KEY_1,
                 charge(ORDER_1, TOTAL_1, APPROVED_TOKEN),
             ).jsonAnswer(PactValues.OK, json { approvedAttempt(it, exact = true) })
-            .toPact(V4Pact::class.java)
-
-    @Pact(consumer = "order")
-    fun refund(builder: PactDslWithProvider): V4Pact =
-        builder
-            .given(
-                "an approved charge exists",
-                mapOf(
-                    "attemptId" to ATTEMPT_APPROVED,
-                    "orderId" to ORDER_1,
-                    "accountId" to ADA,
-                    "amountMinor" to TOTAL_1,
-                    "currency" to "BRL",
-                ),
-            ).internalRequest("a request to refund an approved charge", "POST", REFUNDS)
-            .headers(IDEMPOTENCY_KEY, KEY_REFUND)
-            .jsonBody(REFUND_BODY)
-            .jsonAnswer(PactValues.CREATED, json { refundRecord(it, exact = false) })
-            .toPact(V4Pact::class.java)
-
-    @Pact(consumer = "order")
-    fun refundReplayed(builder: PactDslWithProvider): V4Pact =
-        builder
-            .given(
-                "a refund exists",
-                mapOf(
-                    "refundId" to REFUND,
-                    "attemptId" to ATTEMPT_APPROVED,
-                    "orderId" to ORDER_1,
-                    "idempotencyKey" to KEY_REFUND,
-                    "amountMinor" to TOTAL_1,
-                    "currency" to "BRL",
-                    "createdAt" to "2026-10-02T11:00:00Z",
-                ),
-            ).internalRequest(
-                "a request to refund an approved charge again with the same idempotency key",
-                "POST",
-                REFUNDS,
-            ).headers(IDEMPOTENCY_KEY, KEY_REFUND)
-            .jsonBody(REFUND_BODY)
-            .jsonAnswer(PactValues.OK, json { refundRecord(it, exact = true) })
             .toPact(V4Pact::class.java)
 
     @Pact(consumer = "order")
@@ -385,18 +320,6 @@ class PaymentConsumerPactTest {
     }
 
     @Test
-    @PactTestFor(pactMethod = "refund")
-    fun `an approved charge is refunded`(mockServer: MockServer) {
-        refund(mockServer) shouldBe UUID.fromString(REFUND)
-    }
-
-    @Test
-    @PactTestFor(pactMethod = "refundReplayed")
-    fun `a replayed refund returns the same refund`(mockServer: MockServer) {
-        refund(mockServer) shouldBe UUID.fromString(REFUND)
-    }
-
-    @Test
     @PactTestFor(pactMethod = "paymentApproved", providerType = ProviderType.ASYNCH)
     fun `PaymentApproved approves the order's payment`(pact: V4Pact) {
         coEvery { applyPaymentOutcome(any(), any()) } returns OrderError.OrderNotFound.left()
@@ -450,16 +373,6 @@ class PaymentConsumerPactTest {
                     token,
                     IdempotencyKey(UUID.fromString(key)),
                 ),
-            )
-        }
-
-    private fun refund(mockServer: MockServer): UUID? =
-        withPactCorrelation {
-            PaymentClient(internalClient(mockServer)).refund(
-                order(ORDER_1),
-                attempt(ATTEMPT_APPROVED),
-                Money(TOTAL_1, "BRL"),
-                IdempotencyKey(UUID.fromString(KEY_REFUND)),
             )
         }
 

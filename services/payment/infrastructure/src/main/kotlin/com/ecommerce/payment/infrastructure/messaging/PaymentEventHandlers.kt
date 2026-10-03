@@ -6,7 +6,7 @@ import com.ecommerce.payment.application.CancellationRefund
 import com.ecommerce.payment.application.CancelledOrder
 import com.ecommerce.payment.application.ChargePlacedOrder
 import com.ecommerce.payment.application.PlacedOrderCharge
-import com.ecommerce.payment.application.RefundCancelledOrder
+import com.ecommerce.payment.application.SettleCancelledOrder
 import com.ecommerce.payment.domain.AccountId
 import com.ecommerce.payment.domain.ChargeRequest
 import com.ecommerce.payment.domain.IdempotencyKey
@@ -66,13 +66,14 @@ enum class Handling {
 
 /**
  * The payment context's consumers of `order.order.v1` (group `payment`): `OrderPlaced` charges the order under its
- * checkout key (converging with the synchronous charge), `OrderCancelled` with an approved payment records the
- * refund. Each runs inside the idempotent consumer of platform-messaging, so its changes commit with the
- * processed-event marker, and the events it publishes carry the incoming correlation id. Other types are ignored.
+ * checkout key (converging with the synchronous charge), `OrderCancelled` remembers the cancellation, voids a pending
+ * attempt and refunds an approved charge (even one approved after the cancellation). Each runs inside the idempotent
+ * consumer of platform-messaging, so its changes commit with the processed-event marker, and the events it publishes
+ * carry the incoming correlation id. Other types are ignored.
  */
 class PaymentEventHandlers(
     private val chargePlacedOrder: ChargePlacedOrder,
-    private val refundCancelledOrder: RefundCancelledOrder,
+    private val settleCancelledOrder: SettleCancelledOrder,
 ) {
     suspend fun onOrderEvent(envelope: ReceivedEnvelope): Handling =
         withCorrelationId(envelope.correlationId) {
@@ -107,11 +108,18 @@ class PaymentEventHandlers(
                 paymentId = payload.paymentId?.let(::PaymentAttemptId),
                 recipient = recipientOf(payload),
             )
-        return when (val outcome = refundCancelledOrder(order)) {
-            is CancellationRefund.Refunded, is CancellationRefund.Announced -> Handling.APPLIED
+        return when (val outcome = settleCancelledOrder(order)) {
+            is CancellationRefund.Refunded,
+            is CancellationRefund.Announced,
+            is CancellationRefund.Voided,
+            -> Handling.APPLIED
+
             is CancellationRefund.AlreadyRefunded -> Handling.UNCHANGED
+
             is CancellationRefund.Refused -> ignored(envelope, outcome.error)
+
             CancellationRefund.NoApprovedCharge -> ignored(envelope, "no approved charge to refund")
+
             CancellationRefund.NotRequired -> Handling.IGNORED
         }
     }
