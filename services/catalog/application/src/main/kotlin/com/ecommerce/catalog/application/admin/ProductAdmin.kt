@@ -4,13 +4,16 @@ import arrow.core.Either
 import arrow.core.NonEmptyList
 import arrow.core.raise.Raise
 import arrow.core.raise.either
+import arrow.core.raise.ensure
 import arrow.core.raise.ensureNotNull
 import com.ecommerce.catalog.application.Caller
 import com.ecommerce.catalog.application.Catalog
+import com.ecommerce.catalog.application.OperatorAction
 import com.ecommerce.catalog.application.ProductView
 import com.ecommerce.catalog.application.WriteResult
 import com.ecommerce.catalog.application.accumulating
 import com.ecommerce.catalog.application.concatIssues
+import com.ecommerce.catalog.application.invalid
 import com.ecommerce.catalog.domain.CatalogError
 import com.ecommerce.catalog.domain.CategoryId
 import com.ecommerce.catalog.domain.FieldIssue
@@ -43,12 +46,18 @@ private fun Catalog.validDetails(input: ProductInput): Either<NonEmptyList<Field
         platformCurrency(input.currency).accumulating(),
     ) { details, _ -> details }
 
-/** [details] when their category exists. */
-private suspend fun Raise<CatalogError>.inExistingCategory(
+/**
+ * [details] when their category exists and is active: a product cannot be placed in a withdrawn category or one
+ * beneath it (422, data-model section 3.2 "category must be active").
+ */
+private suspend fun Raise<CatalogError>.inActiveCategory(
     catalog: Catalog,
     details: ProductDetails,
 ): ProductDetails {
     ensureNotNull(catalog.categories.find(details.categoryId)) { CatalogError.CategoryNotFound(details.categoryId) }
+    ensure(details.categoryId !in catalog.hiddenCategories()) {
+        FieldIssue("categoryId", "must be an active category").invalid()
+    }
     return details
 }
 
@@ -72,7 +81,7 @@ private suspend fun Catalog.operatorView(product: Product): ProductView =
 
 /**
  * `createProduct` (operator only): a new active product with [initialStock] units, visible to shoppers at once. The
- * SKU is generated from the id unless one is given.
+ * SKU is generated from the id unless one is given; the category must be active.
  */
 class CreateProduct(
     private val catalog: Catalog,
@@ -96,23 +105,20 @@ class CreateProduct(
                     ) { valid, level, code -> Triple(valid, level, code) }
                     .mapLeft(CatalogError::Invalid)
                     .bind()
-            val product = Product.create(id, validSku, inExistingCategory(catalog, details), catalog.now())
-            catalog.transactions
-                .inTransaction {
-                    either {
-                        when (catalog.products.insert(product)) {
-                            WriteResult.WRITTEN -> catalog.inventory.insert(InventoryLevel(id, stock.value, 0))
-                            WriteResult.DUPLICATE -> raise(CatalogError.DuplicateSku(validSku))
-                            WriteResult.STALE -> raise(CatalogError.ConcurrentUpdate)
-                        }
+            val product = Product.create(id, validSku, inActiveCategory(catalog, details), catalog.now())
+            catalog
+                .auditedChange(actor, ACTION, id.value) {
+                    when (catalog.products.insert(product)) {
+                        WriteResult.WRITTEN -> catalog.inventory.insert(InventoryLevel(id, stock.value, 0))
+                        WriteResult.DUPLICATE -> raise(CatalogError.DuplicateSku(validSku))
+                        WriteResult.STALE -> raise(CatalogError.ConcurrentUpdate)
                     }
                 }.bind()
-            catalog.audit.changed(actor, ACTION, id.value)
             ProductView(product, stock.value, showQuantity = true)
         }
 
     private companion object {
-        const val ACTION = "createProduct"
+        val ACTION = OperatorAction.CREATE_PRODUCT
     }
 }
 
@@ -129,15 +135,14 @@ class UpdateProduct(
             val actor = catalog.authorize(caller, ACTION, productId.value).bind()
             val details = catalog.validDetails(input).mapLeft(CatalogError::Invalid).bind()
             val product = existing(catalog, productId)
-            inExistingCategory(catalog, details)
+            inActiveCategory(catalog, details)
             val updated = product.update(details, catalog.now())
-            save(catalog, product, updated)
-            catalog.audit.changed(actor, ACTION, productId.value)
+            catalog.auditedChange(actor, ACTION, productId.value) { save(catalog, product, updated) }.bind()
             catalog.operatorView(updated)
         }
 
     private companion object {
-        const val ACTION = "updateProduct"
+        val ACTION = OperatorAction.UPDATE_PRODUCT
     }
 }
 
@@ -153,13 +158,12 @@ class WithdrawProduct(
             val actor = catalog.authorize(caller, ACTION, productId.value).bind()
             val product = existing(catalog, productId)
             val withdrawn = product.withdraw(catalog.now()).bind()
-            save(catalog, product, withdrawn)
-            catalog.audit.changed(actor, ACTION, productId.value)
+            catalog.auditedChange(actor, ACTION, productId.value) { save(catalog, product, withdrawn) }.bind()
             catalog.operatorView(withdrawn)
         }
 
     private companion object {
-        const val ACTION = "withdrawProduct"
+        val ACTION = OperatorAction.WITHDRAW_PRODUCT
     }
 }
 
@@ -184,12 +188,11 @@ class AddProductImage(
                     .bind()
             val product = existing(catalog, productId)
             val updated = product.addImage(image, catalog.now()).bind()
-            save(catalog, product, updated)
-            catalog.audit.changed(actor, ACTION, productId.value)
+            catalog.auditedChange(actor, ACTION, productId.value) { save(catalog, product, updated) }.bind()
             updated.images.last()
         }
 
     private companion object {
-        const val ACTION = "addProductImage"
+        val ACTION = OperatorAction.ADD_PRODUCT_IMAGE
     }
 }

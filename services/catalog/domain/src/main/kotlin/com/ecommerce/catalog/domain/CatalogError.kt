@@ -35,6 +35,11 @@ sealed interface CatalogError {
         val productId: ProductId,
     ) : CatalogError
 
+    /** The category is withdrawn already. */
+    data class CategoryAlreadyWithdrawn(
+        val categoryId: CategoryId,
+    ) : CatalogError
+
     /** Another product carries the same SKU. */
     data class DuplicateSku(
         val sku: Sku,

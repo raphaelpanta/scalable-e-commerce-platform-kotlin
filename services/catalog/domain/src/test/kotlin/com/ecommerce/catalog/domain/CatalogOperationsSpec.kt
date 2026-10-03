@@ -7,6 +7,7 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import io.kotest.property.Arb
+import io.kotest.property.arbitrary.boolean
 import io.kotest.property.arbitrary.int
 import io.kotest.property.checkAll
 import java.time.Instant
@@ -104,6 +105,17 @@ class CatalogOperationsSpec :
                 withdrawn.updatedAt shouldBe LATER
                 withdrawn.version shouldBe active.version + 1
                 withdrawn.withdraw(LATER).error() shouldBe CatalogError.AlreadyWithdrawn(active.id)
+            }
+
+            test("a product of a hidden category is off sale and hidden from shoppers, never from operators") {
+                checkAll(Arb.boolean(), Arb.boolean(), Arb.boolean()) { active, hiddenCategory, operator ->
+                    val stored = product(saleState = if (active) SaleState.ACTIVE else SaleState.WITHDRAWN)
+                    val other = categoryId()
+                    val hidden = if (hiddenCategory) setOf(stored.details.categoryId, other) else setOf(other)
+                    stored.onSale(hidden) shouldBe (active && !hiddenCategory)
+                    stored.visibleTo(operator, hidden) shouldBe (operator || (active && !hiddenCategory))
+                }
+                product().visibleTo(operator = false) shouldBe true
             }
 
             test("withdrawing leaves stock and open reservations untouched (existing orders are unaffected)") {

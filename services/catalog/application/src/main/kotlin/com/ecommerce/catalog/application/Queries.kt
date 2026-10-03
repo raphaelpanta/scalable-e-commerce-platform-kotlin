@@ -14,15 +14,17 @@ import com.ecommerce.catalog.domain.SearchTerm
 
 /**
  * A product as one caller sees it: its [available] quantity decides `inStock`, and only an operator
- * ([showQuantity]) is told the quantity itself (catalog.yaml `Availability`).
+ * ([showQuantity]) is told the quantity itself (catalog.yaml `Availability`). [onSale] is false for a withdrawn
+ * product and for a product of a hidden category (only operators see those).
  */
 data class ProductView(
     val product: Product,
     val available: Int,
     val showQuantity: Boolean,
+    val onSale: Boolean = product.isActive,
 ) {
     /** True when the product is on sale with at least one unit available. */
-    val inStock: Boolean get() = product.isActive && available > 0
+    val inStock: Boolean get() = onSale && available > 0
 }
 
 /** The page of products of [filter] with their availability, as [caller] sees it. */
@@ -31,15 +33,22 @@ private suspend fun Catalog.viewPage(
     filter: ProductFilter,
     request: PageRequest,
 ): Page<ProductView> {
-    val visible = filter.copy(includeWithdrawn = filter.includeWithdrawn && caller.isOperator)
+    val withdrawnToo = filter.includeWithdrawn && caller.isOperator
+    val hidden = hiddenCategories()
+    val visible =
+        filter.copy(
+            includeWithdrawn = withdrawnToo,
+            hiddenCategories = if (withdrawnToo) emptySet() else hidden,
+        )
     val page = products.page(visible, request)
     val available = availability(page.items)
-    return page.map { ProductView(it, available[it.id] ?: 0, caller.isOperator) }
+    return page.map { ProductView(it, available[it.id] ?: 0, caller.isOperator, it.onSale(hidden)) }
 }
 
 /**
- * `listProducts` without `q`: active products ordered by name, paged, optionally of one category and its
- * descendants; withdrawn products are listed only for operators asking for them.
+ * `listProducts` without `q`: active products of active categories ordered by name, paged, optionally of one
+ * category and its descendants; withdrawn products (and those of withdrawn categories) are listed only for operators
+ * asking for them.
  */
 class ListProducts(
     private val catalog: Catalog,
@@ -72,7 +81,7 @@ class SearchProducts(
             .map { term -> catalog.viewPage(caller, ProductFilter(categoryId, includeWithdrawn, term), request) }
 }
 
-/** `getProduct`: a withdrawn product is not found, except by operators. */
+/** `getProduct`: a withdrawn product, or one of a withdrawn category, is not found, except by operators. */
 class GetProduct(
     private val catalog: Catalog,
 ) {
@@ -80,29 +89,46 @@ class GetProduct(
         caller: Caller,
         productId: ProductId,
     ): Either<CatalogError, ProductView> {
-        val product = catalog.products.find(productId)?.takeIf { it.visibleTo(caller.isOperator) }
+        val hidden = catalog.hiddenCategories()
+        val product = catalog.products.find(productId)?.takeIf { it.visibleTo(caller.isOperator, hidden) }
         return if (product == null) {
             CatalogError.ProductNotFound(productId).left()
         } else {
-            ProductView(product, catalog.availability(listOf(product)).getValue(product.id), caller.isOperator).right()
+            val available = catalog.availability(listOf(product)).getValue(product.id)
+            ProductView(product, available, caller.isOperator, product.onSale(hidden)).right()
         }
     }
 }
 
-/** `listCategories`: categories by name, optionally the children of one parent. */
+/** The categories [caller] must not see: none for operators, the hidden ones for everybody else. */
+private suspend fun Catalog.hiddenFrom(caller: Caller): Set<CategoryId> =
+    if (caller.isOperator) emptySet() else hiddenCategories()
+
+/**
+ * `listCategories`: categories by name, optionally the children of one parent; withdrawn categories and those
+ * beneath them are listed for operators only.
+ */
 class ListCategories(
     private val catalog: Catalog,
 ) {
     suspend operator fun invoke(
+        caller: Caller,
         parentId: CategoryId?,
         request: PageRequest,
-    ): Page<Category> = catalog.categories.page(parentId, request)
+    ): Page<Category> = catalog.categories.page(parentId, request, catalog.hiddenFrom(caller))
 }
 
-/** `getCategory`. */
+/** `getCategory`: a withdrawn category, or one beneath it, is not found, except by operators. */
 class GetCategory(
     private val catalog: Catalog,
 ) {
-    suspend operator fun invoke(categoryId: CategoryId): Either<CatalogError, Category> =
-        catalog.categories.find(categoryId)?.right() ?: CatalogError.CategoryNotFound(categoryId).left()
+    suspend operator fun invoke(
+        caller: Caller,
+        categoryId: CategoryId,
+    ): Either<CatalogError, Category> =
+        catalog.categories
+            .find(categoryId)
+            ?.takeIf { it.id !in catalog.hiddenFrom(caller) }
+            ?.right()
+            ?: CatalogError.CategoryNotFound(categoryId).left()
 }

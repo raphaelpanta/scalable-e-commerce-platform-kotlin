@@ -1,5 +1,6 @@
 package com.ecommerce.catalog.application
 
+import arrow.core.nonEmptyListOf
 import com.ecommerce.catalog.application.admin.AddProductImage
 import com.ecommerce.catalog.application.admin.AdjustStock
 import com.ecommerce.catalog.application.admin.CategoryInput
@@ -8,11 +9,15 @@ import com.ecommerce.catalog.application.admin.CreateProduct
 import com.ecommerce.catalog.application.admin.ProductInput
 import com.ecommerce.catalog.application.admin.UpdateCategory
 import com.ecommerce.catalog.application.admin.UpdateProduct
+import com.ecommerce.catalog.application.admin.WithdrawCategory
 import com.ecommerce.catalog.application.admin.WithdrawProduct
 import com.ecommerce.catalog.domain.CatalogError
 import com.ecommerce.catalog.domain.CategoryId
+import com.ecommerce.catalog.domain.CategoryStatus
+import com.ecommerce.catalog.domain.FieldIssue
 import com.ecommerce.catalog.domain.InventoryLevel
 import com.ecommerce.catalog.domain.Money
+import com.ecommerce.catalog.domain.OrderId
 import com.ecommerce.catalog.domain.Product
 import com.ecommerce.catalog.domain.ProductId
 import com.ecommerce.catalog.domain.SaleState
@@ -52,6 +57,7 @@ class AdminTest :
                         },
                         { CreateCategory(catalog)(it, CategoryInput("Outdoor", null, null)).error() },
                         { UpdateCategory(catalog)(it, category.id, CategoryInput("Outdoor", null, null)).error() },
+                        { WithdrawCategory(catalog)(it, category.id).error() },
                     )
                 val actions =
                     listOf(
@@ -62,6 +68,7 @@ class AdminTest :
                         "addProductImage",
                         "createCategory",
                         "updateCategory",
+                        "withdrawCategory",
                     )
 
                 attempts.zip(actions).forEach { (attempt, action) ->
@@ -362,6 +369,102 @@ class AdminTest :
                     .shouldBeInstanceOf<CatalogError.Invalid>()
             }
 
+            test("withdrawing a category hides it, its descendants and their products; again is a conflict") {
+                val harness = Harness()
+                val outdoor = harness.category("Outdoor")
+                val tents = harness.category("Tents", outdoor.id)
+                val kitchen = harness.category("Kitchen")
+                val tent = harness.product("Tent", categoryId = tents.id)
+                val pan = harness.product("Pan", categoryId = kitchen.id)
+
+                val withdrawn = WithdrawCategory(harness.catalog)(OPERATOR, outdoor.id).value()
+
+                withdrawn.status shouldBe CategoryStatus.WITHDRAWN
+                withdrawn.version shouldBe outdoor.version + 1
+                withdrawn.updatedAt shouldBe NOW
+                harness.categories.categories.getValue(outdoor.id) shouldBe withdrawn
+                harness.audit.lines shouldContainExactly
+                    listOf("changed:${OPERATOR_ID.value}:withdrawCategory:${outdoor.id.value}")
+                WithdrawCategory(harness.catalog)(OPERATOR, outdoor.id).error() shouldBe
+                    CatalogError.CategoryAlreadyWithdrawn(outdoor.id)
+                val unknown = CategoryId(UUID.randomUUID())
+                WithdrawCategory(harness.catalog)(OPERATOR, unknown).error() shouldBe
+                    CatalogError.CategoryNotFound(unknown)
+                GetProduct(harness.catalog)(SHOPPER, tent.id).error() shouldBe CatalogError.ProductNotFound(tent.id)
+                GetProduct(harness.catalog)(SHOPPER, pan.id).value().inStock shouldBe true
+                with(GetProduct(harness.catalog)(OPERATOR, tent.id).value()) {
+                    onSale shouldBe false
+                    inStock shouldBe false
+                    product.saleState shouldBe SaleState.ACTIVE
+                }
+                GetCategory(harness.catalog)(SHOPPER, tents.id).error() shouldBe CatalogError.CategoryNotFound(tents.id)
+                GetCategory(harness.catalog)(OPERATOR, tents.id).value() shouldBe tents
+                GetPricing(harness.catalog)(tent.id).value().saleState shouldBe SaleState.WITHDRAWN
+                ReserveStock(harness.catalog)(OrderId(UUID.randomUUID()), listOf(tent.id to 1))
+                    .error()
+                    .shouldBeInstanceOf<CatalogError.InsufficientStock>()
+            }
+
+            test("no product is created in, or moved into, a withdrawn category or one beneath it") {
+                val harness = Harness()
+                val outdoor = harness.category("Outdoor", status = CategoryStatus.WITHDRAWN)
+                val tents = harness.category("Tents", outdoor.id)
+                val product = harness.product()
+                val refusal =
+                    CatalogError.Invalid(
+                        nonEmptyListOf(
+                            FieldIssue("categoryId", "must be an active category"),
+                        ),
+                    )
+
+                CreateProduct(harness.catalog)(OPERATOR, input(outdoor.id), 1).error() shouldBe refusal
+                CreateProduct(harness.catalog)(OPERATOR, input(tents.id), 1).error() shouldBe refusal
+                UpdateProduct(harness.catalog)(OPERATOR, product.id, input(tents.id)).error() shouldBe refusal
+                harness.products.products.values
+                    .single() shouldBe product
+                harness.audit.entries.shouldBeEmpty()
+            }
+
+            test("audit entries carry a fresh id, the actor, the action, the target, the outcome and the time") {
+                val harness = Harness()
+                val category = harness.category()
+
+                WithdrawCategory(harness.catalog)(OPERATOR, category.id).value()
+                WithdrawCategory(harness.catalog)(SHOPPER, category.id).error()
+
+                harness.audit.entries shouldContainExactly
+                    listOf(
+                        AuditEntry(
+                            UUID(0L, 1L),
+                            OPERATOR_ID,
+                            OperatorAction.WITHDRAW_CATEGORY,
+                            category.id.value,
+                            AuditOutcome.PERFORMED,
+                            NOW,
+                        ),
+                        AuditEntry(
+                            UUID(0L, 2L),
+                            SHOPPER.accountId,
+                            OperatorAction.WITHDRAW_CATEGORY,
+                            category.id.value,
+                            AuditOutcome.REFUSED,
+                            NOW,
+                        ),
+                    )
+                OperatorAction.entries.map { it.target } shouldContainExactly
+                    List(5) { AuditTarget.PRODUCT } + List(3) { AuditTarget.CATEGORY }
+            }
+
+            test("nothing withdrawn: the category tree is not even read to find hidden categories") {
+                val harness = Harness()
+                harness.product()
+                harness.catalog.hiddenCategories().shouldBeEmpty()
+                harness.categories.hierarchyReads shouldBe 0
+                harness.category("Gone", status = CategoryStatus.WITHDRAWN)
+                harness.catalog.hiddenCategories().size shouldBe 1
+                harness.categories.hierarchyReads shouldBe 1
+            }
+
             test("a category that changed meanwhile is a conflict") {
                 val harness = Harness()
                 val outdoor = harness.category("Outdoor")
@@ -386,6 +489,8 @@ class AdminTest :
                     )
                 UpdateCategory(catalog)(OPERATOR, outdoor.id, CategoryInput("Camping", null, null)).error() shouldBe
                     CatalogError.ConcurrentUpdate
+                WithdrawCategory(catalog)(OPERATOR, outdoor.id).error() shouldBe CatalogError.ConcurrentUpdate
+                harness.audit.entries.shouldBeEmpty()
             }
         }
     })

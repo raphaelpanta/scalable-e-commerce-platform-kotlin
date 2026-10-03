@@ -22,12 +22,14 @@ import com.ecommerce.catalog.application.StockEvents
 import com.ecommerce.catalog.application.Transactions
 import com.ecommerce.catalog.application.admin.AddProductImage
 import com.ecommerce.catalog.application.admin.AdjustStock
+import com.ecommerce.catalog.application.admin.AuthorizeOperator
 import com.ecommerce.catalog.application.admin.CreateCategory
 import com.ecommerce.catalog.application.admin.CreateProduct
 import com.ecommerce.catalog.application.admin.UpdateCategory
 import com.ecommerce.catalog.application.admin.UpdateProduct
+import com.ecommerce.catalog.application.admin.WithdrawCategory
 import com.ecommerce.catalog.application.admin.WithdrawProduct
-import com.ecommerce.catalog.infrastructure.audit.LoggingAuditLog
+import com.ecommerce.catalog.infrastructure.audit.R2dbcAuditLog
 import com.ecommerce.catalog.infrastructure.jobs.ReservationExpiryJob
 import com.ecommerce.catalog.infrastructure.messaging.CatalogEventListeners
 import com.ecommerce.catalog.infrastructure.messaging.OutboxStockEvents
@@ -38,6 +40,7 @@ import com.ecommerce.catalog.infrastructure.persistence.R2dbcReservationReposito
 import com.ecommerce.catalog.infrastructure.persistence.R2dbcStockAdjustmentRepository
 import com.ecommerce.catalog.infrastructure.persistence.ReactiveTransactions
 import com.ecommerce.catalog.infrastructure.web.CatalogAdminHandlers
+import com.ecommerce.catalog.infrastructure.web.CatalogAdminUseCases
 import com.ecommerce.catalog.infrastructure.web.CatalogQueryHandlers
 import com.ecommerce.catalog.infrastructure.web.PricingHandlers
 import com.ecommerce.catalog.infrastructure.web.ReservationHandlers
@@ -91,7 +94,7 @@ class AdapterConfiguration {
     ): StockEvents = OutboxStockEvents(outbox, envelopes)
 
     @Bean
-    fun auditLog(): AuditLog = LoggingAuditLog()
+    fun auditLog(database: DatabaseClient): AuditLog = R2dbcAuditLog(database)
 
     @Bean
     @Suppress("LongParameterList") // one use case per read of catalog.yaml
@@ -107,6 +110,7 @@ class AdapterConfiguration {
     @Bean
     @Suppress("LongParameterList") // one use case per operator operation of catalog.yaml
     fun catalogAdminHandlers(
+        authorizeOperator: AuthorizeOperator,
         createProduct: CreateProduct,
         updateProduct: UpdateProduct,
         withdrawProduct: WithdrawProduct,
@@ -114,15 +118,20 @@ class AdapterConfiguration {
         addProductImage: AddProductImage,
         createCategory: CreateCategory,
         updateCategory: UpdateCategory,
+        withdrawCategory: WithdrawCategory,
     ): CatalogAdminHandlers =
         CatalogAdminHandlers(
-            createProduct,
-            updateProduct,
-            withdrawProduct,
-            adjustStock,
-            addProductImage,
-            createCategory,
-            updateCategory,
+            CatalogAdminUseCases(
+                authorizeOperator,
+                createProduct,
+                updateProduct,
+                withdrawProduct,
+                adjustStock,
+                addProductImage,
+                createCategory,
+                updateCategory,
+                withdrawCategory,
+            ),
         )
 
     @Bean

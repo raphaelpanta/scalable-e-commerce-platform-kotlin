@@ -6,6 +6,7 @@ import arrow.core.raise.either
 import arrow.core.raise.ensureNotNull
 import com.ecommerce.catalog.application.Caller
 import com.ecommerce.catalog.application.Catalog
+import com.ecommerce.catalog.application.OperatorAction
 import com.ecommerce.catalog.application.WriteResult
 import com.ecommerce.catalog.domain.CatalogError
 import com.ecommerce.catalog.domain.Category
@@ -32,6 +33,11 @@ private fun Raise<CatalogError>.written(
     }
 }
 
+private suspend fun Raise<CatalogError>.existing(
+    catalog: Catalog,
+    categoryId: CategoryId,
+): Category = ensureNotNull(catalog.categories.find(categoryId)) { CatalogError.CategoryNotFound(categoryId) }
+
 /** `createCategory` (operator only): a duplicate name under the same parent is refused; at most four levels deep. */
 class CreateCategory(
     private val catalog: Catalog,
@@ -45,13 +51,15 @@ class CreateCategory(
             val details = CategoryDetails.of(input.name, input.description, input.parentId).bind()
             CategoryTree.checkPlacement(null, details.parentId, catalog.categories.hierarchy()).bind()
             val category = Category.create(CategoryId(catalog.newId()), details, catalog.now())
-            written(catalog.categories.insert(category), details)
-            catalog.audit.changed(actor, ACTION, category.id.value)
+            catalog
+                .auditedChange(actor, ACTION, category.id.value) {
+                    written(catalog.categories.insert(category), details)
+                }.bind()
             category
         }
 
     private companion object {
-        const val ACTION = "createCategory"
+        val ACTION = OperatorAction.CREATE_CATEGORY
     }
 }
 
@@ -67,16 +75,45 @@ class UpdateCategory(
         either {
             val actor = catalog.authorize(caller, ACTION, categoryId.value).bind()
             val details = CategoryDetails.of(input.name, input.description, input.parentId).bind()
-            val category =
-                ensureNotNull(catalog.categories.find(categoryId)) { CatalogError.CategoryNotFound(categoryId) }
+            val category = existing(catalog, categoryId)
             CategoryTree.checkPlacement(categoryId, details.parentId, catalog.categories.hierarchy()).bind()
             val updated = category.update(details, catalog.now())
-            written(catalog.categories.update(updated, category.version), details)
-            catalog.audit.changed(actor, ACTION, categoryId.value)
+            catalog
+                .auditedChange(actor, ACTION, categoryId.value) {
+                    written(catalog.categories.update(updated, category.version), details)
+                }.bind()
             updated
         }
 
     private companion object {
-        const val ACTION = "updateCategory"
+        val ACTION = OperatorAction.UPDATE_CATEGORY
+    }
+}
+
+/**
+ * `withdrawCategory` (operator only, FR-002): the category, the categories beneath it and their products disappear
+ * from shopper browsing and search and no product can be placed in them; existing orders are unaffected. Withdrawing
+ * a withdrawn category is a conflict.
+ */
+class WithdrawCategory(
+    private val catalog: Catalog,
+) {
+    suspend operator fun invoke(
+        caller: Caller,
+        categoryId: CategoryId,
+    ): Either<CatalogError, Category> =
+        either {
+            val actor = catalog.authorize(caller, ACTION, categoryId.value).bind()
+            val category = existing(catalog, categoryId)
+            val withdrawn = category.withdraw(catalog.now()).bind()
+            catalog
+                .auditedChange(actor, ACTION, categoryId.value) {
+                    written(catalog.categories.update(withdrawn, category.version), withdrawn.details)
+                }.bind()
+            withdrawn
+        }
+
+    private companion object {
+        val ACTION = OperatorAction.WITHDRAW_CATEGORY
     }
 }

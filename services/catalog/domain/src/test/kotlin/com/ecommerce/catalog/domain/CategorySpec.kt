@@ -1,9 +1,18 @@
 package com.ecommerce.catalog.domain
 
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
+import io.kotest.property.Arb
+import io.kotest.property.arbitrary.flatMap
+import io.kotest.property.arbitrary.int
+import io.kotest.property.arbitrary.list
+import io.kotest.property.arbitrary.map
+import io.kotest.property.arbitrary.subsequence
+import io.kotest.property.checkAll
 import java.time.Instant
 
 private val LATER: Instant = NOW.plusSeconds(5)
@@ -16,6 +25,25 @@ private class Tree {
     val other = categoryId()
     val parentOf: Map<CategoryId, CategoryId?> = mapOf(root to null, child to root, grandchild to child, other to null)
 }
+
+/**
+ * A generated forest of 1..12 categories: each one is a root or sits beneath an earlier one, so there is no cycle,
+ * with a subset of them withdrawn.
+ */
+private data class Forest(
+    val parentOf: Map<CategoryId, CategoryId?>,
+    val withdrawn: Set<CategoryId>,
+)
+
+private val forests: Arb<Forest> =
+    Arb.int(1..12).flatMap { size ->
+        Arb.list(Arb.int(-1..size), size..size).flatMap { parents ->
+            val ids = List(size) { categoryId() }
+            val parentOf =
+                ids.mapIndexed { index, id -> id to parents[index].takeIf { it in 0 until index }?.let(ids::get) }
+            Arb.subsequence(ids).map { withdrawn -> Forest(parentOf.toMap(), withdrawn.toSet()) }
+        }
+    }
 
 class CategorySpec :
     FunSpec({
@@ -39,6 +67,40 @@ class CategorySpec :
             updated.updatedAt shouldBe LATER
             updated.createdAt shouldBe NOW
             updated.version shouldBe 1
+        }
+
+        test("a category is created active; withdrawing moves the version once and is refused when repeated") {
+            val created = Category.create(categoryId(), CategoryDetails.of("Outdoor", null, null).value(), NOW)
+            created.status shouldBe CategoryStatus.ACTIVE
+            created.isActive shouldBe true
+            val withdrawn = created.withdraw(LATER).value()
+            withdrawn.status shouldBe CategoryStatus.WITHDRAWN
+            withdrawn.isActive shouldBe false
+            withdrawn.updatedAt shouldBe LATER
+            withdrawn.version shouldBe 1
+            withdrawn.details shouldBe created.details
+            withdrawn.withdraw(LATER).error() shouldBe CatalogError.CategoryAlreadyWithdrawn(created.id)
+            withdrawn.update(CategoryDetails.of("Camping", null, null).value(), LATER).status shouldBe
+                CategoryStatus.WITHDRAWN
+        }
+
+        test("hidden categories are exactly the withdrawn ones and everything beneath them") {
+            checkAll(forests) { forest ->
+                val hidden = CategoryTree.hidden(forest.withdrawn, forest.parentOf)
+                hidden shouldContainAll forest.withdrawn
+                forest.parentOf.forEach { (id, parent) ->
+                    // Independent characterisation: a category is hidden when withdrawn or when its parent is hidden.
+                    (id in hidden) shouldBe (id in forest.withdrawn || (parent != null && parent in hidden))
+                }
+                CategoryTree.hidden(emptySet(), forest.parentOf).shouldBeEmpty()
+                CategoryTree.hidden(forest.parentOf.keys, forest.parentOf) shouldBe forest.parentOf.keys
+            }
+        }
+
+        test("a withdrawn id that is no longer a category hides nothing") {
+            val tree = Tree()
+            CategoryTree.hidden(setOf(categoryId()), tree.parentOf).shouldBeEmpty()
+            CategoryTree.hidden(setOf(tree.child), tree.parentOf) shouldBe setOf(tree.child, tree.grandchild)
         }
 
         test("ancestry lists a category and its ancestors, nearest first, and survives cycles") {

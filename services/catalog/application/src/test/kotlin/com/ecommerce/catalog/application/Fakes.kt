@@ -6,6 +6,7 @@ import com.ecommerce.catalog.domain.CatalogError
 import com.ecommerce.catalog.domain.Category
 import com.ecommerce.catalog.domain.CategoryDetails
 import com.ecommerce.catalog.domain.CategoryId
+import com.ecommerce.catalog.domain.CategoryStatus
 import com.ecommerce.catalog.domain.CategoryTree
 import com.ecommerce.catalog.domain.InventoryLevel
 import com.ecommerce.catalog.domain.OrderId
@@ -70,6 +71,7 @@ class InMemoryProducts(
         val matching =
             products.values
                 .filter { filter.includeWithdrawn || it.isActive }
+                .filter { it.details.categoryId !in filter.hiddenCategories }
                 .filter { scope == null || it.details.categoryId in scope }
                 .mapNotNull { product ->
                     val rank =
@@ -109,6 +111,7 @@ class InMemoryProducts(
 /** Categories in memory: names are unique per parent (case-insensitively), updates check the version. */
 class InMemoryCategories : CategoryRepository {
     val categories = linkedMapOf<CategoryId, Category>()
+    var hierarchyReads = 0
 
     fun store(vararg stored: Category) = stored.forEach { categories[it.id] = it }
 
@@ -125,11 +128,13 @@ class InMemoryCategories : CategoryRepository {
     override suspend fun page(
         parentId: CategoryId?,
         request: PageRequest,
+        excluded: Set<CategoryId>,
     ): Page<Category> {
         yield()
         val matching =
             categories.values
                 .filter { parentId == null || it.details.parentId == parentId }
+                .filter { it.id !in excluded }
                 .sortedBy { it.details.name.value }
         return Page(
             matching.drop(request.offset.toInt()).take(request.size),
@@ -141,7 +146,16 @@ class InMemoryCategories : CategoryRepository {
 
     override suspend fun hierarchy(): Map<CategoryId, CategoryId?> {
         yield()
+        hierarchyReads++
         return parents()
+    }
+
+    override suspend fun withdrawn(): Set<CategoryId> {
+        yield()
+        return categories.values
+            .filterNot(Category::isActive)
+            .map(Category::id)
+            .toSet()
     }
 
     override suspend fun insert(category: Category): WriteResult {
@@ -323,24 +337,20 @@ class RecordedStockEvents : StockEvents {
     }
 }
 
-/** Every audit line, as `refused:action:target` or `changed:actor:action:target`. */
+/** Every audit entry, and its short form `refused:account:action:target` or `changed:account:action:target`. */
 class RecordedAudit : AuditLog {
-    val lines = mutableListOf<String>()
+    val entries = mutableListOf<AuditEntry>()
 
-    override suspend fun refused(
-        caller: Caller,
-        action: String,
-        target: UUID?,
-    ) {
-        lines += "refused:${caller.accountId?.value}:$action:$target"
-    }
+    val lines: List<String>
+        get() =
+            entries.map {
+                val kind = if (it.outcome == AuditOutcome.REFUSED) "refused" else "changed"
+                "$kind:${it.actorId?.value}:${it.action.operationId}:${it.targetId}"
+            }
 
-    override suspend fun changed(
-        actor: AccountId,
-        action: String,
-        target: UUID,
-    ) {
-        lines += "changed:${actor.value}:$action:$target"
+    override suspend fun record(entry: AuditEntry) {
+        yield()
+        entries += entry
     }
 }
 
@@ -353,6 +363,8 @@ class FakeTransactions(
     override suspend fun <T> inTransaction(block: suspend () -> Either<CatalogError, T>): Either<CatalogError, T> {
         yield()
         val products = LinkedHashMap(harness.products.products)
+        val categories = LinkedHashMap(harness.categories.categories)
+        val audit = harness.audit.entries.toList()
         val levels = LinkedHashMap(harness.inventory.levels)
         val reservations = LinkedHashMap(harness.reservations.reservations)
         val adjustments = harness.adjustments.toList()
@@ -362,6 +374,12 @@ class FakeTransactions(
             harness.products.products
                 .apply { clear() }
                 .putAll(products)
+            harness.categories.categories
+                .apply { clear() }
+                .putAll(categories)
+            harness.audit.entries
+                .apply { clear() }
+                .addAll(audit)
             harness.inventory.levels
                 .apply { clear() }
                 .putAll(levels)
@@ -403,9 +421,11 @@ class Harness {
     fun category(
         name: String = "Kitchen",
         parentId: CategoryId? = null,
+        status: CategoryStatus = CategoryStatus.ACTIVE,
     ): Category =
         Category
             .create(CategoryId(UUID.randomUUID()), CategoryDetails.of(name, null, parentId).valid(), NOW)
+            .copy(status = status)
             .also { categories.store(it) }
 
     @Suppress("LongParameterList") // every attribute of a stored product can be varied

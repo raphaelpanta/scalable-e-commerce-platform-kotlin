@@ -145,9 +145,9 @@ class QueriesTest :
                 val footwear = harness.category("Footwear")
                 val tents = harness.category("Tents", outdoor.id)
 
-                ListCategories(harness.catalog)(null, page()).items shouldContainExactly
+                ListCategories(harness.catalog)(Caller.ANONYMOUS, null, page()).items shouldContainExactly
                     listOf(footwear, outdoor, tents)
-                val children = ListCategories(harness.catalog)(outdoor.id, page())
+                val children = ListCategories(harness.catalog)(SHOPPER, outdoor.id, page())
                 children.items shouldContainExactly listOf(tents)
                 children.totalItems shouldBe 1
             }
@@ -155,9 +155,9 @@ class QueriesTest :
             test("a category is found by id; an unknown one is not found") {
                 val harness = Harness()
                 val category = harness.category()
-                GetCategory(harness.catalog)(category.id).value() shouldBe category
+                GetCategory(harness.catalog)(SHOPPER, category.id).value() shouldBe category
                 val unknown = CategoryId(UUID.randomUUID())
-                GetCategory(harness.catalog)(unknown)
+                GetCategory(harness.catalog)(OPERATOR, unknown)
                     .error()
                     .shouldBeInstanceOf<CatalogError.CategoryNotFound>()
                     .categoryId shouldBe unknown

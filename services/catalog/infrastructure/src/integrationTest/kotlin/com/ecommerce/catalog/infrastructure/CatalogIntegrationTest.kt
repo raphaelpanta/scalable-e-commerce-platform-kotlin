@@ -67,18 +67,22 @@ open class CatalogIntegrationTest {
 
     protected fun shopper(): String = "Bearer " + jwt.tokenFor(SHOPPER_ID, setOf("shopper"))
 
-    /** A request to [uri] with [method], an optional bearer [token] and JSON [body]. */
+    /** A request to [uri] with [method], an optional bearer [token], JSON [body] and [correlationId]. */
     protected fun call(
         method: HttpMethod,
         uri: String,
         token: String? = null,
         body: Any? = null,
+        correlationId: String? = null,
     ): WebTestClient.ResponseSpec {
         val spec =
             client
                 .method(method)
                 .uri(uri)
-                .headers { headers -> token?.let { headers.set(HttpHeaders.AUTHORIZATION, it) } }
+                .headers { headers ->
+                    token?.let { headers.set(HttpHeaders.AUTHORIZATION, it) }
+                    correlationId?.let { headers.set(CORRELATION_ID_HEADER, it) }
+                }
         return (if (body == null) spec else spec.bodyValue(body)).exchange()
     }
 
@@ -148,6 +152,19 @@ open class CatalogIntegrationTest {
             }.one()
             .block(QUERY_TIMEOUT)
 
+    /** The rows of [sql] with [bindings], each as a column map. */
+    protected fun rows(
+        sql: String,
+        bindings: Map<String, Any> = emptyMap(),
+    ): List<Map<String, Any?>> =
+        bindings.entries
+            .fold(database.sql(sql)) { spec, (name, value) -> spec.bind(name, value) }
+            .fetch()
+            .all()
+            .collectList()
+            .block(QUERY_TIMEOUT)
+            .orEmpty()
+
     /** Runs [sql] with [bindings]. */
     protected fun execute(
         sql: String,
@@ -163,6 +180,7 @@ open class CatalogIntegrationTest {
     companion object {
         const val PRODUCTS = "/api/v1/catalog/products"
         const val CATEGORIES = "/api/v1/catalog/categories"
+        const val CORRELATION_ID_HEADER = "X-Correlation-Id"
         val jwt: JwtFixture = JwtFixture()
 
         @JvmStatic

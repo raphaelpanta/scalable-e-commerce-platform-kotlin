@@ -67,8 +67,17 @@ data class Product(
 
     val isActive: Boolean get() = saleState == SaleState.ACTIVE
 
-    /** Shoppers see active products only; operators see withdrawn ones too. */
-    fun visibleTo(operator: Boolean): Boolean = isActive || operator
+    /**
+     * Operators see every product; shoppers see active products outside the [hiddenCategories] (withdrawn categories
+     * and the categories beneath them, [CategoryTree.hidden]).
+     */
+    fun visibleTo(
+        operator: Boolean,
+        hiddenCategories: Set<CategoryId> = emptySet(),
+    ): Boolean = operator || onSale(hiddenCategories)
+
+    /** True when the product can be browsed, carted and reserved: active, in a category that is not hidden. */
+    fun onSale(hiddenCategories: Set<CategoryId>): Boolean = isActive && details.categoryId !in hiddenCategories
 
     /** The product with new [details]; stock is changed through adjustments only. */
     fun update(

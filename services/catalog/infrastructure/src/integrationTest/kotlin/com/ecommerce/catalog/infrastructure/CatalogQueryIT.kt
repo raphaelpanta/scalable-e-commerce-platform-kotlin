@@ -162,7 +162,7 @@ class CatalogQueryIT : CatalogIntegrationTest() {
         children.ids() shouldContainExactly listOf(alpha, zeta)
         children["totalItems"] shouldBe 2
         call(HttpMethod.GET, "$CATEGORIES/$zeta").json(OK) shouldBe
-            mapOf("id" to zeta, "name" to "Zeta", "parentId" to parent)
+            mapOf("id" to zeta, "name" to "Zeta", "parentId" to parent, "status" to "active")
         call(HttpMethod.GET, "$CATEGORIES/${UUID.randomUUID()}").expectProblem(ProblemType.NOT_FOUND)
         (call(HttpMethod.GET, "$CATEGORIES?size=1").json(OK)["totalItems"] as Int >= MIN_CATEGORIES) shouldBe true
     }

@@ -31,7 +31,8 @@ import java.util.UUID
 /**
  * Outbound adapter: products and their images in `products` and `product_images` (V2__catalog_schema.sql) over
  * R2DBC. A product and its images are written in one transaction, joining the caller's when there is one. Listings
- * filter by category subtree (recursive query), sale state and search term in SQL, so paging is exact; the search
+ * filter by category subtree (recursive query), sale state, hidden categories and search term in SQL, so paging is
+ * exact; the search
  * ranks like `SearchTerm.rank` (whole name, name prefix, name, description), case-insensitively.
  */
 class R2dbcProductRepository(
@@ -222,6 +223,10 @@ class R2dbcProductRepository(
             filter.categoryId?.let {
                 clauses += SUBTREE
                 bindings["categoryId"] = it.value
+            }
+            if (filter.hiddenCategories.isNotEmpty()) {
+                clauses += "p.category_id <> ALL(:hidden)"
+                bindings["hidden"] = filter.hiddenCategories.map { it.value }.toTypedArray()
             }
             filter.term?.let { term ->
                 clauses += MATCHES

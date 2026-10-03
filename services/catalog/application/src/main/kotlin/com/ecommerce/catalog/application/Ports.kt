@@ -1,7 +1,6 @@
 package com.ecommerce.catalog.application
 
 import arrow.core.Either
-import com.ecommerce.catalog.domain.AccountId
 import com.ecommerce.catalog.domain.CatalogError
 import com.ecommerce.catalog.domain.Category
 import com.ecommerce.catalog.domain.CategoryId
@@ -19,7 +18,6 @@ import com.ecommerce.catalog.domain.SearchTerm
 import com.ecommerce.catalog.domain.StockAdjustment
 import com.ecommerce.catalog.domain.StockEffect
 import java.time.Instant
-import java.util.UUID
 
 /** Outcome of an insert or a version-checked update. */
 enum class WriteResult {
@@ -34,12 +32,14 @@ enum class WriteResult {
 
 /**
  * Which products a listing returns: those of [categoryId] and its descendants (every category when null), withdrawn
- * ones only when [includeWithdrawn], and with a [term] only matching ones ranked by relevance (otherwise by name).
+ * ones only when [includeWithdrawn], none of the [hiddenCategories] (withdrawn categories and their descendants), and
+ * with a [term] only matching ones ranked by relevance (otherwise by name).
  */
 data class ProductFilter(
     val categoryId: CategoryId? = null,
     val includeWithdrawn: Boolean = false,
     val term: SearchTerm? = null,
+    val hiddenCategories: Set<CategoryId> = emptySet(),
 )
 
 /** Outbound port: products with their images. */
@@ -67,14 +67,18 @@ interface ProductRepository {
 interface CategoryRepository {
     suspend fun find(id: CategoryId): Category?
 
-    /** Categories ordered by name; only the children of [parentId] when given. */
+    /** Categories ordered by name except the [excluded] ones; only the children of [parentId] when given. */
     suspend fun page(
         parentId: CategoryId?,
         request: PageRequest,
+        excluded: Set<CategoryId> = emptySet(),
     ): Page<Category>
 
     /** The parent of every category (the tree, for placement checks). */
     suspend fun hierarchy(): Map<CategoryId, CategoryId?>
+
+    /** The ids of the withdrawn categories. */
+    suspend fun withdrawn(): Set<CategoryId>
 
     /** Stores a new category; [WriteResult.DUPLICATE] when its name is taken under the same parent. */
     suspend fun insert(category: Category): WriteResult
@@ -167,19 +171,10 @@ interface Transactions {
     suspend fun <T> inTransaction(block: suspend () -> Either<CatalogError, T>): Either<CatalogError, T>
 }
 
-/** Outbound port: the audit trail of operator actions (account ids only, never personal data). */
-interface AuditLog {
-    /** An operator capability [action] on [target] was refused to [caller]. */
-    suspend fun refused(
-        caller: Caller,
-        action: String,
-        target: UUID?,
-    )
-
-    /** The operator [actor] performed [action] on [target]. */
-    suspend fun changed(
-        actor: AccountId,
-        action: String,
-        target: UUID,
-    )
+/**
+ * Outbound port: the durable, append-only audit trail of operator actions (account ids only, never personal data).
+ * Entries of performed changes are recorded inside the change's transaction.
+ */
+fun interface AuditLog {
+    suspend fun record(entry: AuditEntry)
 }

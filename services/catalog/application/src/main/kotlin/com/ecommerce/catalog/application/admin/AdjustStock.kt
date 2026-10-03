@@ -5,6 +5,7 @@ import arrow.core.raise.either
 import arrow.core.raise.ensureNotNull
 import com.ecommerce.catalog.application.Caller
 import com.ecommerce.catalog.application.Catalog
+import com.ecommerce.catalog.application.OperatorAction
 import com.ecommerce.catalog.domain.AdjustmentId
 import com.ecommerce.catalog.domain.CatalogError
 import com.ecommerce.catalog.domain.ProductId
@@ -33,35 +34,27 @@ class AdjustStock(
                     .mapLeft(CatalogError::Invalid)
                     .bind()
             ensureNotNull(catalog.products.find(productId)) { CatalogError.ProductNotFound(productId) }
-            val adjustment =
-                catalog.transactions
-                    .inTransaction {
-                        either {
-                            val level =
-                                ensureNotNull(catalog.inventory.find(productId)) {
-                                    CatalogError.ProductNotFound(productId)
-                                }
-                            val id = AdjustmentId(catalog.newId())
-                            val planned =
-                                StockAdjustment.apply(id, level, validDelta, validReason, actor, catalog.now()).bind()
-                            val after =
-                                ensureNotNull(catalog.inventory.adjust(productId, validDelta)) {
-                                    CatalogError.StockBelowReserved(productId, validDelta, level.available)
-                                }
-                            val recorded =
-                                planned.adjustment.copy(
-                                    previousAvailable = after.available - validDelta,
-                                    newAvailable = after.available,
-                                )
-                            catalog.adjustments.record(recorded)
-                            recorded
+            catalog
+                .auditedChange(actor, ACTION, productId.value) {
+                    val level =
+                        ensureNotNull(catalog.inventory.find(productId)) { CatalogError.ProductNotFound(productId) }
+                    val id = AdjustmentId(catalog.newId())
+                    val planned = StockAdjustment.apply(id, level, validDelta, validReason, actor, catalog.now()).bind()
+                    val after =
+                        ensureNotNull(catalog.inventory.adjust(productId, validDelta)) {
+                            CatalogError.StockBelowReserved(productId, validDelta, level.available)
                         }
-                    }.bind()
-            catalog.audit.changed(actor, ACTION, productId.value)
-            adjustment
+                    val recorded =
+                        planned.adjustment.copy(
+                            previousAvailable = after.available - validDelta,
+                            newAvailable = after.available,
+                        )
+                    catalog.adjustments.record(recorded)
+                    recorded
+                }.bind()
         }
 
     private companion object {
-        const val ACTION = "adjustStock"
+        val ACTION = OperatorAction.ADJUST_STOCK
     }
 }

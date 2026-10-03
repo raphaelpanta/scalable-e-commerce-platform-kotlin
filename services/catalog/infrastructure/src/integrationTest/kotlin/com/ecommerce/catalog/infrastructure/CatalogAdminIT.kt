@@ -25,6 +25,12 @@ private const val REMOVED = -3
 private const val ADDED = 5
 private val RECENT: Duration = Duration.ofMinutes(1)
 
+/** The stock of a product created by the `product` helper without one. */
+private const val STOCK_OF_HELPER = 5
+
+@Suppress("UNCHECKED_CAST")
+private fun Json.ids(): List<String> = (this["items"] as List<Json>).map { it["id"].toString() }
+
 /**
  * The operator writes of catalog.yaml with operator, shopper and anonymous tokens (US7): 401 without a token, 403 and
  * an audit line for shoppers, attributed changes for operators, 422 for broken rules and 409 for conflicts.
@@ -88,6 +94,7 @@ class CatalogAdminIT : CatalogIntegrationTest() {
                 ),
                 Triple(HttpMethod.POST, CATEGORIES, mapOf("name" to "Shopper category")),
                 Triple(HttpMethod.PUT, "$CATEGORIES/$categoryId", mapOf("name" to "Renamed")),
+                Triple(HttpMethod.POST, "$CATEGORIES/$categoryId/withdrawal", null),
             )
 
         attempts.forEach { (method, uri, body) ->
@@ -146,6 +153,46 @@ class CatalogAdminIT : CatalogIntegrationTest() {
         call(HttpMethod.GET, "$PRODUCTS?q=$name").json(OK)["totalItems"] shouldBe 0
         call(HttpMethod.POST, "$PRODUCTS/$productId/withdrawal", operator()).expectProblem(ProblemType.CONFLICT)
         internal(HttpMethod.GET, "/internal/products/$productId/pricing").json(OK)["saleState"] shouldBe "withdrawn"
+    }
+
+    @Test
+    fun `withdrawing a category hides it, its subcategories and their products from shoppers, not from operators`() {
+        val marker = UUID.randomUUID().toString()
+        val outdoor = category("Outdoor $marker")
+        val tents = category("Tents", outdoor)
+        val tentId = product(tents, "Tent $marker")
+        val otherId = product(category(), "Lamp $marker")
+
+        val withdrawn = call(HttpMethod.POST, "$CATEGORIES/$outdoor/withdrawal", operator()).json(OK)
+
+        withdrawn shouldBe mapOf("id" to outdoor, "name" to "Outdoor $marker", "status" to "withdrawn")
+        call(HttpMethod.POST, "$CATEGORIES/$outdoor/withdrawal", operator()).expectProblem(ProblemType.CONFLICT)
+        call(HttpMethod.POST, "$CATEGORIES/${UUID.randomUUID()}/withdrawal", operator())
+            .expectProblem(ProblemType.NOT_FOUND)
+        // Shoppers: the subtree and its products are gone from browsing, search and direct reads.
+        call(HttpMethod.GET, "$PRODUCTS?q=$marker").json(OK).ids() shouldBe listOf(otherId)
+        call(HttpMethod.GET, "$PRODUCTS?categoryId=$outdoor").json(OK)["totalItems"] shouldBe 0
+        call(HttpMethod.GET, "$PRODUCTS/$tentId", shopper()).expectProblem(ProblemType.NOT_FOUND)
+        call(HttpMethod.GET, "$CATEGORIES/$tents").expectProblem(ProblemType.NOT_FOUND)
+        call(HttpMethod.GET, "$CATEGORIES?parentId=$outdoor").json(OK)["totalItems"] shouldBe 0
+        internal(HttpMethod.GET, "/internal/products/$tentId/pricing").json(OK)["saleState"] shouldBe "withdrawn"
+        // Operators still see everything, with the state.
+        call(HttpMethod.GET, "$CATEGORIES/$tents", operator()).json(OK)["status"] shouldBe "active"
+        call(HttpMethod.GET, "$CATEGORIES/$outdoor", operator()).json(OK)["status"] shouldBe "withdrawn"
+        call(HttpMethod.GET, "$PRODUCTS?q=$marker&includeWithdrawn=true", operator()).json(OK)["totalItems"] shouldBe 2
+        with(call(HttpMethod.GET, "$PRODUCTS/$tentId", operator()).json(OK)) {
+            this["status"] shouldBe "active"
+            this["availability"] shouldBe mapOf("inStock" to false, "availableQuantity" to STOCK_OF_HELPER)
+        }
+        // No product can be placed in the withdrawn subtree.
+        val refused =
+            call(HttpMethod.POST, PRODUCTS, operator(), productBody(tents)).expectProblem(
+                ProblemType.VALIDATION,
+                UNPROCESSABLE,
+            )
+        refused["errors"] shouldBe listOf(mapOf("field" to "categoryId", "message" to "must be an active category"))
+        call(HttpMethod.PUT, "$PRODUCTS/$otherId", operator(), productBody(outdoor))
+            .expectProblem(ProblemType.VALIDATION, UNPROCESSABLE)
     }
 
     @Test
@@ -242,7 +289,7 @@ class CatalogAdminIT : CatalogIntegrationTest() {
                     "parentId" to other,
                 ),
             ).json(OK)
-        moved shouldBe mapOf("id" to tents, "name" to "Tents 2P", "parentId" to other)
+        moved shouldBe mapOf("id" to tents, "name" to "Tents 2P", "parentId" to other, "status" to "active")
         call(HttpMethod.PUT, "$CATEGORIES/$tents", operator(), mapOf("name" to "Tents", "parentId" to other))
             .expectProblem(ProblemType.CONFLICT)
     }
