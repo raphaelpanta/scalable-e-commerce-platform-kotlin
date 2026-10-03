@@ -8,6 +8,11 @@
 # published, bound to ${BIND_ADDRESS:-127.0.0.1}. Services, databases and Kafka publish nothing. The gateway is the only
 # container attached to the `edge` network. Services carry no container_name, so `--scale <service>=N` works and the
 # Compose DNS name of a service resolves to all of its replicas (DNS discovery, research.md section 2).
+#
+# Images: the seven `build:` blocks use the same context and platform/docker/Dockerfile, whose `build` stage compiles
+# every boot jar in one Gradle invocation and does not depend on SERVICE_MODULE; built one at a time
+# (COMPOSE_PARALLEL_LIMIT=1), the first image runs Gradle and the six others reuse that stage from the layer cache
+# (cold `up --build` about 4 minutes instead of 14 to 24, platform/docker/README.md, SC-006).
 name: ecommerce-platform
 
 x-platform-env: &platform-env

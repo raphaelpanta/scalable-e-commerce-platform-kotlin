@@ -1,33 +1,59 @@
 # syntax=docker/dockerfile:1
-# Shared multi-stage image recipe for every service; built by `./gradlew :services:<name>:infrastructure:dockerImage`
-# from the repository root with --build-arg SERVICE_MODULE=<gradle path of the infrastructure module> (and, optionally,
+# Shared multi-stage image recipe for every service; built by Docker Compose (platform/compose/docker-compose.yml) and
+# by `./gradlew :services:<name>:infrastructure:dockerImage` from the repository root with
+# --build-arg SERVICE_MODULE=<gradle path of the deployable module> (and, optionally,
 # --build-arg APP_JAR=<pre-built boot jar inside the context>).
 # Base images are pinned by digest (resolved 2026-10-02); refresh them deliberately (docs/build.md, Follow-ups).
-
-ARG SERVICE_MODULE
+#
+# One shared build stage (T132, SC-006): `build` compiles the boot jar of EVERY deployable (the gateway and each
+# services/*/infrastructure module) in a single Gradle invocation and does not depend on SERVICE_MODULE, so the seven
+# image builds of `docker compose up --build` send the same context through the same instructions and the engine
+# reuses the stage from its layer cache after the first image (BuildKit and buildah/Podman alike). Only `layers` and
+# the runtime stage differ per SERVICE_MODULE. Never reference SERVICE_MODULE in `build`: that would split the cache
+# per service again (platform/docker/README.md).
 
 FROM eclipse-temurin:25-jdk@sha256:8c0a84ea11c8f6ed52600fc19f1040121f2a162998e9f50a5faebbbad9172dcc AS build
-ARG SERVICE_MODULE
 # Optional: path, relative to the build context, of an already built boot jar (CI: the artifact of the `jar` job of
-# .github/workflows/service-ci.yml). When set, the stage copies it and does not compile; empty (the default, as Compose
-# and `dockerImage` use it) builds the jar here with Gradle.
+# .github/workflows/service-ci.yml). When set, the stage copies it to /jars/prebuilt.jar and does not compile; empty
+# (the default, as Compose and `dockerImage` use it) builds every deployable's jar here with Gradle.
 ARG APP_JAR=""
 WORKDIR /workspace
 COPY . .
+# Deployables: services/gateway and every services/<name>/infrastructure directory (a service added with
+# `./gradlew newService` is picked up without editing this file). Jar names follow the module path:
+# :services:catalog:infrastructure -> /jars/services-catalog-infrastructure.jar.
 RUN --mount=type=cache,target=/root/.gradle,sharing=locked \
+    set -e; \
+    mkdir -p /jars; \
     if [ -n "${APP_JAR}" ]; then \
-      test -f "${APP_JAR}" && cp "${APP_JAR}" /workspace/app.jar; \
+      test -f "${APP_JAR}"; \
+      cp "${APP_JAR}" /jars/prebuilt.jar; \
     else \
-      test -n "${SERVICE_MODULE}" \
-      && ./gradlew -q --no-daemon "${SERVICE_MODULE}:bootJar" \
-      && module_dir="$(echo "${SERVICE_MODULE}" | sed 's#^:##; s#:#/#g')" \
-      && find "${module_dir}/build/libs" -name '*.jar' ! -name '*-plain.jar' -exec cp {} /workspace/app.jar \; ; \
+      modules="services/gateway $(ls -d services/*/infrastructure)"; \
+      tasks=""; \
+      for dir in ${modules}; do tasks="${tasks} :$(echo "${dir}" | tr / :):bootJar"; done; \
+      ./gradlew -q --no-daemon ${tasks}; \
+      for dir in ${modules}; do \
+        jar="$(find "${dir}/build/libs" -name '*.jar' ! -name '*-plain.jar')"; \
+        test "$(echo "${jar}" | wc -l)" -eq 1 && test -f "${jar}"; \
+        cp "${jar}" "/jars/$(echo "${dir}" | tr / -).jar"; \
+      done; \
     fi
 
-FROM eclipse-temurin:25-jdk@sha256:8c0a84ea11c8f6ed52600fc19f1040121f2a162998e9f50a5faebbbad9172dcc AS layers
+# Per service from here on: picks the jar of SERVICE_MODULE (or the pre-built one) out of the shared stage, whose file
+# system it inherits (no copy of the seven jars), and extracts the Spring Boot layers.
+FROM build AS layers
+ARG SERVICE_MODULE
 WORKDIR /layers
-COPY --from=build /workspace/app.jar app.jar
-RUN java -Djarmode=tools -jar app.jar extract --layers --launcher --destination extracted
+RUN set -e; \
+    if [ -f /jars/prebuilt.jar ]; then \
+      jar=/jars/prebuilt.jar; \
+    else \
+      test -n "${SERVICE_MODULE}" || { echo "build-arg SERVICE_MODULE is required" >&2; exit 1; }; \
+      jar="/jars/$(echo "${SERVICE_MODULE}" | sed 's#^:##; s#:#-#g').jar"; \
+      test -f "${jar}" || { echo "no boot jar for ${SERVICE_MODULE} (${jar})" >&2; exit 1; }; \
+    fi; \
+    java -Djarmode=tools -jar "${jar}" extract --layers --launcher --destination extracted
 
 FROM eclipse-temurin:25-jre@sha256:fcd7fd7b387f94bb2ac461478a7436ad8e349924c374ea8313919624dceae636
 RUN groupadd --system --gid 10001 app \

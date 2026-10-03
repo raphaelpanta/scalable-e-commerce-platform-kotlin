@@ -118,3 +118,36 @@ volume was rebuilt from scratch:
 | Journey (register → Mailpit → verify → sign in → address → cart → approved checkout) | 201 `ORD-20261003-0001` placed/approved; confirmation email in Mailpit within 15 s |
 | Loki, `{service=~".+"} | correlationId="<id>"` | 26 lines from gateway, identity, cart, catalog, order and payment for the journey's single correlation id (SC-007) |
 | Quality gate | every module's `check` green; the relay cancellation leak is fixed in platform-messaging and the cart tests now consume response bodies |
+
+## 9. Cold start with one shared build stage (2026-10-03, T132, SC-006)
+
+`platform/docker/Dockerfile` now compiles the seven boot jars in one Gradle invocation in a `build` stage that does not
+depend on `SERVICE_MODULE`; only the `layers` extraction and the runtime stage differ per image
+(`platform/docker/README.md`, "Stages"). Machine: Podman 6.0.2 machine (libkrun, 8 CPUs, 11.6 GiB), Docker Compose
+v5.6.0, base images already pulled.
+
+Clean state: the stack torn down (`down`, volumes kept), the seven `ecommerce-platform/*:local` images removed and the
+build cache pruned with `podman image prune --build-cache -f` (the Gradle cache mount under
+`/var/tmp/buildah-cache-501` was recreated empty by the run). Then, from the repository root:
+
+```bash
+export BUILDAH_FORMAT=docker COMPOSE_PARALLEL_LIMIT=1 GATEWAY_PORT=18080
+docker compose --project-directory platform/compose -f platform/compose/docker-compose.yml --profile core up -d --build
+```
+
+| Measure | Before | After |
+|---|---|---|
+| Shared Gradle stage (all seven jars, Gradle distribution and dependencies downloaded) | one `bootJar` build per image | about 2 min 7 s, once |
+| `up -d --build` returned (seven images built, 15 containers started) | 14 min 30 s (section 8) / 24 min (section 1) | 3 min 38 s |
+| All seven application containers `healthy` | | **3 min 58 s** |
+| Warm rebuild, nothing changed (`compose build`) | about 14 min | 32 s |
+
+Cache behaviour under buildah: the first image (`cart`) ran the Gradle step; for the other six the build output shows
+`--> Using cache b4726ec11976...` on the Gradle `RUN` (the same id each time), so no separate base image or build
+script was needed. Every image was checked to carry its own application (`Start-Class` of gateway, identity, catalog,
+cart, order, payment and notification), the readiness `HEALTHCHECK` and user `app`. The CI path
+(`--build-arg APP_JAR=<jar in the context>`) was checked by building the cart image from a pre-built jar: no Gradle
+run, `Start-Class` of cart, uid 10001.
+
+**SC-006 is met on this machine**: the cold `--profile core up -d --build` is healthy in under 4 minutes. The floor is
+the single Gradle compilation (about 2 minutes) plus the start of the last JVM behind its health check.

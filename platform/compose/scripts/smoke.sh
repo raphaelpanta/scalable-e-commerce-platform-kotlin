@@ -14,8 +14,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 BUILD=(--build)
-# The seven images share one Gradle cache mount; building them in parallel makes Gradle's lock files collide
-# across containers, so images are built one at a time unless the caller raises the limit.
+# The seven images share one build stage (platform/docker/Dockerfile) and one Gradle cache mount: built one at a time,
+# the first image compiles every jar and the others reuse the stage from the cache; in parallel they would all compile
+# and Gradle's lock files would collide across containers. So images are built one at a time unless the caller raises
+# the limit.
 export COMPOSE_PARALLEL_LIMIT="${COMPOSE_PARALLEL_LIMIT:-1}"
 KEEP=false
 VERBOSE=0
