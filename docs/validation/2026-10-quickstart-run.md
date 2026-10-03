@@ -80,3 +80,16 @@ catalog 88.2/92.0 (domain/application).
 - Register a self-hosted runner and the private registry (`platform/ci-runner`) so the per-service pipelines run.
 - Run the performance suite (`platform/perf`) on a machine with headroom; no numbers recorded yet (SC-002, SC-003).
 - Revisit the in-memory gateway rate limiter and the absence of Spring Cloud LoadBalancer (DNS + retry) when scaling beyond one gateway instance.
+
+## 7. Re-run after resizing the Podman machine (2026-10-03)
+
+The machine was resized from 4 CPUs / 8 GiB to 6 CPUs / 10 GiB (`podman machine set --cpus 6 --memory 10240`), which
+also cleared the leaked keyring quota. With the images already built:
+
+| Check | Result |
+|---|---|
+| `docker compose --profile core --profile observability up -d` | all 20 containers healthy in about 90 s (SC-006 met with warm images) |
+| `smoke.sh --no-build` | compose up, health, port isolation PASS; the gateway read raced its own start (000 five seconds after creation) and answered 200 in 0.4 s immediately afterwards |
+| Prometheus targets (`up`) | all seven service targets plus the collector report 1 |
+| Loki | no log streams: the services had no Logback → OpenTelemetry appender, so only traces and metrics were exported (fix in progress, see section 4 once updated) |
+| Quality gate | every module's `check` green with the engine healthy |
