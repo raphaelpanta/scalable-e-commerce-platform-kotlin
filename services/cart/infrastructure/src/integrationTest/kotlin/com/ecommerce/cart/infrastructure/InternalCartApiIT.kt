@@ -53,6 +53,7 @@ class InternalCartApiIT : CartIntegrationTest() {
             .exchange()
             .expectStatus()
             .isCreated
+            .expectBody(Void::class.java) // consume the body so the client releases it
     }
 
     @Test

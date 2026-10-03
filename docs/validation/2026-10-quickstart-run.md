@@ -106,3 +106,15 @@ also cleared the leaked keyring quota. With the images already built:
 | Prometheus targets (`up`) | all seven service targets plus the collector report 1 |
 | Loki | no log streams at first: the services had no Logback → OpenTelemetry appender, so only traces and metrics were exported; fixed the same day, see section 4 (four services found for one correlation id) |
 | Quality gate | every module's `check` green with the engine healthy |
+
+## 8. Fresh Podman machine (2026-10-03, after a host crash)
+
+The host crashed twice and the Podman machine had to be recreated (libkrun, 8 CPUs, 11.6 GiB), so every image and
+volume was rebuilt from scratch:
+
+| Check | Result |
+|---|---|
+| `smoke.sh` with `--build` | all seven images rebuilt sequentially and the 20-container stack healthy; every smoke check PASS; 14 min 30 s end to end |
+| Journey (register → Mailpit → verify → sign in → address → cart → approved checkout) | 201 `ORD-20261003-0001` placed/approved; confirmation email in Mailpit within 15 s |
+| Loki, `{service=~".+"} | correlationId="<id>"` | 26 lines from gateway, identity, cart, catalog, order and payment for the journey's single correlation id (SC-007) |
+| Quality gate | every module's `check` green; the relay cancellation leak is fixed in platform-messaging and the cart tests now consume response bodies |

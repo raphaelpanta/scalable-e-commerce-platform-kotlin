@@ -202,7 +202,7 @@ class CartIT : CartIntegrationTest() {
         removed.lines().shouldBeEmpty()
         removed.money("total") shouldBe 0
 
-        addLine(coffee, 1, token).expectStatus().isCreated
+        addLine(coffee, 1, token).expectStatus().isCreated.expectBody(Void::class.java)
         request("DELETE", "/api/v1/cart", token).expectStatus().isNoContent
         request("DELETE", "/api/v1/cart", token).expectStatus().isNoContent
         request("GET", "/api/v1/cart", token).okCart().lines().shouldBeEmpty()
@@ -272,7 +272,7 @@ class CartIT : CartIntegrationTest() {
             2,
             anonymousToken,
             bearer(account),
-        ).expectStatus().isCreated.expectHeader().doesNotExist(CART_TOKEN)
+        ).expectStatus().isCreated.expectHeader().doesNotExist(CART_TOKEN).expectBody(Void::class.java)
 
         val cart = request("GET", "/api/v1/cart", anonymousToken, bearer(account)).okCart()
         cart.lines().single()["quantity"] shouldBe 2

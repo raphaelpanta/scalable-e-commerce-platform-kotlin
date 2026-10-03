@@ -65,6 +65,7 @@ class CartEventsIT(
             .exchange()
             .expectStatus()
             .isCreated
+            .expectBody(Void::class.java) // consume the body so the client releases it
     }
 
     private fun orderPaid(

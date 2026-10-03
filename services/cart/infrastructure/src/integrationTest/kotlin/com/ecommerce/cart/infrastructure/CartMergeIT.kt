@@ -37,7 +37,8 @@ class CartMergeIT(
             .exchange()
             .expectStatus()
             .isCreated
-            .returnResult(Json::class.java)
+            .expectBody(Void::class.java)
+            .returnResult()
             .responseHeaders
             .getFirst(CART_TOKEN)
 
