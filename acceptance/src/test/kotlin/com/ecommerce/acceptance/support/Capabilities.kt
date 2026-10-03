@@ -62,6 +62,7 @@ class Capabilities(
             "create a category" to Operation("createCategory", "POST", Paths.CATEGORIES, mapOf("name" to "Forbidden")),
             "update a category" to
                 Operation("updateCategory", "PUT", Paths.category(categoryId), mapOf("name" to "Forbidden")),
+            "withdraw a category" to Operation("withdrawCategory", "POST", Paths.categoryWithdrawal(categoryId)),
         )
     }
 

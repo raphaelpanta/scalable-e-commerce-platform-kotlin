@@ -17,6 +17,7 @@ Feature: Authorisation sweep
       | add a product image              |
       | create a category                |
       | update a category                |
+      | withdraw a category              |
       | change an order status           |
       | list failed notifications        |
       | retry a failed notification      |
@@ -50,6 +51,7 @@ Feature: Authorisation sweep
       | add a product image |
       | create a category   |
       | update a category   |
+      | withdraw a category |
 
     Examples: Cart, orders and payments
       | capability                       |

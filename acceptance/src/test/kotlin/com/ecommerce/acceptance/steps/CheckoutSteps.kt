@@ -152,6 +152,8 @@ class CheckoutSteps(
         answers shouldHaveSize 2
         answers.forEach { withClue(it.describe()) { it.status shouldBe answers.first().status } }
         answers.map { it.body.string("id") }.distinct() shouldHaveSize 1
+        // The one order both answers describe is the scenario's order (its payment charges are checked next).
+        world.order = answers.first().body
     }
 
     @Then("the shopper has exactly {int} order(s)")

@@ -92,7 +92,7 @@ The suite never logs credentials or tokens. Response bodies in assertion message
 | US6 notifications | `notifications.feature` | 5 | `NotificationSteps` |
 | US7 catalogue operations | `catalogue-operations.feature` | 9 | `CatalogueOperationsSteps` |
 | US8 platform and observability | `platform-observability.feature` | 5 | `ObservabilitySteps` |
-| SC-010 authorisation sweep | `authorisation-sweep.feature` | 45 | `AuthorisationSteps` |
+| SC-010 authorisation sweep | `authorisation-sweep.feature` | 47 | `AuthorisationSteps` |
 
 US9 (pipeline scope and image publication) is a CI property, not a platform journey. The CI workflows cover it,
 not this suite.

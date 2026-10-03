@@ -38,6 +38,8 @@ object Paths {
 
     fun category(id: String) = "$CATEGORIES/$id" // getCategory, updateCategory
 
+    fun categoryWithdrawal(id: String) = "$CATEGORIES/$id/withdrawal" // withdrawCategory
+
     // cart.yaml
     const val CART = "/api/v1/cart" // getCart, clearCart
     const val CART_LINES = "$CART/lines" // addCartLine
