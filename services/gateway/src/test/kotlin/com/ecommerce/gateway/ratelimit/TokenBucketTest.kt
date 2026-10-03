@@ -99,6 +99,28 @@ class TokenBucketTest :
             empty.isFull(auth, START + 61 * SECOND) shouldBe true
         }
 
+        test("a bucket records its tokens and time, a rejection its wait") {
+            val full = TokenBucket.full(auth, START)
+            full.tokens shouldBe 10.0
+            full.updatedAtNanos shouldBe START
+            val (empty, _) = takeMany(auth, 10)
+            (empty.take(auth, START).second as TokenBucket.Decision.Rejected).retryAfterSeconds shouldBe 6L
+        }
+
+        test("the limiter forgets refilled buckets every 4096 decisions, and only those") {
+            var now = START
+            val limiter = InMemoryRateLimiter { now }
+            val busy = TokenBucket.Limit(10_000)
+            limiter.tryAcquire("idle", auth)
+            now += 61 * SECOND
+            repeat(4094) { limiter.tryAcquire("busy", busy) }
+            limiter.size() shouldBe 2
+            limiter.tryAcquire("busy", busy)
+            limiter.size() shouldBe 1
+            repeat(4096) { limiter.tryAcquire("busy", busy) }
+            limiter.size() shouldBe 1
+        }
+
         test("a limit needs a positive capacity and period") {
             shouldThrow<IllegalArgumentException> { TokenBucket.Limit(0) }
             shouldThrow<IllegalArgumentException> { TokenBucket.Limit(1, Duration.ZERO) }

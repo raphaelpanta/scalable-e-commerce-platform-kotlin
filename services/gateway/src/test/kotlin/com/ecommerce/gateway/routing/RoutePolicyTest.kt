@@ -62,6 +62,7 @@ class RoutePolicyTest :
                         "response-timeout" to "10000",
                     ),
                 )
+            policy.operatorTier shouldBe Tier.OPERATOR
             policy.tierFor(null) shouldBe Tier.STANDARD
             policy.tierFor(shopper) shouldBe Tier.STANDARD
             policy.tierFor(operator) shouldBe Tier.OPERATOR
@@ -73,9 +74,9 @@ class RoutePolicyTest :
                 mapOf("auth" to " ", "tier" to "browse", "response-timeout" to 5000) to "metadata 'auth' is required",
                 mapOf("auth" to "anonymous", "response-timeout" to 5000) to "metadata 'tier' is required",
                 mapOf("auth" to "everyone", "tier" to "browse", "response-timeout" to 5000) to
-                    "unknown auth requirement 'everyone'",
+                    "unknown auth requirement 'everyone' (expected one of anonymous, authenticated, shopper, operator)",
                 mapOf("auth" to "anonymous", "tier" to "gold", "response-timeout" to 5000) to
-                    "unknown rate-limit tier 'gold'",
+                    "unknown rate-limit tier 'gold' (expected one of auth, browse, standard, checkout, operator)",
                 mapOf("auth" to "anonymous", "tier" to "browse") to "metadata 'response-timeout' is required",
                 mapOf("auth" to "anonymous", "tier" to "browse", "response-timeout" to 30000) to
                     "differs from the browse tier's 5000 ms",

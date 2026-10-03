@@ -50,8 +50,8 @@ private val OPERATOR = AuthRequirement.OPERATOR
 /** contracts/gateway-routes.md applied to every operation of the contracts/openapi files. */
 private val expectations =
     listOf(
-        identity("POST", "/accounts", "identity-registration", ANON),
-        identity("POST", "/accounts/verify-email", "identity-registration", ANON),
+        identity("POST", "/accounts", "identity-registration", ANON, Tier.AUTH),
+        identity("POST", "/accounts/verify-email", "identity-registration", ANON, Tier.AUTH),
         identity("POST", "/sessions", "identity-credentials", ANON, Tier.AUTH),
         identity("POST", "/sessions/refresh", "identity-credentials", ANON, Tier.AUTH),
         identity("DELETE", "/sessions/current", "identity-sign-out", AUTHENTICATED),
@@ -79,6 +79,7 @@ private val expectations =
         catalog("POST", "/products/$ID/images", "catalog-image-registration", OPERATOR, Tier.OPERATOR),
         catalog("POST", "/categories", "catalog-creations", OPERATOR, Tier.OPERATOR),
         catalog("PUT", "/categories/$ID", "catalog-updates", OPERATOR, Tier.OPERATOR),
+        catalog("POST", "/categories/$ID/withdrawal", "catalog-creations", OPERATOR, Tier.OPERATOR),
         Expected("GET", "/api/v1/cart", "cart", ANON, Tier.STANDARD, "cart"),
         Expected("DELETE", "/api/v1/cart", "cart", ANON, Tier.STANDARD, "cart"),
         Expected("POST", "/api/v1/cart/lines", "cart-line-addition", ANON, Tier.STANDARD, "cart"),
@@ -136,6 +137,8 @@ private val unrouted =
         "DELETE" to "/api/v1/catalog/products/$ID",
         "PATCH" to "/api/v1/catalog/products/$ID",
         "POST" to "/api/v1/catalog/products/$ID",
+        "POST" to "/api/v1/catalog/categories/$ID",
+        "PUT" to "/api/v1/catalog/categories/$ID/withdrawal",
         "GET" to "/api/v1/catalog/products/$ID/images",
         "PUT" to "/api/v1/orders/$ID",
         "DELETE" to "/api/v1/orders/$ID",

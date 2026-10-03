@@ -28,7 +28,7 @@ A route without `auth`/`tier`, with an unknown value or with another timeout sto
 | Route id | Methods and paths (`/api/v1/...`) | Auth | Tier |
 |---|---|---|---|
 | `identity-credentials` | POST `identity/sessions`, `identity/sessions/refresh`, `identity/password-resets`, `identity/password-resets/complete` | anonymous | auth |
-| `identity-registration` | POST `identity/accounts`, `identity/accounts/verify-email` | anonymous | standard |
+| `identity-registration` | POST `identity/accounts`, `identity/accounts/verify-email` | anonymous | auth |
 | `identity-sign-out` | DELETE `identity/sessions/current` | authenticated | standard |
 | `identity-account-deletion` | DELETE `identity/accounts/me` | shopper | standard |
 | `identity-profile` | GET, PUT `identity/accounts/me`, `identity/accounts/me/notification-preferences` | authenticated | standard |
@@ -37,7 +37,7 @@ A route without `auth`/`tier`, with an unknown value or with another timeout sto
 | `identity-phone-verification` | POST `identity/accounts/me/phone-verifications`, `.../confirm` | authenticated | standard |
 | `catalog-reads` | GET `catalog/products`, `catalog/products/{id}`, `catalog/categories`, `catalog/categories/{id}` | anonymous | browse |
 | `catalog-image-registration` | POST `catalog/products/{id}/images` (body up to 5 MiB) | operator | operator |
-| `catalog-creations` | POST `catalog/products`, `catalog/products/{id}/withdrawal`, `catalog/products/{id}/stock-adjustments`, `catalog/categories` | operator | operator |
+| `catalog-creations` | POST `catalog/products`, `catalog/products/{id}/withdrawal`, `catalog/products/{id}/stock-adjustments`, `catalog/categories`, `catalog/categories/{id}/withdrawal` | operator | operator |
 | `catalog-updates` | PUT `catalog/products/{id}`, `catalog/categories/{id}` | operator | operator |
 | `cart-merge` | POST `cart/merge` | authenticated | standard |
 | `cart` | GET, DELETE `cart` | anonymous | standard |
@@ -56,8 +56,15 @@ A route without `auth`/`tier`, with an unknown value or with another timeout sto
 
 Where `gateway-routes.md` says "shopper" but the OpenAPI operation accepts "shopper or operator" (profile,
 addresses, cart merge, reading one order, payments), the route is `authenticated` and the service decides; every
-service repeats the authorisation decision (FR-005). Register and verify-email use `standard`; the `auth` tier covers
-sessions and password resets (T058).
+service repeats the authorisation decision (FR-005).
+
+**Tier of registration and e-mail verification (T169).** `POST identity/accounts` and
+`POST identity/accounts/verify-email` use the `auth` tier, like sign-in, refresh and password resets: they are
+anonymous, credential-adjacent calls (a registration chooses a password; verification redeems an e-mailed token), and
+every registration sends a verification e-mail, so a per-address budget of 10 per minute limits mass registration,
+mail flooding and token guessing. All of them share one budget per source address. Clients that register many
+accounts from one address (the acceptance suite, the performance run) raise
+`GATEWAY_RATELIMIT_REQUESTSPERMINUTE_AUTH` locally (`platform/perf/compose.perf.yml`).
 
 Deny by default: any other method and path, including `/internal/**`, `/.well-known/**` and `/actuator/**` on
 port 8080, matches no route and answers 404 `not-found` without reaching a service.
@@ -66,15 +73,20 @@ port 8080, matches no route and answers 404 `not-found` without reaching a servi
 
 Each route's `uri` is an environment variable with the documented default (`docs/service-conventions.md`):
 `IDENTITY_URL`, `CATALOG_URL`, `CART_URL`, `ORDER_URL`, `PAYMENT_URL`, `NOTIFICATION_URL`, default
-`http://localhost:8080`, Compose `http://<context>:8080`. Service names resolve to every instance through DNS; the
-image sets `networkaddress.cache.ttl=5`, so instances can be added or removed without changing the gateway.
+`http://localhost:8080`, Compose `http://<context>:8080`. Service names resolve to every instance through DNS, so
+instances can be added or removed without changing the gateway. The upstream Netty client resolves them explicitly
+for instance churn (`UpstreamResolver`, an `HttpClientCustomizer`): Reactor Netty's DNS resolver caches an answer for
+at most 5 s (instead of the record's own TTL) and selects the returned addresses round-robin, the same settings as the
+services' internal clients (`WebClientDefaults.httpClient` in platform-core). The image also sets
+`networkaddress.cache.ttl=5` for lookups through the JDK resolver.
 
 ### Timeouts and retries
 
 Connect timeout 2 s. Upstream response timeout per tier (route metadata `response-timeout`): auth 5 s, browse
 5 s, standard 10 s, operator 15 s, checkout 30 s; a slower upstream answers 504. The default `Retry` filter retries
 GET and HEAD only, at most twice with a 50-500 ms back-off, and only on `java.net.ConnectException` (no connection
-could be opened); upstream statuses are never retried, so `POST /api/v1/orders` is never retried.
+could be opened); a retry opens a new connection, which may go to another of the resolved instances.
+Upstream statuses are never retried, and no other method is, so `POST /api/v1/orders` is never retried.
 
 ## Authentication
 
@@ -98,7 +110,8 @@ responses of authenticated calls `Cache-Control: no-store`. Client-supplied `X-A
 ## Rate limiting
 
 `RateLimitFilter` charges each routed request to a token bucket per tier and client key: the source address for
-`auth`, otherwise the account id of an authenticated caller or the source address. Defaults per minute: auth 10,
+`auth` (sign-in, refresh, password resets, registration, e-mail verification), otherwise the account id of an
+authenticated caller or the source address. Defaults per minute: auth 10,
 browse 600, standard 120, checkout 20, operator 300 (`gateway.rate-limit.requests-per-minute.<tier>`, overridable
 with `GATEWAY_RATELIMIT_REQUESTSPERMINUTE_<TIER>`). Over budget: 429 `throttled` with `Retry-After` in seconds.
 
@@ -111,7 +124,15 @@ With N gateway instances a client can get up to N times its budget, and a restar
 - `EdgeHttpHandlerDecorator` wraps the whole public handler: `X-Correlation-Id` is accepted when it is a UUID or
   16-64 characters of `[A-Za-z0-9-]`, otherwise replaced by a new UUID (the refused value is logged as
   `originalCorrelationId`); it is forwarded upstream, echoed on every response and kept in the MDC. One ECS access
-  log line per request (`method`, `path`, `status`, `durationMs`).
+  log line per request (`method`, `path`, `status`, `durationMs`, plus `traceId` and `spanId`).
+- The access line is written when the response is complete, after `HttpWebHandlerAdapter` has stopped the
+  `http.server.requests` observation and outside its scope, so the MDC holds no trace there. The decorator puts a
+  `RequestTrace` into the Reactor context, `TraceCaptureWebFilter` (the first web filter, inside the observation)
+  copies the server span's `traceId`/`spanId` from the exchange's `ServerRequestObservationContext` into it, and the
+  line is written with those ids in the MDC (ECS console line) and the span context current (trace context of the OTLP
+  log record, which the collector turns into `traceId` for Loki). The server span continues an incoming
+  `traceparent`, and the upstream call is its child, so the access line links to the same trace as the services'
+  lines (FR-025).
 - Every response carries `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
   `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'` and
   `Referrer-Policy: no-referrer`; `Server`, `X-Powered-By` and internal headers are removed.
@@ -125,7 +146,10 @@ With N gateway instances a client can get up to N times its budget, and a restar
 
 ## Observability
 
-Management port 8081: `/actuator/health` (with `/liveness` and `/readiness`) and `/actuator/prometheus`. Logs are
+Management port 8081: `/actuator/health` (with `/liveness` and `/readiness`) and `/actuator/prometheus`.
+`http.server.requests` is published with histogram buckets
+(`management.metrics.distribution.percentiles-histogram.http.server.requests`), so `http_server_requests_seconds_bucket`
+feeds the p95 of the Service RED dashboard like the services' series (FR-026). Logs are
 ECS JSON on the console. Traces, logs and metrics are exported over OTLP/HTTP to
 `${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}` (`management.opentelemetry.tracing.export.otlp.endpoint`,
 `management.opentelemetry.logging.export.otlp.endpoint`, `management.otlp.metrics.export.url`).
@@ -133,10 +157,18 @@ ECS JSON on the console. Traces, logs and metrics are exported over OTLP/HTTP to
 ## Tests
 
 ```bash
-./gradlew -q :services:gateway:test             # correlation rules, token bucket, route table vs OpenAPI
+./gradlew -q :services:gateway:test             # route policies, filters, token bucket, correlation, problems, JWT, ...
 ./gradlew -q :services:gateway:integrationTest  # GatewayRoutingIT, JwksClientIT, JwksUnavailableIT, ManagementPortIT
 ./gradlew -q :services:gateway:contractTest     # Pact consumer gateway -> identity (JWKS): build/pacts/gateway-identity.json
+./gradlew -q :services:gateway:pitest           # mutation testing of the unit layer (part of check)
 ```
+
+Mutation testing (T146, Principle VIII): the module applies the `pitest` convention with target
+`com.ecommerce.gateway.*` and the 80 % threshold. The unit layer drives the filters with `MockServerWebExchange`,
+the edge decorator with a stub `HttpHandler`, and the JWT decoder with keys generated per test. Excluded in
+`services/gateway/build.gradle.kts`, because they are Spring wiring or I/O adapters covered by the integration and
+contract layers: `GatewayApplication`, `SecurityConfiguration`, `OpenTelemetryAppenderInstaller` and `JwksClient`
+(`JwksClientIT`, `JwksUnavailableIT`, `IdentityJwksPactTest`).
 
 The integration tests use WireMock upstreams and a WireMock JWKS with an Ed25519 key generated per run. The Pact
 test signs its token with the RFC 8037 test key, whose public half is the first JWKS example of

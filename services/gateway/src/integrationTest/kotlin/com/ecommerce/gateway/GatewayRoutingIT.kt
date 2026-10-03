@@ -45,6 +45,7 @@ private const val ONE_MIB = 1024 * 1024
 private const val UPSTREAM_DELAY_MS = 6000
 private const val SECONDS_PER_MINUTE = 60L
 private const val ORDER_ID = "0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10"
+private const val TRACEPARENT = "traceparent"
 
 /**
  * The gateway in front of WireMock upstreams (identity, catalog, cart, order and notification share one WireMock;
@@ -291,19 +292,45 @@ class GatewayRoutingIT(
             "\"correlationId\":\"$replaced\""
     }
 
+    @Test
+    fun `the access line carries the trace and span of the request`(output: CapturedOutput) {
+        val traceId = "4bf92f3577b34da6a3ce929d0e0e4736"
+        val clientSpanId = "00f067aa0ba902b7"
+        client
+            .get()
+            .uri("/api/v1/catalog/products")
+            .header(TRACEPARENT, "00-$traceId-$clientSpanId-01")
+            .exchange()
+            .expectStatus()
+            .isOk
+        val forwarded =
+            upstream
+                .findAll(getRequestedFor(urlPathEqualTo("/api/v1/catalog/products")))
+                .single()
+                .getHeader(TRACEPARENT)
+
+        // The gateway's server span continues the client's trace; its id is in the access line, and the upstream
+        // call is a child of the same trace.
+        val line = accessLineWith(output, "\"durationMs\"", "\"traceId\":\"$traceId\"")
+        val spanId = Regex("\"spanId\":\"([0-9a-f]{16})\"").find(line).shouldNotBeNull().groupValues[1]
+        spanId shouldNotBe clientSpanId
+        forwarded shouldContain traceId
+    }
+
     private fun accessLineWith(
         output: CapturedOutput,
-        marker: String,
+        vararg markers: String,
     ): String {
+        fun matches(candidate: String) = markers.all(candidate::contains)
         repeat(LOG_POLL_ATTEMPTS) {
             val line =
                 output.out
                     .lines()
-                    .singleOrNull { candidate -> candidate.contains(marker) }
+                    .singleOrNull(::matches)
             if (line != null) return line
             Thread.sleep(LOG_POLL_INTERVAL_MS)
         }
-        return output.out.lines().single { candidate -> candidate.contains(marker) }
+        return output.out.lines().single(::matches)
     }
 
     @Test
