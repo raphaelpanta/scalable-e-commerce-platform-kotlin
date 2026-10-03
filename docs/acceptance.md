@@ -23,6 +23,10 @@ test JVM:
 ```bash
 GATEWAY_URL=http://localhost:8080 ./gradlew -q :acceptance:test -Dcucumber.filter.tags="@us4 and not @slow"
 GATEWAY_URL=http://localhost:8080 ./gradlew -q :acceptance:test -Dcucumber.filter.tags="not @observability and not @chaos and not @sms"
+# the split the platform workflow uses: fast, then slow, then chaos
+GATEWAY_URL=http://localhost:8080 ./gradlew -q :acceptance:test -Dcucumber.filter.tags="not @slow and not @chaos"
+GATEWAY_URL=http://localhost:8080 ./gradlew -q :acceptance:test -Dcucumber.filter.tags="@slow and not @chaos"
+GATEWAY_URL=http://localhost:8080 ./gradlew -q :acceptance:test -Dcucumber.filter.tags="@chaos"
 ```
 
 The `summary` plugin prints failures only. The task is never up to date, because the result depends on the stack and
@@ -56,11 +60,12 @@ The suite never logs credentials or tokens. Response bodies in assertion message
   `13` or `14` are declined, so every price in the features keeps totals away from those endings.
 - **Rate limits.** The gateway's `auth` tier allows 10 credential calls per minute per source address
   (`contracts/gateway-routes.md`). Every scenario registers, verifies and signs in a fresh shopper, so set-up
-  calls wait on 429 with `untilNotThrottled`. The suite stays correct but becomes slow; raise the tier in the local
-  gateway configuration for faster runs.
-- **`@chaos`** needs Mailpit's chaos triggers (`MP_ENABLE_CHAOS=true` on the `mailpit` service). The scenario makes
-  Mailpit refuse every recipient, waits until the order confirmation has used up its retries, and restores Mailpit
-  in an `@After` hook. The current Compose file does not enable chaos yet.
+  calls wait on 429 with `untilNotThrottled`. The suite stays correct but becomes slow; start the stack with the override
+  `-f ../perf/compose.perf.yml` (as `.github/workflows/platform.yml` does) to lift the per-address tiers for faster runs.
+- **`@chaos`** needs Mailpit's chaos triggers (`MP_ENABLE_CHAOS=true` on the `mailpit` service); the Compose file
+  already sets it, so no extra step is needed against `platform/compose`. The scenario makes Mailpit refuse every
+  recipient, waits until the order confirmation has used up its retries, and restores Mailpit in an `@After` hook. A
+  Mailpit started some other way must set the variable itself.
 - **`@sms`** needs the phone verification code to be readable. SMS goes to an in-process simulator in the
   notification service, and no public API returns message bodies. The suite looks for the code in Mailpit, searching
   for the phone number, on the assumption that the simulator mirrors SMS into Mailpit (the quickstart calls Mailpit

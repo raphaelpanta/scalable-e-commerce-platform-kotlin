@@ -318,7 +318,7 @@ Per-service threat model: [plan.md](../specs/004-ecommerce-platform-mvp/plan.md)
 | Local run | Docker Compose in `platform/compose` with profiles `core` (gateway, six services, one PostgreSQL each, Kafka KRaft, Mailpit), `observability` (OTel Collector, Loki, Tempo, Prometheus, Grafana) and `ci` (Pact Broker). Only `gateway:8080`, `grafana:3000` and `mailpit:8025` are published ([running-locally.md](running-locally.md)) |
 | Discovery and scaling | Platform DNS: a service name resolves to every replica (`--scale catalog=2`); see deviations |
 | CI | GitHub Actions: `verify` (`./gradlew -q verify`) on pushes to `main` and, through `pr-gate`, on pull requests ([ci-cd.md](ci-cd.md)). Design: one path-filtered pipeline per service plus a platform pipeline, Pact verification gating image publication, on a containerised self-hosted runner ([research.md](../specs/004-ecommerce-platform-mvp/research.md) section 4) |
-| Registry | Private `registry:2` on the runner host (`platform/ci-runner`), images tagged `<service>:<git-sha>` and `<service>:<branch>`; a hosted registry is deferred |
+| Registry | Private `registry:3` on the runner host (`platform/ci-runner`), images tagged `<service>:<git-sha>` and `<service>:<branch>`; a hosted registry is deferred |
 
 ## 8. Decisions
 

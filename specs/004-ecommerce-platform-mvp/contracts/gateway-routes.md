@@ -11,10 +11,10 @@ instances can be added or removed without changing gateway configuration (FR-024
 
 | Public route prefix | Target service (DNS name) | Auth requirement | Rate limit tier |
 | --- | --- | --- | --- |
-| `/api/v1/identity/` (register, verify, sign in, reset, profile, addresses) | `identity-service` | anonymous for register, sign in, verify, reset; shopper for profile and addresses | `auth` for credential endpoints, `standard` otherwise |
+| `/api/v1/identity/` (register, verify, sign in, reset, profile, addresses) | `identity-service` | anonymous for register, sign in, verify, reset; authenticated (shopper or operator) for profile, addresses, notification preferences and sign-out; shopper for account deletion | `auth` for credential endpoints, `standard` otherwise |
 | `/api/v1/catalog/` (GET products, categories, search) | `catalog-service` | anonymous | `browse` |
 | `/api/v1/catalog/` (POST, PUT, PATCH, DELETE: products, categories, stock, images) | `catalog-service` | operator | `operator` |
-| `/api/v1/cart` | `cart-service` | anonymous (identified by `X-Cart-Token`) or shopper (account cart); `POST /api/v1/cart/merge` requires shopper | `standard` |
+| `/api/v1/cart` | `cart-service` | anonymous (identified by `X-Cart-Token`) or authenticated (shopper or operator) for the account cart; `POST /api/v1/cart/merge` requires an authenticated caller (shopper or operator) | `standard` |
 | `/api/v1/orders/` | `order-service` | shopper (place, list, get, cancel); operator for `POST /{id}/status` and reading any order | `checkout` for `POST /api/v1/orders`, `standard` otherwise, `operator` for operator calls |
 | `/api/v1/payments/` | `payment-service` | operator or owning shopper (attempts, refunds); operator only for `/simulator/rules` | `standard` |
 | `/api/v1/notifications/` | `notification-service` | shopper (own list); operator for `/failed` and `/{id}/retry` | `standard`, `operator` for operator calls |

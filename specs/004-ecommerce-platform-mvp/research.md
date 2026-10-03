@@ -36,8 +36,10 @@ No open clarification items remain.
   Prometheus for metrics, Grafana Tempo for traces, Grafana for the single UI. Services emit
   structured JSON logs with `correlationId`, `traceId`, `spanId`, service name and no PII.
   Correlation: W3C `traceparent` propagated by OpenTelemetry; `X-Correlation-Id` accepted at the
-  gateway, validated (UUID-shaped) and replaced if malformed with the original recorded in a log
-  field; echoed on every response (FR-025, SC-007).
+  gateway, validated and replaced if malformed with the original recorded in a log field; echoed on every
+  response (FR-025, SC-007). The rule has two layers: the gateway accepts a UUID or 16 to 64 characters of
+  `[A-Za-z0-9-]` and replaces anything else; the services (platform-core) accept 1 to 64 characters after the
+  gateway has sanitised the value, so a call that reaches a service directly (internal calls, tests) may use a shorter id.
 - **Rationale**: Lightweight enough for a laptop Compose stack, one UI for logs-to-traces jumps,
   vendor-neutral instrumentation. Meets Principle VI observability requirements.
 - **Alternatives considered**: Elastic (ELK) stack (strong full-text search, memory-hungry locally,
@@ -69,7 +71,7 @@ No open clarification items remain.
 
 ## 5. Image Registry
 
-- **Decision**: Private `registry:2` container on the runner host (`platform/ci-runner/`), with
+- **Decision**: Private `registry:3` container on the runner host (`platform/ci-runner/`), with
   basic auth and TLS termination, images tagged `<service>:<git-sha>` and `<service>:<branch>`.
 - **Consequence**: images are pullable only on that host or network; local developers build
   images from source via Compose (`--build`). Publishing to a hosted registry is deferred to a
@@ -79,10 +81,11 @@ No open clarification items remain.
 
 ## 6. Container Images
 
-- **Decision**: Multi-stage Dockerfiles, one per deployable, generated from a shared template in
-  `platform/docker/`: stage 1 builds with the Gradle wrapper (BuildKit cache mounts for Gradle
-  caches), stage 2 extracts Spring Boot layers, stage 3 is a minimal JRE runtime image running as a
-  non-root user with a health check and `JAVA_TOOL_OPTIONS` for container-aware memory. `.dockerignore`
+- **Decision**: One parameterised multi-stage Dockerfile, `platform/docker/Dockerfile`, shared by every deployable and
+  selected with the build argument `SERVICE_MODULE` (the Gradle path of the module): stage 1 builds with the Gradle
+  wrapper (BuildKit cache mounts for Gradle caches, or copies a pre-built jar given as `APP_JAR`), stage 2 extracts
+  Spring Boot layers, stage 3 is a minimal JRE runtime image running as a non-root user with a health check and
+  `JAVA_TOOL_OPTIONS` for container-aware memory. `.dockerignore`
   excludes build outputs and caches. Base image digests pinned and refreshed by dependency updates.
 - **Rationale**: Requester preference; explicit, familiar, scanner-friendly.
 - **Alternatives considered**: Jib via convention plugin (no Dockerfile, no daemon at build time,

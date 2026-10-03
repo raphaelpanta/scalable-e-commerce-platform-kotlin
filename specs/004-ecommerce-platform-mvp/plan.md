@@ -20,7 +20,7 @@ the web storefront is out of scope.
 Stack decisions were taken with the requester on 2026-10-02 (see [research.md](research.md)):
 Spring Cloud Gateway in Kotlin · platform DNS discovery · OpenTelemetry + Grafana LGTM ·
 GitHub Actions on a containerised self-hosted runner with a private registry on the runner host ·
-multi-stage Dockerfiles · Apache Kafka in KRaft mode.
+one parameterised multi-stage Dockerfile · Apache Kafka in KRaft mode.
 
 ## Technical Context
 
@@ -49,7 +49,7 @@ licensing is an open follow-up, research §14), Konsist for architecture rules. 
 
 **Target Platform**: Linux containers (non-root, JRE runtime stage); local Docker Compose with
 profiles `core`, `observability`, `ci`; CI on a containerised GitHub Actions runner with Docker
-socket access; images pushed to a private `registry:2` on the runner host.
+socket access; images pushed to a private `registry:3` on the runner host.
 
 **Project Type**: Multi-service backend monorepo (API-first). Frontend directory reserved, out of
 scope for this feature.
@@ -127,12 +127,11 @@ build.gradle.kts
 
 services/
 ├── gateway/                         # Spring Cloud Gateway (Kotlin): routes, JWT, rate limit, correlation
-│   ├── src/main/kotlin, src/test, src/integrationTest, src/contractTest
-│   └── Dockerfile
+│   └── src/main/kotlin, src/test, src/integrationTest, src/contractTest   # built with platform/docker/Dockerfile
 ├── identity/
 │   ├── domain/                      # pure Kotlin: Account, Credential, Address, value objects, events
 │   ├── application/                 # use cases + ports (RegisterAccount, SignIn, ResetPassword…)
-│   └── infrastructure/              # Spring Boot app, web adapters, R2DBC, Kafka outbox, Dockerfile,
+│   └── infrastructure/              # Spring Boot app, web adapters, R2DBC, Kafka outbox,
 │                                    #   src/{test,integrationTest,contractTest,acceptanceTest}
 ├── catalog/      {domain, application, infrastructure}
 ├── cart/         {domain, application, infrastructure}
@@ -142,9 +141,9 @@ services/
 
 platform/
 ├── compose/                         # docker-compose.yml, profiles core|observability|ci, seed data
-├── docker/                          # shared multi-stage Dockerfile template and .dockerignore
+├── docker/                          # the single parameterised multi-stage Dockerfile (build arg SERVICE_MODULE) shared by all services
 ├── observability/                   # otel-collector, loki, tempo, prometheus, grafana provisioning
-└── ci-runner/                       # actions-runner container, registry:2, pact-broker compose
+└── ci-runner/                       # actions-runner container, registry:3, pact-broker compose
 
 contracts/                           # source of truth copied from specs/004/contracts at implementation
 ├── openapi/*.yaml
