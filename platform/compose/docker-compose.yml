@@ -223,7 +223,8 @@ services:
       <<: *service-env
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
-      PUBLIC_BASE_URL: http://localhost:8080
+      # Links in e-mails and SMS point at the published gateway, so they follow GATEWAY_PORT (docs/service-conventions.md section 2)
+      PUBLIC_BASE_URL: http://localhost:${GATEWAY_PORT:-8080}
     networks: [internal]
     depends_on:
       notification-db:
