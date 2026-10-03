@@ -1,0 +1,53 @@
+# Path-neutral aggregate of the service checks (feature 004, user story 9, T148): one status check, `services-aggregate`,
+# that exists on EVERY pull request, so it can be required in branch protection next to `pr-gate`. The seven
+# `service-ci / <ctx>` checks and `platform` are path-filtered (GitHub reports nothing for a workflow its `paths:` filter
+# skipped, and a required check that is never reported blocks the merge); this job works out which of them the change
+# triggers (.github/scripts/path-filter-check.sh on the files of the pull request), waits for those check runs of the head
+# commit through the checks API and fails when one of them failed or never appeared. "Not triggered" is success.
+# Details and the branch-protection command: docs/ci-cd.md, "Required status checks and merge policy".
+#
+# Safeguards: `pull_request` only (never pull_request_target), read-only token, no secrets, actions pinned by commit SHA.
+# It runs on a GitHub-hosted runner on purpose: it only reads the API (no pull request code is built) and it may wait for
+# up to 40 minutes, which on the single self-hosted runner would occupy the very runner the service jobs wait for. Fork
+# pull requests fail the check (the service pipelines never run for them), like `pr-gate`.
+name: required-checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: read
+
+concurrency:
+  group: required-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  services-aggregate:
+    name: services-aggregate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # Only the path-filter script and the workflow `paths:` lists are used from the checkout, never built.
+      - name: Check out the repository
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Refuse fork pull requests
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::error::Fork pull requests are not built on the self-hosted runner; a maintainer pushes the branch to this repository."
+          exit 1
+
+      - name: Aggregate the service and platform checks of the head commit
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: .github/scripts/services-aggregate.sh

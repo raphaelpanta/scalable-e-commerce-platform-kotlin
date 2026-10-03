@@ -8,10 +8,12 @@ surviving-mutant check and the harness self-tests on top of it.
 
 ## Required status check
 
-Branch protection (feature 003) must require exactly one status check on `main`: **`pr-gate`**, the final job
+Branch protection (feature 003) requires **`pr-gate`** on `main`, the final job
 of `.github/workflows/pr-gate.yml`, which fails unless `verify`, `mutation` and `hook-tests` all succeeded. On a
 pull request the verify run appears as `verify / verify` (caller job / called job) under the workflow `pr-gate`;
-do not require it separately. On `main` the workflow `verify` runs on its own after every push.
+do not require it separately. On `main` the workflow `verify` runs on its own after every push. Feature 004 adds the
+second required check, **`services-aggregate`** (`.github/workflows/required-checks.yml`), which stands for the
+path-filtered service and platform checks of the pull request (see "Required status checks and merge policy" below).
 
 ## Triggers and safeguards
 
@@ -68,10 +70,11 @@ Runner, private registry and Pact Broker live in `platform/ci-runner/` (setup in
 
 | Workflow | Triggers | Paths (push to `main` and `pull_request` alike) | Check names |
 | --- | --- | --- | --- |
-| `gateway.yml`, `identity.yml`, `catalog.yml`, `cart.yml`, `order.yml`, `payment.yml`, `notification.yml` | push to `main`, pull request | `services/<ctx>/**`, `libs/**`, `build-logic/**`, `gradle/**`, `contracts/**`, `platform/docker/**`, `settings.gradle.kts`, `build.gradle.kts`, `gradle.properties`, `config/**`, `.github/workflows/service-ci.yml`, `.github/workflows/<ctx>.yml` | `service-ci / <ctx>` (aggregate, the one to require), `service-ci / gate (<ctx>)`, `service-ci / image (<ctx>)` |
+| `gateway.yml`, `identity.yml`, `catalog.yml`, `cart.yml`, `order.yml`, `payment.yml`, `notification.yml` | push to `main`, pull request | `services/<ctx>/**`, `libs/**`, `build-logic/**`, `gradle/**`, `contracts/**`, `platform/docker/**`, `settings.gradle.kts`, `build.gradle.kts`, `gradle.properties`, `config/**`, `.github/workflows/service-ci.yml`, `.github/workflows/<ctx>.yml` | `service-ci / <ctx>` (per-service aggregate, informational: required through `services-aggregate`), `service-ci / gate (<ctx>)`, `service-ci / image (<ctx>)` |
 | `service-ci.yml` | `workflow_call` only | (called by the seven workflows above with `service` and `publish-image`) | |
 | `platform.yml` | push to `main`, pull request | `platform/**`, `acceptance/**`, `contracts/**`, `.github/workflows/platform.yml` | `platform` |
 | `pr-gate.yml` / `verify.yml` | every pull request / push to `main` | none (feature 001) | `pr-gate`, `verify / verify` |
+| `required-checks.yml` | every pull request | none (path-neutral on purpose) | `services-aggregate` (the one to require beside `pr-gate`) |
 
 `<ctx>` is one of `gateway`, `identity`, `catalog`, `cart`, `order`, `payment`, `notification`. A check name is
 `<caller job> / <called job>`: the caller job of every service workflow is `service-ci`, the aggregate job of
@@ -140,50 +143,60 @@ Repository configuration used by the pipelines (Settings > Secrets and variables
    deployed to `PACT_ENVIRONMENT` when set). A failure names the pact, consumer and provider, which is the
    user-story-9 scenario "a change that breaks a contract fails naming the contract and the consumer".
 
-### Required status checks and merge policy (T113, for the maintainer)
+### Required status checks and merge policy (T113, amended by T148, for the maintainer)
 
-**Decision (2026-10-02, T113):** `pr-gate` stays the only required status check on `main`. The seven `service-ci / <ctx>`
-checks and `platform` are path-filtered, so requiring them would block every pull request that does not touch all of
-them (see the warning below); they run as informational checks and publish images on pushes to `main`. Revisit when a
-path-neutral aggregate job exists. The commands below are kept for that moment.
+**Decision (2026-10-03, T148, amending T113 of 2026-10-02):** require **`pr-gate`** and **`services-aggregate`** on `main`.
+The seven `service-ci / <ctx>` checks and `platform` stay informational on their own: they are path-filtered, GitHub
+reports no check for a workflow its `paths:` filter skipped, and a required check that is never reported stays
+"Expected - Waiting for status" and blocks the merge (a pull request that touches only `services/cart/**` would wait
+forever for `service-ci / catalog` and the other five, a docs-only one for all of them). `services-aggregate` removes the
+problem: it exists on every pull request and requires exactly the checks the change triggered.
 
-Feature 003 configured branch protection through `scripts/bootstrap-repo.sh` (`required_status_checks`, `strict: true`);
-the context names are the check names above. To ADD the new contexts and keep `pr-gate` (run once, as repository admin;
-nothing in this repository does it):
+**How `services-aggregate` works** (`.github/workflows/required-checks.yml`, `.github/scripts/services-aggregate.sh`, tests in
+`.github/scripts/tests/test-services-aggregate.sh`):
+
+1. It triggers on every pull request (`opened`, `synchronize`, `reopened`), with no `paths:` filter, and runs on a
+   GitHub-hosted runner: it only reads the API, builds nothing, and it may wait up to 40 minutes, which on the single
+   self-hosted runner would occupy the runner the service jobs wait for. Token: `contents`, `checks` and `pull-requests`
+   read; no secrets.
+2. It lists the files of the pull request (`gh api repos/<repo>/pulls/<n>/files`, renames count with both names) and feeds
+   them to `.github/scripts/path-filter-check.sh`, the offline simulation of the `paths:` filters. A listed `<ctx>.yml`
+   expects the check `service-ci / <ctx>`, `platform.yml` expects `platform`. A workflow that is not listed was not
+   triggered, which counts as success.
+3. It polls `gh api repos/<repo>/commits/<head sha>/check-runs?filter=latest` every 20 seconds until each expected check
+   has been reported (10 minutes at most) and has completed (40 minutes at most). `success`, `neutral` and `skipped`
+   pass; `failure`, `cancelled`, `timed_out`, `action_required`, `stale` and `startup_failure` fail at once, as does an
+   expected check that never appears (re-run its workflow) or is still running at the deadline. A service or platform check
+   that exists although its filter was not predicted is watched too. The step summary lists every watched check.
+4. Pull requests from forks fail it (the service pipelines never run for them on the self-hosted runner), like `pr-gate`.
+5. It always reports exactly one check, named `services-aggregate`.
+
+Feature 003 configured branch protection through `scripts/bootstrap-repo.sh` (`required_status_checks`, `strict: true`).
+Run once, as repository admin (nothing in this repository does it). The script form is convergent and replaces the list:
 
 ```bash
 OWNER=<owner>; REPO=<repo>
-gh api -X POST "repos/$OWNER/$REPO/branches/main/protection/required_status_checks/contexts" \
-  -f 'contexts[]=service-ci / gateway'  -f 'contexts[]=service-ci / identity' -f 'contexts[]=service-ci / catalog' \
-  -f 'contexts[]=service-ci / cart'     -f 'contexts[]=service-ci / order'    -f 'contexts[]=service-ci / payment' \
-  -f 'contexts[]=service-ci / notification' -f 'contexts[]=platform'
+scripts/bootstrap-repo.sh --owner "$OWNER" --name "$REPO" --yes \
+  --require-check pr-gate --require-check services-aggregate
 ```
 
-The equivalent that REPLACES the whole list (the PATCH form), and the convergent script form:
+The same through the API (the PATCH form replaces the whole list; the POST form below only adds a context):
 
 ```bash
 gh api -X PATCH "repos/$OWNER/$REPO/branches/main/protection/required_status_checks" -F strict=true \
-  -f 'contexts[]=pr-gate' -f 'contexts[]=service-ci / gateway' -f 'contexts[]=service-ci / identity' \
-  -f 'contexts[]=service-ci / catalog' -f 'contexts[]=service-ci / cart' -f 'contexts[]=service-ci / order' \
-  -f 'contexts[]=service-ci / payment' -f 'contexts[]=service-ci / notification' -f 'contexts[]=platform'
+  -f 'contexts[]=pr-gate' -f 'contexts[]=services-aggregate'
 
-scripts/bootstrap-repo.sh --owner "$OWNER" --name "$REPO" --yes --require-check pr-gate \
-  --require-check 'service-ci / gateway' --require-check 'service-ci / identity' --require-check 'service-ci / catalog' \
-  --require-check 'service-ci / cart' --require-check 'service-ci / order' --require-check 'service-ci / payment' \
-  --require-check 'service-ci / notification' --require-check platform
+gh api -X POST "repos/$OWNER/$REPO/branches/main/protection/required_status_checks/contexts" \
+  -f 'contexts[]=services-aggregate'
 ```
 
-Warning before requiring them: GitHub does not report a check for a workflow that its `paths:` filter skipped, and a
-required check that is never reported stays "Expected - Waiting for status", which blocks the merge. A pull request that
-touches only `services/cart/**` would therefore wait forever for `service-ci / catalog` and the other five, and one that
-touches only docs would wait for all of them. Safe options: keep `pr-gate` as the only required check (it already runs
-the full `verify` gate and the mutation checks on every pull request, and the service pipelines publish images after the
-merge), require the service checks only through a rule that tolerates missing checks, or add an always-running aggregate
-job that evaluates the relevant checks of the pull request. Decide this before running the commands above.
+Do not require `service-ci / <ctx>` or `platform` directly: they are the very checks that go missing. `services-aggregate`
+needs `pr-gate` to stay required as well, since it does not run the gate (`verify`, `mutation`, `hook-tests`).
 
-Merge policy proposed for `docs/ci-cd.md`: a pull request merges when `pr-gate` is green (and, if required as above, the
-service and `platform` checks of the paths it touches); images are published only from `main`; fork pull requests never run
-on the runner (a maintainer pushes the branch to this repository).
+Merge policy: a pull request merges when `pr-gate` and `services-aggregate` are green (the latter covers the service and
+`platform` checks of the paths it touches); images are published only from `main`; fork pull requests never run on the
+runner (a maintainer pushes the branch to this repository). `platform.yml` also runs after every merge to `main` and every
+night, with the slow and chaos tags (see "Running the platform workflow locally").
 
 ### Running the platform workflow locally
 
