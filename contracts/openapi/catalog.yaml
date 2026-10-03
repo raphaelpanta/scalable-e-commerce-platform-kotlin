@@ -13,9 +13,11 @@ info:
     UTC `date-time` timestamps; pagination with `page` (default 0) and `size` (default 20, max 100).
 
     Catalogue reads are anonymous. Every write requires the `operator` role; a shopper token is
-    refused with 403 and the attempt is logged. Reads accept an optional bearer token: when it
-    carries the `operator` role, `availability.availableQuantity` and withdrawn products are
-    included; for everyone else they are never exposed.
+    refused with 403 (before the request is validated) and the attempt is recorded in the audit
+    trail. Reads accept an optional bearer token: when it carries the `operator` role,
+    `availability.availableQuantity`, withdrawn categories and withdrawn products are included; for
+    everyone else they are never exposed. A withdrawn category hides itself, the categories beneath
+    it and their products from shoppers.
 servers:
   - url: http://localhost:8080
     description: Local platform entry point (API gateway)
@@ -32,9 +34,10 @@ paths:
       tags: [Products]
       summary: List or search active products
       description: |
-        Anonymous (optional bearer). Returns only active products, paged. With `q` the result is
-        ranked by relevance; otherwise ordered by name. Withdrawn products are never returned to
-        non-operators. Operators may list withdrawn products with `includeWithdrawn=true`.
+        Anonymous (optional bearer). Returns only active products of active categories, paged. With
+        `q` the result is ranked by relevance; otherwise ordered by name. Withdrawn products, and the
+        products of withdrawn categories, are never returned to non-operators. Operators may list them
+        with `includeWithdrawn=true`.
       security: [{}, { bearerAuth: [] }]
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
@@ -80,7 +83,7 @@ paths:
       operationId: createProduct
       tags: [Products]
       summary: Create a product
-      description: Requires role operator. The product is visible to shoppers immediately with the given stock.
+      description: Requires role operator. The product is visible to shoppers immediately with the given stock. A category that is withdrawn (or beneath a withdrawn one) answers 422.
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
       requestBody:
@@ -116,7 +119,7 @@ paths:
       operationId: getProduct
       tags: [Products]
       summary: Get a product
-      description: Anonymous (optional bearer). A withdrawn product answers 404 except to operators.
+      description: Anonymous (optional bearer). A withdrawn product, or one of a withdrawn category, answers 404 except to operators.
       security: [{}, { bearerAuth: [] }]
       responses:
         '200':
@@ -142,7 +145,7 @@ paths:
       operationId: updateProduct
       tags: [Products]
       summary: Update a product
-      description: Requires role operator. Replaces name, description, price and category; stock is changed only through stock adjustments. Existing orders keep their frozen prices.
+      description: Requires role operator. Replaces name, description, price and category; stock is changed only through stock adjustments. Existing orders keep their frozen prices. A category that is withdrawn (or beneath a withdrawn one) answers 422.
       requestBody:
         required: true
         content:
@@ -254,8 +257,8 @@ paths:
       operationId: listCategories
       tags: [Categories]
       summary: List categories
-      description: Anonymous. Flat list; nesting is expressed by `parentId`. Optionally restrict to the children of one parent.
-      security: []
+      description: Anonymous (optional bearer). Flat list; nesting is expressed by `parentId`. Optionally restrict to the children of one parent. Withdrawn categories, and those beneath them, are listed for operators only.
+      security: [{}, { bearerAuth: [] }]
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
         - name: parentId
@@ -271,7 +274,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/CategoryPage' }
               example:
-                items: [{ id: 5c2f9a7e-1b34-4d68-8a0e-3f6c1d9b2e45, name: Footwear, description: Shoes and boots }]
+                items: [{ id: 5c2f9a7e-1b34-4d68-8a0e-3f6c1d9b2e45, name: Footwear, description: Shoes and boots, status: active }]
                 page: 0
                 size: 20
                 totalItems: 1
@@ -312,8 +315,8 @@ paths:
       operationId: getCategory
       tags: [Categories]
       summary: Get a category
-      description: Anonymous.
-      security: []
+      description: Anonymous (optional bearer). A withdrawn category, or one beneath it, answers 404 except to operators.
+      security: [{}, { bearerAuth: [] }]
       responses:
         '200':
           description: The category.
@@ -346,6 +349,32 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
+  /api/v1/catalog/categories/{categoryId}/withdrawal:
+    post:
+      operationId: withdrawCategory
+      tags: [Categories]
+      summary: Withdraw a category from shoppers
+      description: |
+        Requires role operator. The category, the categories beneath it and their products disappear
+        from browsing and search, cannot be added to carts and accept no new products; existing orders
+        are unaffected. Withdrawing an already withdrawn category answers 409.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CategoryId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The withdrawn category.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+              example: { id: 5c2f9a7e-1b34-4d68-8a0e-3f6c1d9b2e45, name: Footwear, description: Shoes and boots, status: withdrawn }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 components:
   securitySchemes:
     bearerAuth:
@@ -414,7 +443,7 @@ components:
           schema: { $ref: '#/components/schemas/Problem' }
           example: { type: 'https://ecommerce.example/problems/not-found', title: Not found, status: 404, detail: Product not found., instance: /api/v1/catalog/products/0b4e6d1c-2a57-4c83-9f10-6d8a3e5b7c21 }
     Conflict:
-      description: State conflict, such as a duplicate name or an already withdrawn product (409).
+      description: State conflict, such as a duplicate name or an already withdrawn product or category (409).
       headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
       content:
         application/problem+json:
@@ -489,7 +518,7 @@ components:
       type: object
       required: [name, price, categoryId]
       properties:
-        name: { type: string, minLength: 1, maxLength: 200 }
+        name: { type: string, minLength: 1, maxLength: 120 }
         description: { type: string, maxLength: 4000 }
         price: { $ref: '#/components/schemas/Money' }
         categoryId: { type: string, format: uuid }
@@ -550,9 +579,10 @@ components:
       allOf:
         - $ref: '#/components/schemas/CategoryInput'
         - type: object
-          required: [id]
+          required: [id, status]
           properties:
             id: { type: string, format: uuid }
+            status: { type: string, enum: [active, withdrawn], description: '`withdrawn` is visible to operators only.' }
     CategoryPage:
       type: object
       required: [items, page, size, totalItems]

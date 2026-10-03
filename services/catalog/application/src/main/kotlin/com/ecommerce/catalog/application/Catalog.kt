@@ -7,6 +7,8 @@ import arrow.core.nonEmptyListOf
 import arrow.core.right
 import com.ecommerce.catalog.domain.AccountId
 import com.ecommerce.catalog.domain.CatalogError
+import com.ecommerce.catalog.domain.CategoryId
+import com.ecommerce.catalog.domain.CategoryTree
 import com.ecommerce.catalog.domain.FieldIssue
 import com.ecommerce.catalog.domain.Product
 import com.ecommerce.catalog.domain.ProductId
@@ -71,16 +73,29 @@ class Catalog(
      */
     suspend fun authorize(
         caller: Caller,
-        action: String,
+        action: OperatorAction,
         target: UUID?,
     ): Either<CatalogError, AccountId> {
         val operator = caller.accountId?.takeIf { caller.isOperator }
         return if (operator != null) {
             operator.right()
         } else {
-            audit.refused(caller, action, target)
-            CatalogError.Forbidden(action).left()
+            audit.record(AuditEntry(newId(), caller.accountId, action, target, AuditOutcome.REFUSED, now()))
+            CatalogError.Forbidden(action.operationId).left()
         }
+    }
+
+    /** Records that [actor] performed [action] on [target] (US7 scenario 2), inside the change's transaction. */
+    suspend fun audited(
+        actor: AccountId,
+        action: OperatorAction,
+        target: UUID,
+    ) = audit.record(AuditEntry(newId(), actor, action, target, AuditOutcome.PERFORMED, now()))
+
+    /** The categories hidden from shoppers: the withdrawn ones and every category beneath them. */
+    suspend fun hiddenCategories(): Set<CategoryId> {
+        val withdrawn = categories.withdrawn()
+        return if (withdrawn.isEmpty()) emptySet() else CategoryTree.hidden(withdrawn, categories.hierarchy())
     }
 
     /** [currency] when it is the platform currency. */
@@ -97,9 +112,13 @@ class Catalog(
         return products.associate { it.id to (levels[it.id]?.available ?: 0) }
     }
 
-    /** What can be reserved of each of [productIds] now: the available quantity of active products, 0 otherwise. */
+    /**
+     * What can be reserved of each of [productIds] now: the available quantity of products on sale (active, in a
+     * category that is not hidden), 0 otherwise.
+     */
     suspend fun sellable(productIds: Collection<ProductId>): (ProductId) -> Int {
-        val active = products.findAll(productIds).filter(Product::isActive)
+        val hidden = hiddenCategories()
+        val active = products.findAll(productIds).filter { it.onSale(hidden) }
         val available = availability(active)
         return { productId -> available[productId] ?: 0 }
     }

@@ -28,6 +28,7 @@ class CatalogRoutes {
             POST(CATEGORIES, admin::createCategory)
             GET(CATEGORY, queries::getCategory)
             PUT(CATEGORY, admin::updateCategory)
+            POST("$CATEGORY/withdrawal", admin::withdrawCategory)
             POST("/internal/reservations", reservations::reserve)
             POST("/internal/reservations/{reservationId}/commit", reservations::commit)
             POST("/internal/reservations/{reservationId}/release", reservations::release)

@@ -42,6 +42,6 @@ class FlywayBaselineIntegrationTest : CatalogIntegrationTest() {
                 .collectList()
                 .block(TIMEOUT)
 
-        versions shouldBe listOf("1", "1.1", "2", "3", "4")
+        versions shouldBe listOf("1", "1.1", "2", "3", "4", "5", "6")
     }
 }

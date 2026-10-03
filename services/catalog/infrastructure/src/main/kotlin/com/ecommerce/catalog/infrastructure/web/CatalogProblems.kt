@@ -78,6 +78,10 @@ private fun CatalogError.notFoundOrConflict(): Problem =
             Problem.conflict("The product is already withdrawn.")
         }
 
+        is CatalogError.CategoryAlreadyWithdrawn -> {
+            Problem.conflict("The category is already withdrawn.")
+        }
+
         is CatalogError.DuplicateSku -> {
             Problem.conflict("Another product has the SKU ${sku.value}.")
         }

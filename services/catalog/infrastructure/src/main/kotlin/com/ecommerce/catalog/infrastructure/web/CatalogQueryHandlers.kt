@@ -14,8 +14,8 @@ import org.springframework.web.reactive.function.server.ServerResponse
 
 /**
  * Inbound adapter: the anonymous reads of catalog.yaml (`listProducts`, `getProduct`, `listCategories`,
- * `getCategory`). A bearer token is optional; with the operator role the quantity and, on request, withdrawn
- * products are included. Malformed query parameters answer 400; unknown or hidden records 404.
+ * `getCategory`). A bearer token is optional; with the operator role the quantity, withdrawn categories and, on
+ * request, withdrawn products are included. Malformed query parameters answer 400; unknown or hidden records 404.
  */
 class CatalogQueryHandlers(
     private val listProducts: ListProducts,
@@ -50,12 +50,12 @@ class CatalogQueryHandlers(
         either {
             val page = request.pageRequest().bind()
             val parentId = request.uuidQuery("parentId").bind()?.let(::CategoryId)
-            listCategories(parentId, page)
+            listCategories(callerOf(), parentId, page)
         }.toServerResponse(request) { categories -> ok(categories.toJson { it.toJson() }) }
 
     suspend fun getCategory(request: ServerRequest): ServerResponse =
         either {
             val categoryId = CategoryId(request.uuidPath("categoryId").bind())
-            getCategory(categoryId).mapLeft { it.toProblem() }.bind()
+            getCategory(callerOf(), categoryId).mapLeft { it.toProblem() }.bind()
         }.toServerResponse(request) { ok(it.toJson()) }
 }

@@ -26,10 +26,12 @@ import com.ecommerce.catalog.application.StockEvents
 import com.ecommerce.catalog.application.Transactions
 import com.ecommerce.catalog.application.admin.AddProductImage
 import com.ecommerce.catalog.application.admin.AdjustStock
+import com.ecommerce.catalog.application.admin.AuthorizeOperator
 import com.ecommerce.catalog.application.admin.CreateCategory
 import com.ecommerce.catalog.application.admin.CreateProduct
 import com.ecommerce.catalog.application.admin.UpdateCategory
 import com.ecommerce.catalog.application.admin.UpdateProduct
+import com.ecommerce.catalog.application.admin.WithdrawCategory
 import com.ecommerce.catalog.application.admin.WithdrawProduct
 import com.ecommerce.catalog.domain.ServiceName
 import com.ecommerce.catalog.domain.ServiceNameResult
@@ -142,6 +144,12 @@ class UseCaseConfiguration {
 
     @Bean
     fun updateCategory(catalog: Catalog): UpdateCategory = UpdateCategory(catalog)
+
+    @Bean
+    fun withdrawCategory(catalog: Catalog): WithdrawCategory = WithdrawCategory(catalog)
+
+    @Bean
+    fun authorizeOperator(catalog: Catalog): AuthorizeOperator = AuthorizeOperator(catalog)
 
     private companion object {
         const val SERVICE_NAME = "catalog"

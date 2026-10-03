@@ -27,19 +27,39 @@ data class CategoryDetails(
     }
 }
 
-/** A category of the catalogue; nesting is expressed by [CategoryDetails.parentId] (data-model section 3.2). */
+/** Whether a category is offered to shoppers. Withdrawing replaces deletion (data-model sections 1 and 3.2). */
+enum class CategoryStatus {
+    ACTIVE,
+    WITHDRAWN,
+}
+
+/**
+ * A category of the catalogue; nesting is expressed by [CategoryDetails.parentId] (data-model section 3.2). A
+ * withdrawn category hides itself, the categories beneath it and their products from shoppers ([CategoryTree.hidden]).
+ */
 data class Category(
     val id: CategoryId,
     val details: CategoryDetails,
     val createdAt: Instant,
     val updatedAt: Instant,
     val version: Long,
+    val status: CategoryStatus = CategoryStatus.ACTIVE,
 ) {
-    /** The category with new [details]. */
+    val isActive: Boolean get() = status == CategoryStatus.ACTIVE
+
+    /** The category with new [details]; the status is kept. */
     fun update(
         details: CategoryDetails,
         at: Instant,
     ): Category = copy(details = details, updatedAt = at, version = version + 1)
+
+    /** Withdraws the category from shoppers; withdrawing a withdrawn category is refused. */
+    fun withdraw(at: Instant): Either<CatalogError, Category> =
+        if (isActive) {
+            copy(status = CategoryStatus.WITHDRAWN, updatedAt = at, version = version + 1).right()
+        } else {
+            CatalogError.CategoryAlreadyWithdrawn(id).left()
+        }
 
     companion object {
         /** Nesting depth limit: a root category has depth 1. */
@@ -49,7 +69,7 @@ data class Category(
             id: CategoryId,
             details: CategoryDetails,
             at: Instant,
-        ): Category = Category(id, details, at, at, 0)
+        ): Category = Category(id, details, at, at, 0, CategoryStatus.ACTIVE)
     }
 }
 
@@ -99,6 +119,15 @@ object CategoryTree {
         }
         return chain
     }
+
+    /**
+     * Every category hidden from shoppers: the [withdrawn] ones and every category beneath one of them, given the
+     * parent of every category (`parentOf`, keys are every existing category).
+     */
+    fun hidden(
+        withdrawn: Set<CategoryId>,
+        parentOf: Map<CategoryId, CategoryId?>,
+    ): Set<CategoryId> = parentOf.keys.filterTo(mutableSetOf()) { id -> ancestry(id, parentOf).any { it in withdrawn } }
 
     /** Levels of the subtree rooted at [categoryId]: 1 for a leaf (bounded by the number of categories). */
     fun height(

@@ -13,9 +13,9 @@ Package root: `com.ecommerce.catalog`.
 
 | Module | Contents |
 |---|---|
-| `domain` | value objects (`Money`, `Sku`, `ProductName`, `CategoryName`, `Description`, `ImageRef`, `StockLevel`, `StockAdjustmentReason`, `Quantity`, `SearchTerm`, `PageRequest`), aggregates `Product`, `Category` (+ `CategoryTree`), `InventoryLevel`, `Reservation`, `StockAdjustment`, errors `CatalogError`; health `HealthStatus`, `ServiceName` |
-| `application` | ports (`Ports.kt`), the `Catalog` context with the operator check (`Caller`, `authorize`), queries `ListProducts`, `SearchProducts`, `GetProduct`, `ListCategories`, `GetCategory`, pricing `GetPricing`, `GetPricingBatch`, reservations `ReserveStock`, `CommitReservation`, `ReleaseReservation`, `SettleOrderReservation`, `ExpireReservations`, operator use cases in `admin/` |
-| `infrastructure` | WebFlux coroutine router (`web/`), R2DBC adapters with guarded stock updates (`persistence/`), outbox publisher and order-event listener (`messaging/`), reservation expiry job (`jobs/`), audit log (`audit/`), Flyway `V2`..`V4` and the seed |
+| `domain` | value objects (`Money`, `Sku`, `ProductName`, `CategoryName`, `Description`, `ImageRef`, `StockLevel`, `StockAdjustmentReason`, `Quantity`, `SearchTerm`, `PageRequest`), aggregates `Product`, `Category` (active or withdrawn, + `CategoryTree` with the hidden subtrees), `InventoryLevel`, `Reservation`, `StockAdjustment`, errors `CatalogError`; health `HealthStatus`, `ServiceName` |
+| `application` | ports (`Ports.kt`), the `Catalog` context with the operator check (`Caller`, `authorize`) and the audit model (`Audit.kt`: `OperatorAction`, `AuditEntry`), queries `ListProducts`, `SearchProducts`, `GetProduct`, `ListCategories`, `GetCategory`, pricing `GetPricing`, `GetPricingBatch`, reservations `ReserveStock`, `CommitReservation`, `ReleaseReservation`, `SettleOrderReservation`, `ExpireReservations`, operator use cases in `admin/` (with `AuthorizeOperator` and `WithdrawCategory`) |
+| `infrastructure` | WebFlux coroutine router (`web/`), R2DBC adapters with guarded stock updates (`persistence/`), outbox publisher and order-event listener (`messaging/`), reservation expiry job (`jobs/`), durable audit trail (`audit/`), Flyway `V2`..`V6` and the seed |
 
 ## HTTP surface
 
@@ -32,16 +32,25 @@ Package root: `com.ecommerce.catalog`.
 | getCategory | `GET /api/v1/catalog/categories/{categoryId}` | `GetCategory` | anyone |
 | createCategory | `POST /api/v1/catalog/categories` | `CreateCategory` | operator |
 | updateCategory | `PUT /api/v1/catalog/categories/{categoryId}` | `UpdateCategory` | operator |
+| withdrawCategory | `POST /api/v1/catalog/categories/{categoryId}/withdrawal` | `WithdrawCategory` | operator |
 | reserveStock | `POST /internal/reservations` | `ReserveStock` | `X-Internal-Token` |
 | commitReservation | `POST /internal/reservations/{reservationId}/commit` | `CommitReservation` | `X-Internal-Token` |
 | releaseReservation | `POST /internal/reservations/{reservationId}/release` | `ReleaseReservation` | `X-Internal-Token` |
 | getProductPricing | `GET /internal/products/{productId}/pricing` | `GetPricing` | `X-Internal-Token` |
 | getProductsPricing | `POST /internal/products/pricing` | `GetPricingBatch` | `X-Internal-Token` |
 
-Writes without a token answer 401 (platform security); a token without the operator role answers 403 and the
-refused attempt is logged by `com.ecommerce.catalog.audit` (`audit.outcome`, `audit.action`, `audit.target`,
-`audit.accountId`, `audit.correlationId`; no personal data). `availability.availableQuantity` and withdrawn products
-are shown to operators only. Search is case-insensitive over name and description, ranked: whole name, name prefix,
+Writes without a token answer 401 (platform security); a token without the operator role answers 403, checked before
+the path or the body is read so a shopper never sees a 400 or 422. Every performed operator change (in the change's
+transaction) and every refused attempt is stored in the append-only table `audit_entry` (operator id, action, target
+type and id, outcome `performed`/`refused`, correlation id, time; `V6__catalog_audit_entries.sql`, a trigger refuses
+updates and deletes) and logged by `com.ecommerce.catalog.audit` (`audit.outcome`, `audit.action`, `audit.targetType`,
+`audit.target`, `audit.accountId`, `audit.correlationId`; no personal data). `availability.availableQuantity`,
+withdrawn products and withdrawn categories are shown to operators only.
+
+Withdrawing a category (`V5__category_status.sql`) hides it, every category beneath it and their products from
+shoppers: listings, search, `getProduct`, `listCategories` and `getCategory` leave them out (404 on direct reads),
+pricing reports their products `withdrawn`, reservations count them as unavailable, and creating or moving a product
+into the subtree answers 422 (`categoryId` must be an active category). Withdrawing again answers 409. Search is case-insensitive over name and description, ranked: whole name, name prefix,
 name, description. Validation problems are 422 on the public API (400 for malformed requests and query parameters)
 and 400 on the internal API.
 
@@ -96,8 +105,8 @@ one above, the zero-stock product is Ceramic Mug, the withdrawn one Vintage Kett
 
 | Layer | Where | Run alone |
 |---|---|---|
-| unit | `domain/src/test` (Kotest properties: value objects, `ReservationSpec`, `CatalogOperationsSpec`, categories), `application/src/test` (fake ports), architecture rules in `infrastructure` | `./gradlew -q :services:catalog:domain:test` |
-| integration | `infrastructure/src/integrationTest` (Testcontainers PostgreSQL and Kafka): queries and search, reservations and the race for the last unit, operator API, consumers, seed profile, health, metrics | `./gradlew -q :services:catalog:infrastructure:integrationTest` |
+| unit | `domain/src/test` (Kotest properties: value objects, `ReservationSpec`, `CatalogOperationsSpec`, categories), `application/src/test` (fake ports; property specs over generated carts, stock levels, order outcomes and catalogues in `*PropertySpec.kt` with the generators of `CatalogArbs.kt`, named edge cases in `*Test.kt`), architecture rules in `infrastructure` | `./gradlew -q :services:catalog:domain:test` |
+| integration | `infrastructure/src/integrationTest` (Testcontainers PostgreSQL and Kafka): queries and search, reservations and the race for the last unit, operator API and category withdrawal, audit trail, consumers, seed profile, health, metrics | `./gradlew -q :services:catalog:infrastructure:integrationTest` |
 | contract | `infrastructure/src/contractTest`: consumer pacts (`platform-probe` health, `catalog` ← `order` events) in `contractTest`; `CatalogProviderVerificationTest` (cart and order pacts) in `contractVerify` | `./gradlew -q :services:catalog:infrastructure:contractTest :services:catalog:infrastructure:contractVerify` |
 | acceptance | `infrastructure/src/acceptanceTest` (Cucumber, service status) | `./gradlew -q :services:catalog:infrastructure:acceptanceTest` |
 

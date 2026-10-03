@@ -60,13 +60,14 @@ data class PageJson<T>(
     val totalItems: Long,
 )
 
-/** catalog.yaml `Category`. */
+/** catalog.yaml `Category` (with the additive `status`). */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class CategoryJson(
     val id: UUID,
     val name: String,
     val description: String?,
     val parentId: UUID?,
+    val status: String,
 )
 
 /** catalog.yaml `StockAdjustment`: quantities are the available quantity before and after. */
@@ -195,7 +196,7 @@ fun ProductView.toJson(): ProductJson =
 fun <T, R> Page<T>.toJson(transform: (T) -> R): PageJson<R> = PageJson(items.map(transform), page, size, totalItems)
 
 fun Category.toJson(): CategoryJson =
-    CategoryJson(id.value, details.name.value, details.description?.value, details.parentId?.value)
+    CategoryJson(id.value, details.name.value, details.description?.value, details.parentId?.value, status.lower())
 
 fun StockAdjustment.toJson(): StockAdjustmentJson =
     StockAdjustmentJson(
@@ -227,5 +228,5 @@ fun ProductPricing.toJson(): ProductPricingJson =
         product.details.name.value,
         product.details.price.toJson(),
         available,
-        product.saleState.lower(),
+        saleState.lower(),
     )
