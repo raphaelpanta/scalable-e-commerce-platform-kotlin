@@ -6,6 +6,7 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import io.kotest.property.Arb
+import io.kotest.property.arbitrary.int
 import io.kotest.property.arbitrary.long
 import io.kotest.property.arbitrary.map
 import io.kotest.property.arbitrary.string
@@ -17,6 +18,7 @@ private val RULES = SimulatedPaymentRules
 private fun endingIn(suffix: Long): Arb<Money> = Arb.long(0L..99_999L).map { money(it * 100 + suffix) }
 
 private val unreachable = token(SimulatedPaymentRules.UNREACHABLE_TOKEN)
+private val unreachableForever = token(SimulatedPaymentRules.UNREACHABLE_FOREVER_TOKEN)
 private val declineTokens = Arb.string(0..20).map { token(SimulatedPaymentRules.DECLINE_TOKEN_PREFIX + it) }
 
 /**
@@ -32,14 +34,34 @@ class SimulatedPaymentProviderSpec :
             RULES.decide(token(APPROVE_TOKEN), money(19_800)).outcome shouldBe PaymentOutcome.APPROVED
         }
 
-        test("the unreachable token leaves the charge pending whatever the amount (rule 1 wins)") {
+        test("the unreachable token leaves the first attempt pending whatever the amount (rule 1 wins)") {
             checkAll(PaymentArbs.amount) { amount ->
                 RULES.decide(unreachable, amount) shouldBe
                     RuleDecision(PaymentOutcome.PENDING, null, "provider-unreachable")
+                RULES.decide(unreachable, amount, 1) shouldBe RULES.decide(unreachable, amount)
             }
             RULES.decide(unreachable, money(4_913)).outcome shouldBe PaymentOutcome.PENDING
             RULES.decide(token(SimulatedPaymentRules.UNREACHABLE_TOKEN + "x"), money(4_900)).outcome shouldBe
                 PaymentOutcome.APPROVED
+        }
+
+        test("a retry of an unreachable-token charge is decided by the other rules: approved unless they decline") {
+            checkAll(PaymentArbs.plainAmount, Arb.int(2..10)) { amount, attempt ->
+                RULES.decide(unreachable, amount, attempt) shouldBe RuleDecision(PaymentOutcome.APPROVED, null, null)
+            }
+            checkAll(endingIn(13), Arb.int(2..10)) { amount, attempt ->
+                RULES.decide(unreachable, amount, attempt) shouldBe
+                    RuleDecision(PaymentOutcome.DECLINED, DeclineCategory.INSUFFICIENT_FUNDS, "insufficient-funds")
+            }
+            RULES.decide(unreachable, money(4_900), SimulatedPaymentRules.UNREACHABLE_ATTEMPTS + 1).outcome shouldBe
+                PaymentOutcome.APPROVED
+        }
+
+        test("the unreachable-forever token leaves every attempt pending whatever the amount") {
+            checkAll(PaymentArbs.amount, Arb.int(1..10)) { amount, attempt ->
+                RULES.decide(unreachableForever, amount, attempt) shouldBe
+                    RuleDecision(PaymentOutcome.PENDING, null, "provider-unreachable-forever")
+            }
         }
 
         test("amounts ending in 13 are declined insufficient_funds, before any token rule but the first") {
@@ -78,23 +100,45 @@ class SimulatedPaymentProviderSpec :
             checkAll(PaymentArbs.amount) { _ -> RULES.refundOutcome() shouldBe PaymentOutcome.APPROVED }
         }
 
-        test("the document lists the four rules of payment.yaml in order, approved by default") {
+        test("the document lists the five rules of payment.yaml in order, approved by default") {
             val document = SimulatedPaymentRules.DOCUMENT
-            document.version shouldBe 1
+            document.version shouldBe 2
             document.defaultOutcome shouldBe PaymentOutcome.APPROVED
-            document.rules.map { it.order } shouldContainExactly listOf(1, 2, 3, 4)
+            document.rules.map { it.order } shouldContainExactly listOf(1, 2, 3, 4, 5)
             document.rules.map { it.id } shouldContainExactly
-                listOf("provider-unreachable", "insufficient-funds", "card-expired", "card-rejected")
+                listOf(
+                    "provider-unreachable",
+                    "provider-unreachable-forever",
+                    "insufficient-funds",
+                    "card-expired",
+                    "card-rejected",
+                )
             document.rules.map { it.match.field.wire } shouldContainExactly
-                listOf("token", "amountMinor", "amountMinor", "token")
+                listOf("token", "token", "amountMinor", "amountMinor", "token")
             document.rules.map { it.match.operator.wire } shouldContainExactly
-                listOf("equals", "endsWith", "endsWith", "startsWith")
+                listOf("equals", "equals", "endsWith", "endsWith", "startsWith")
             document.rules.map { it.match.value } shouldContainExactly
-                listOf("tok_sim_unreachable", "13", "14", "tok_sim_decline")
+                listOf("tok_sim_unreachable", "tok_sim_unreachable_forever", "13", "14", "tok_sim_decline")
             document.rules.map { it.outcome.wire } shouldContainExactly
-                listOf("pending", "declined", "declined", "declined")
+                listOf("pending", "pending", "declined", "declined", "declined")
             document.rules.map { it.declineCategory?.wire } shouldContainExactly
-                listOf(null, "insufficient_funds", "card_expired", "card_rejected")
+                listOf(null, null, "insufficient_funds", "card_expired", "card_rejected")
+            document.rules.map { it.maxAttemptNumber } shouldContainExactly listOf(1, null, null, null, null)
+        }
+
+        test("a rule limited to the first attempts no longer applies to later ones") {
+            val match = RuleMatch(RuleField.TOKEN, RuleOperator.EQUALS, APPROVE_TOKEN)
+            val limited = SimulatorRule(1, "limited", "", match, PaymentOutcome.PENDING, maxAttemptNumber = 2)
+            listOf(1, 2).forEach { limited.appliesTo(token(APPROVE_TOKEN), money(1), it) shouldBe true }
+            limited.appliesTo(token(APPROVE_TOKEN), money(1), 3) shouldBe false
+            limited.appliesTo(token("tok_other"), money(1), 1) shouldBe false
+            val unlimited = limited.copy(maxAttemptNumber = null)
+            unlimited.appliesTo(token(APPROVE_TOKEN), money(1), Int.MAX_VALUE) shouldBe true
+            val document = SimulatorRules(1, PaymentOutcome.APPROVED, listOf(limited))
+            document.evaluate(token(APPROVE_TOKEN), money(1), 2).ruleId shouldBe "limited"
+            document.evaluate(token(APPROVE_TOKEN), money(1), 3) shouldBe
+                RuleDecision(PaymentOutcome.APPROVED, null, null)
+            document.evaluate(token(APPROVE_TOKEN), money(1)).ruleId shouldBe "limited"
         }
 
         test("rules are evaluated by their order, not their position in the list, and the first match wins") {
@@ -141,6 +185,9 @@ class SimulatedPaymentProviderSpec :
             RuleDecision(PaymentOutcome.PENDING, null, "provider-unreachable")
                 .toProviderDecision { error("no reference while unreachable") }
                 .shouldBeInstanceOf<ProviderDecision.Unreachable>()
+            RuleDecision(PaymentOutcome.VOIDED, null, null)
+                .toProviderDecision { error("no reference without an answer") }
+                .shouldBeInstanceOf<ProviderDecision.Unreachable>()
         }
 
         test("a rule document refuses inconsistent rules") {
@@ -161,6 +208,14 @@ class SimulatedPaymentProviderSpec :
             val rule = SimulatorRule(1, "one", "", match, PaymentOutcome.PENDING)
             shouldThrow<IllegalArgumentException> { SimulatorRules(0, PaymentOutcome.APPROVED, emptyList()) }
             shouldThrow<IllegalArgumentException> { SimulatorRules(1, PaymentOutcome.DECLINED, emptyList()) }
+            shouldThrow<IllegalArgumentException> { SimulatorRules(1, PaymentOutcome.VOIDED, emptyList()) }
+            shouldThrow<IllegalArgumentException> { SimulatorRule(1, "voids", "", match, PaymentOutcome.VOIDED) }
+            shouldThrow<IllegalArgumentException> {
+                SimulatorRule(1, "zero-attempts", "", match, PaymentOutcome.PENDING, maxAttemptNumber = 0)
+            }
+            SimulatorRule(1, "one-attempt", "", match, PaymentOutcome.PENDING, maxAttemptNumber = 1)
+                .maxAttemptNumber shouldBe 1
+            SimulatorRules(1, PaymentOutcome.PENDING, emptyList()).defaultOutcome shouldBe PaymentOutcome.PENDING
             shouldThrow<IllegalArgumentException> { SimulatorRules(1, PaymentOutcome.APPROVED, listOf(rule, rule)) }
             SimulatorRule(1, "one", "", match, PaymentOutcome.PENDING).order shouldBe 1
             SimulatorRules(1, PaymentOutcome.APPROVED, listOf(rule)).rules.size shouldBe 1

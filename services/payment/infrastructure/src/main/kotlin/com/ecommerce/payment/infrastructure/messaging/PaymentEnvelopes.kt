@@ -28,6 +28,7 @@ object PaymentEnvelopes {
                     PaymentOutcome.APPROVED -> EventType.PaymentApproved
                     PaymentOutcome.DECLINED -> EventType.PaymentDeclined
                     PaymentOutcome.PENDING -> EventType.PaymentPending
+                    PaymentOutcome.VOIDED -> error("a voided attempt is never published")
                 }
             }
 

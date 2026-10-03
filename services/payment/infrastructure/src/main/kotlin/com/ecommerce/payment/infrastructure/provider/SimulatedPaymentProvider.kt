@@ -20,7 +20,9 @@ class SimulatedPaymentProvider(
     override suspend fun charge(
         paymentMethod: PaymentMethodRef,
         amount: Money,
-    ): ProviderDecision = rules.evaluate(paymentMethod, amount).toProviderDecision { reference(CHARGE_PREFIX) }
+        attemptNumber: Int,
+    ): ProviderDecision =
+        rules.evaluate(paymentMethod, amount, attemptNumber).toProviderDecision { reference(CHARGE_PREFIX) }
 
     override suspend fun refund(
         charge: ProviderReference,

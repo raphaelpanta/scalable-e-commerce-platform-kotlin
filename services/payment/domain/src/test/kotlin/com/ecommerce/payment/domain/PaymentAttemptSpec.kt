@@ -8,6 +8,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.property.Arb
 import io.kotest.property.arbitrary.enum
 import io.kotest.property.checkAll
+import java.time.Duration
 import java.util.UUID
 
 private val CHARGE_REF = reference("sim_ch_000123")
@@ -170,7 +171,8 @@ class PaymentAttemptSpec :
             checkAll(Arb.enum<DeclineCategory>()) { DeclineCategory.fromWire(it.wire) shouldBe it }
             checkAll(Arb.enum<PaymentOutcome>()) { PaymentOutcome.fromWire(it.wire) shouldBe it }
             DeclineCategory.fromWire("method_rejected") shouldBe null
-            PaymentOutcome.fromWire("voided") shouldBe null
+            PaymentOutcome.fromWire("refunded") shouldBe null
+            PaymentOutcome.entries.map { it.wire } shouldBe listOf("approved", "declined", "pending", "voided")
             DeclineCategory.entries.map { it.wire } shouldBe
                 listOf(
                     "insufficient_funds",
@@ -200,5 +202,87 @@ class PaymentAttemptSpec :
             }
             IdempotencyKey.refundOf(OrderId(UUID.fromString("0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10"))).value shouldBe
                 UUID.nameUUIDFromBytes("payment:refund-of-order:0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10".toByteArray())
+        }
+
+        test("the key of a retry is derived from the key of the attempt it retries, never equal to it") {
+            checkAll(PaymentArbs.key, PaymentArbs.key) { first, second ->
+                IdempotencyKey.retryOf(first) shouldBe IdempotencyKey.retryOf(IdempotencyKey(first.value))
+                (IdempotencyKey.retryOf(first) == IdempotencyKey.retryOf(second)) shouldBe (first == second)
+                (IdempotencyKey.retryOf(first) == first) shouldBe false
+            }
+            val checkout = IdempotencyKey(UUID.fromString("6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f"))
+            IdempotencyKey.retryOf(checkout).value shouldBe
+                UUID.nameUUIDFromBytes("payment:retry-of:6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f".toByteArray())
+        }
+
+        test("a pending attempt is voided without a reference; any other attempt cannot be voided") {
+            checkAll(PaymentArbs.pendingAttempt) { pending ->
+                pending.isPending shouldBe true
+                val voided = pending.void()
+                voided shouldBe pending.copy(outcome = PaymentOutcome.VOIDED)
+                voided.isPending shouldBe false
+                voided.providerReference shouldBe null
+                shouldThrow<IllegalStateException> { voided.void() }
+            }
+            val approved = PaymentArbs.approvedAttempt.one()
+            approved.isPending shouldBe false
+            shouldThrow<IllegalStateException> { approved.void() }
+            shouldThrow<IllegalArgumentException> { approved.copy(outcome = PaymentOutcome.VOIDED) }
+        }
+
+        test("a retry is attempt N + 1 of the same order, linked to the attempt it retries, under a derived key") {
+            checkAll(PaymentArbs.pendingAttempt, PaymentArbs.attemptId, PaymentArbs.decision) { pending, id, decision ->
+                val later = NOW.plusSeconds(60)
+                val retry = pending.retry(id, decision, later)
+                retry.id shouldBe id
+                retry.orderId shouldBe pending.orderId
+                retry.accountId shouldBe pending.accountId
+                retry.amount shouldBe pending.amount
+                retry.paymentMethodRef shouldBe pending.paymentMethodRef
+                retry.outcome shouldBe decision.outcome
+                retry.providerReference shouldBe decision.reference
+                retry.declineCategory shouldBe (decision as? ProviderDecision.Declined)?.category
+                retry.idempotencyKey shouldBe IdempotencyKey.retryOf(pending.idempotencyKey)
+                retry.createdAt shouldBe later
+                retry.attemptNumber shouldBe 2
+                retry.previousAttemptId shouldBe pending.id
+                val third = retry.takeIf { it.isPending }?.retry(PaymentArbs.attemptId.one(), decision, later)
+                third?.attemptNumber?.let { it shouldBe 3 }
+                third?.previousAttemptId?.let { it shouldBe retry.id }
+            }
+            shouldThrow<IllegalStateException> {
+                PaymentArbs.approvedAttempt.one().retry(PaymentArbs.attemptId.one(), ProviderDecision.Unreachable, NOW)
+            }
+        }
+
+        test("only the first attempt has no previous one, and attempts are numbered from 1") {
+            val pending = PaymentArbs.pendingAttempt.one()
+            val retry = pending.retry(PaymentArbs.attemptId.one(), ProviderDecision.Unreachable, NOW)
+            pending.attemptNumber shouldBe 1
+            pending.previousAttemptId shouldBe null
+            shouldThrow<IllegalArgumentException> { pending.copy(attemptNumber = 0, previousAttemptId = null) }
+            shouldThrow<IllegalArgumentException> { pending.copy(attemptNumber = 2) }
+            shouldThrow<IllegalArgumentException> { retry.copy(attemptNumber = 1) }
+            shouldThrow<IllegalArgumentException> { retry.copy(previousAttemptId = null) }
+            retry.copy(attemptNumber = 3).attemptNumber shouldBe 3
+        }
+
+        test("a pending attempt is due for a retry once old enough and while below the maximum of attempts") {
+            val policy = RetryPolicy(Duration.ofSeconds(60), 3)
+            val pending = PaymentArbs.pendingAttempt.one()
+            policy.cutoff(NOW.plusSeconds(60)) shouldBe NOW
+            policy.isDue(pending, NOW.plusSeconds(60)) shouldBe true
+            policy.isDue(pending, NOW.plusSeconds(59)) shouldBe false
+            policy.isDue(pending, NOW.plusSeconds(600)) shouldBe true
+            val second = pending.retry(PaymentArbs.attemptId.one(), ProviderDecision.Unreachable, NOW)
+            policy.isDue(second, NOW.plusSeconds(60)) shouldBe true
+            val third = second.retry(PaymentArbs.attemptId.one(), ProviderDecision.Unreachable, NOW)
+            policy.isDue(third, NOW.plusSeconds(600)) shouldBe false
+            policy.isDue(pending.void(), NOW.plusSeconds(600)) shouldBe false
+            policy.isDue(PaymentArbs.approvedAttempt.one(), NOW.plusSeconds(600)) shouldBe false
+            RetryPolicy(Duration.ZERO, 1).isDue(pending, NOW) shouldBe false
+            RetryPolicy(Duration.ZERO, 2).isDue(pending, NOW) shouldBe true
+            shouldThrow<IllegalArgumentException> { RetryPolicy(Duration.ofSeconds(-1), 3) }
+            shouldThrow<IllegalArgumentException> { RetryPolicy(Duration.ZERO, 0) }
         }
     })

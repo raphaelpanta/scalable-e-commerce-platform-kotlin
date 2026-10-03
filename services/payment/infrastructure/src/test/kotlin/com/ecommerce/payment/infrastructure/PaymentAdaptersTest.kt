@@ -21,6 +21,7 @@ import com.ecommerce.payment.infrastructure.messaging.PaymentEnvelopes
 import com.ecommerce.payment.infrastructure.provider.SimulatedPaymentProvider
 import com.ecommerce.platform.messaging.envelope.EnvelopeFactory
 import com.ecommerce.platform.messaging.envelope.EventType
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldStartWith
@@ -55,17 +56,26 @@ class PaymentAdaptersTest :
         val provider = SimulatedPaymentProvider(SimulatedPaymentRules.DOCUMENT)
 
         test("the simulated provider follows the rule document and issues sim_ references") {
-            val approved = provider.charge(token("tok_sim_approve_4242"), Money(TOTAL, "BRL"))
+            val approved = provider.charge(token("tok_sim_approve_4242"), Money(TOTAL, "BRL"), 1)
             approved.outcome shouldBe PaymentOutcome.APPROVED
             approved.reference?.value.orEmpty() shouldStartWith SimulatedPaymentProvider.CHARGE_PREFIX
-            val declined = provider.charge(token("tok_sim_approve_4242"), Money(4_913, "BRL"))
+            val declined = provider.charge(token("tok_sim_approve_4242"), Money(4_913, "BRL"), 1)
             (declined as ProviderDecision.Declined).category shouldBe DeclineCategory.INSUFFICIENT_FUNDS
-            provider.charge(token("tok_sim_unreachable"), Money(TOTAL, "BRL")) shouldBe ProviderDecision.Unreachable
+            provider.charge(token("tok_sim_unreachable"), Money(TOTAL, "BRL"), 1) shouldBe ProviderDecision.Unreachable
             provider.refund(ProviderReference("sim_ch_1"), Money(TOTAL, "BRL")).value shouldStartWith
                 SimulatedPaymentProvider.REFUND_PREFIX
             SimulatedPaymentProvider(SimulatedPaymentRules.DOCUMENT) { "000123" }
-                .charge(token("tok_sim_decline_0001"), Money(TOTAL, "BRL")) shouldBe
+                .charge(token("tok_sim_decline_0001"), Money(TOTAL, "BRL"), 1) shouldBe
                 ProviderDecision.Declined(DeclineCategory.CARD_REJECTED, ProviderReference("sim_ch_000123"))
+        }
+
+        test("a retry of an unreachable-token charge is approved; the unreachable-forever token never is") {
+            provider.charge(token("tok_sim_unreachable"), Money(TOTAL, "BRL"), 2).outcome shouldBe
+                PaymentOutcome.APPROVED
+            listOf(1, 2, 3).forEach {
+                provider.charge(token("tok_sim_unreachable_forever"), Money(TOTAL, "BRL"), it) shouldBe
+                    ProviderDecision.Unreachable
+            }
         }
 
         test("charge outcomes map to PaymentApproved, PaymentDeclined and PaymentPending keyed by the attempt") {
@@ -95,6 +105,7 @@ class PaymentAdaptersTest :
             val pendingPayload = PaymentEnvelopes.payloadOf(PaymentEvent.ChargeRecorded(pending))
             pendingPayload["pendingReason"] shouldBe "PROVIDER_UNAVAILABLE"
             pendingPayload.containsKey("providerReference") shouldBe false
+            shouldThrow<IllegalStateException> { PaymentEnvelopes.typeOf(PaymentEvent.ChargeRecorded(pending.void())) }
         }
 
         test("a refund maps to RefundRecorded keyed by the refunded charge, with the recipient snapshot") {

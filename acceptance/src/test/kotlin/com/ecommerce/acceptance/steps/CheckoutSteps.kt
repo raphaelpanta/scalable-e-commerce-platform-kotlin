@@ -4,10 +4,12 @@ import com.ecommerce.acceptance.support.Cards
 import com.ecommerce.acceptance.support.CartHolder
 import com.ecommerce.acceptance.support.Checkout
 import com.ecommerce.acceptance.support.Concurrency
+import com.ecommerce.acceptance.support.Environment
 import com.ecommerce.acceptance.support.Headers
 import com.ecommerce.acceptance.support.ScenarioWorld
 import com.ecommerce.acceptance.support.Shopper
 import com.ecommerce.acceptance.support.Status
+import com.ecommerce.acceptance.support.eventually
 import com.ecommerce.acceptance.support.items
 import com.ecommerce.acceptance.support.list
 import com.ecommerce.acceptance.support.minor
@@ -24,6 +26,7 @@ import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import tools.jackson.databind.JsonNode
+import java.time.Duration
 
 /** Checkout and payment (user story 4, order.yaml and payment.yaml). */
 class CheckoutSteps(
@@ -239,8 +242,36 @@ class CheckoutSteps(
     @Given("the shopper has placed an order for {string} while the payment provider is unreachable")
     fun hasPlacedAPendingOrder(alias: String) {
         world.carts.add(world.shopperCart(), world.product(alias).id, 1) shouldHaveStatus Status.CREATED
-        checkOut(Cards.UNREACHABLE)
+        // Unreachable on every attempt: the payment service's retries cannot resolve it during the scenario.
+        checkOut(Cards.UNREACHABLE_FOREVER)
         placedAndPending()
+    }
+
+    @Then("a later retry of the payment approves the order")
+    fun aLaterRetryApproves() {
+        val shopper = world.theShopper()
+        eventually(within = Environment.paymentRetryBudget, every = Duration.ofSeconds(RETRY_POLL_SECONDS)) {
+            val order = world.orders.get(shopper.bearer, world.orderId())
+            order shouldHaveStatus Status.OK
+            withClue(order.describe()) {
+                order.body.string("orderStatus") shouldBe "placed"
+                order.body.string("paymentStatus") shouldBe "approved"
+            }
+            world.order = order.body
+        }
+    }
+
+    @Then("the order has {int} payment attempts, the latest approved and the earlier ones voided")
+    fun theAttemptsOfARetriedPayment(count: Int) {
+        val attempts = world.orders.paymentAttempts(world.theShopper().bearer, world.orderId())
+        attempts shouldHaveStatus Status.OK
+        val items = attempts.body.items()
+        withClue(attempts.describe()) {
+            items shouldHaveSize count
+            items.map { it.string("outcome") } shouldBe listOf("approved") + List(count - 1) { "voided" }
+            items.map { it.path("attemptNumber").asInt() } shouldBe (count downTo 1).toList()
+            items.first().string("retryOf") shouldBe items[1].string("id")
+        }
     }
 
     private fun placePaidOrder(
@@ -290,6 +321,10 @@ class CheckoutSteps(
     }
 
     private fun currentOrder(): JsonNode = checkNotNull(world.order) { "No order in this scenario" }
+
+    private companion object {
+        const val RETRY_POLL_SECONDS = 5L
+    }
 
     private fun orderLine(
         order: JsonNode,

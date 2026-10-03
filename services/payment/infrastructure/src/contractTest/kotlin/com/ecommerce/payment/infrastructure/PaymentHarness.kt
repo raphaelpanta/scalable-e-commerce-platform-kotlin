@@ -39,7 +39,7 @@ class PaymentHarness(
     /** Empties the service's tables: every provider state describes all the data its interaction needs. */
     fun reset() {
         database
-            .sql("TRUNCATE refunds, payment_attempts, processed_event, outbox")
+            .sql("TRUNCATE refunds, payment_attempts, cancelled_orders, processed_event, outbox")
             .fetch()
             .rowsUpdated()
             .block(TIMEOUT)

@@ -1,14 +1,17 @@
 package com.ecommerce.payment.application
 
 import arrow.core.Either
+import arrow.core.getOrElse
 import arrow.core.left
 import arrow.core.raise.either
 import arrow.core.raise.ensureNotNull
 import arrow.core.right
 import com.ecommerce.payment.domain.ChargeRequest
+import com.ecommerce.payment.domain.IdempotencyKey
 import com.ecommerce.payment.domain.PaymentAttempt
 import com.ecommerce.payment.domain.PaymentError
 import com.ecommerce.payment.domain.PaymentEvent
+import com.ecommerce.payment.domain.PaymentOutcome
 import com.ecommerce.payment.domain.PaymentProviderPort
 import com.ecommerce.payment.domain.Recipient
 import com.ecommerce.payment.domain.RefundRecord
@@ -24,6 +27,7 @@ import java.time.Clock
 class PaymentLedger(
     val attempts: PaymentAttemptRepository,
     val refunds: RefundRepository,
+    val cancellations: CancelledOrderRepository,
     val events: PaymentEventPublisher,
     val transactions: Transactions,
 )
@@ -35,17 +39,55 @@ data class Recorded<out T>(
 )
 
 /**
+ * Stores a new charge attempt with its event under the order's lock, against what is known of the order's
+ * cancellation (data-model section 3.5): an attempt of an order already cancelled is never left pending (it is stored
+ * voided, without an event), and an approval of such an order, a charge that raced the cancellation, is refunded at
+ * once with a `RefundRecorded` for the owner remembered from the `OrderCancelled` event. Must run inside a transaction.
+ */
+class ChargeSettlement(
+    private val ledger: PaymentLedger,
+    private val recordRefund: RecordRefund,
+) {
+    /** The attempt as stored, or null when a concurrent writer stored a conflicting attempt first. */
+    suspend fun store(attempt: PaymentAttempt): PaymentAttempt? {
+        ledger.cancellations.lock(attempt.orderId)
+        val cancellation = ledger.cancellations.find(attempt.orderId)
+        val settled = if (cancellation != null && attempt.isPending) attempt.void() else attempt
+        val stored = ledger.attempts.insert(settled)
+        if (stored && settled.outcome != PaymentOutcome.VOIDED) {
+            ledger.events.publish(PaymentEvent.ChargeRecorded(settled))
+        }
+        if (stored && cancellation != null && settled.outcome == PaymentOutcome.APPROVED) {
+            refundLateApproval(settled, cancellation.recipient)
+        }
+        return settled.takeIf { stored }
+    }
+
+    private suspend fun refundLateApproval(
+        charge: PaymentAttempt,
+        recipient: Recipient,
+    ) {
+        recordRefund(
+            RefundRequest(charge.orderId, charge.id, charge.amount, IdempotencyKey.refundOf(charge.orderId)),
+            recipient,
+        ).getOrElse { error("the late approval ${charge.id} of a cancelled order could not be refunded: $it") }
+    }
+}
+
+/**
  * `POST /internal/charges` and the `OrderPlaced` consumer (FR-013, FR-014): idempotent on the `Idempotency-Key`.
  * The same key with the same body returns the stored attempt unchanged (no new provider call); the same key with a
  * different body is `IdempotencyKeyReuse`; a new key for an order that already has an approved charge is
  * `AlreadyCharged`. Otherwise the provider decides, and the attempt is stored with its `PaymentApproved`,
- * `PaymentDeclined` or `PaymentPending` event in one transaction. A concurrent request that stored first wins.
+ * `PaymentDeclined` or `PaymentPending` event in one transaction ([ChargeSettlement]: a charge of an order cancelled
+ * meanwhile is voided or refunded). A concurrent request that stored first wins.
  */
 class AuthoriseCharge(
     private val ledger: PaymentLedger,
     private val provider: PaymentProviderPort,
     private val ids: PaymentIds,
     private val clock: Clock,
+    private val settlement: ChargeSettlement,
 ) {
     private val attempts = ledger.attempts
 
@@ -56,7 +98,7 @@ class AuthoriseCharge(
                 Recorded(existing.replay(request).bind(), created = false)
             } else {
                 ensureNotCharged(attempts.findApprovedCharge(request.orderId)).bind()
-                val decision = provider.charge(request.paymentMethodRef, request.amount)
+                val decision = provider.charge(request.paymentMethodRef, request.amount, FIRST_ATTEMPT)
                 val attempt = PaymentAttempt.charge(ids.nextAttempt(), request, decision, clock.instant())
                 ledger.transactions.run { store(attempt, request) }.bind()
             }
@@ -66,13 +108,13 @@ class AuthoriseCharge(
         attempt: PaymentAttempt,
         request: ChargeRequest,
     ): Either<PaymentError, Recorded<PaymentAttempt>> =
-        if (attempts.insert(attempt)) {
-            ledger.events.publish(PaymentEvent.ChargeRecorded(attempt))
-            Recorded(attempt, created = true).right()
-        } else {
-            attempts.findByKey(request.idempotencyKey)?.replay(request)?.map { Recorded(it, created = false) }
-                ?: PaymentError.AlreadyCharged.left()
-        }
+        settlement.store(attempt)?.let { Recorded(it, created = true).right() }
+            ?: attempts.findByKey(request.idempotencyKey)?.replay(request)?.map { Recorded(it, created = false) }
+            ?: PaymentError.AlreadyCharged.left()
+
+    private companion object {
+        const val FIRST_ATTEMPT = 1
+    }
 }
 
 /**
@@ -81,7 +123,7 @@ class AuthoriseCharge(
  * a charge that is not approved is `NotRefundable`; an amount other than the charged one is `Invalid`; a second
  * refund of the charge under a new key is `AlreadyRefunded`. The simulated provider always accepts the refund.
  * `RefundRecorded` is published with the refund when the owner's contact snapshot ([Recipient]) is known; otherwise
- * the refund waits for the `OrderCancelled` event, which carries it ([RefundCancelledOrder]).
+ * the refund waits for the `OrderCancelled` event, which carries it ([SettleCancelledOrder]).
  */
 class RecordRefund(
     private val ledger: PaymentLedger,

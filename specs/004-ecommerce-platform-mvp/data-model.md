@@ -256,7 +256,9 @@ PaymentPending is consumed only to annotate the order (provider unreachable, sho
 | Provider is behind a port; MVP adapter is the simulator whose deterministic rules map amount/method to `approved`, `declined(category)` or `pending` (provider unreachable). Order journey is identical for any adapter. | FR-014 |
 | One OrderPlaced produces exactly one charge attempt; duplicate event or retry never creates a second approved charge. | FR-013 |
 | Pending attempts are re-attempted (scheduled, bounded) until resolved or the order is cancelled; a retry reuses the order, adds attemptNumber + 1 only after the previous one is resolved or voided. | US4.6 |
+| Implementation of the retry: a job retries a pending attempt once it is `payment.retry.delay` old (default 60 s) while its attemptNumber is below `payment.retry.max-attempts` (default 3); in one transaction it voids the pending attempt and stores the retry (previousAttemptId = the voided attempt, key derived from the voided attempt's key; the checkout key stays on attempt 1) with its PaymentApproved, PaymentDeclined or PaymentPending. The last attempt allowed stays pending until the order's expiry voids it. | US4.7 |
 | OrderCancelled for an order with an approved charge records a refund (full amount) and publishes RefundRecorded; with only a pending charge, the attempt is voided (an approval racing in after cancel is refunded automatically). | FR-016 |
+| Payment remembers each cancelled order (with the owner's contact snapshot of its OrderCancelled). A charge stored for a remembered order is voided when pending and refunded at once (RefundRecorded) when approved; an OrderCancelled that finds an approved charge refunds it whatever its `refundRequired`. Charges and cancellations of one order are serialised by a per-order lock, so neither misses the other. | FR-016 |
 | No card data stored; only PaymentMethodRef. | Principle III |
 
 **Mapping to the order's paymentStatus** (the payment context owns attempts; the order context owns paymentStatus and updates it only from these events)
@@ -278,6 +280,7 @@ PaymentPending is consumed only to annotate the order (provider unreachable, sho
 | pending | scheduled/shopper retry approved | approved | PaymentApproved |
 | pending | retry declined | declined | PaymentDeclined |
 | pending | OrderCancelled (incl. expiry) | voided | (none) |
+| pending | its retry (attempt N + 1) is stored | voided | (none; the retry publishes its own outcome) |
 | (none, kind refund) | OrderCancelled with approved charge | approved (recorded) | RefundRecorded |
 | approved, declined, voided | any | refused (terminal) | |
 

@@ -19,9 +19,12 @@ import com.ecommerce.payment.domain.ProviderReference
 import com.ecommerce.payment.domain.Recipient
 import com.ecommerce.payment.domain.RefundId
 import com.ecommerce.payment.domain.RefundRecord
+import com.ecommerce.payment.domain.RetryPolicy
 import kotlinx.coroutines.yield
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.util.UUID
 
@@ -35,6 +38,21 @@ val REFUND_REF = ProviderReference("sim_rf_000045")
 const val APPROVE_TOKEN = "tok_sim_approve_4242"
 
 fun fixedClock(at: Instant = NOW): Clock = Clock.fixed(at, ZoneOffset.UTC)
+
+/** A clock that stands still until a test moves it on. */
+class SteppingClock(
+    var now: Instant = NOW,
+) : Clock() {
+    override fun getZone(): ZoneOffset = ZoneOffset.UTC
+
+    override fun withZone(zone: ZoneId?): Clock = this
+
+    override fun instant(): Instant = now
+
+    fun advance(by: Duration) {
+        now = now.plus(by)
+    }
+}
 
 fun brl(amountMinor: Long): Money = Money(amountMinor, "BRL")
 
@@ -63,6 +81,9 @@ class InMemoryAttempts : PaymentAttemptRepository {
     /** Stored by "another request" right before the next insert, to simulate a concurrent writer. */
     var concurrent: PaymentAttempt? = null
 
+    /** When true, the next markVoided loses to a concurrent writer (the attempt is no longer pending). */
+    var voidedElsewhere = false
+
     override suspend fun insert(attempt: PaymentAttempt): Boolean {
         yield()
         concurrent?.let { stored[it.id] = it }
@@ -70,10 +91,40 @@ class InMemoryAttempts : PaymentAttemptRepository {
         val duplicateKey = stored.values.any { it.idempotencyKey == attempt.idempotencyKey }
         val secondApproval =
             attempt.outcome == PaymentOutcome.APPROVED && stored.values.any { it.isApprovedChargeOf(attempt.orderId) }
-        return if (duplicateKey || secondApproval) {
+        val secondRetry =
+            attempt.previousAttemptId != null && stored.values.any { it.previousAttemptId == attempt.previousAttemptId }
+        return if (duplicateKey || secondApproval || secondRetry) {
             false
         } else {
             stored[attempt.id] = attempt
+            true
+        }
+    }
+
+    override suspend fun findPendingOf(orderId: OrderId): List<PaymentAttempt> {
+        yield()
+        return stored.values.filter { it.orderId == orderId && it.isPending }
+    }
+
+    override suspend fun findDueForRetry(
+        createdUpTo: Instant,
+        maxAttempts: Int,
+        limit: Int,
+    ): List<PaymentAttempt> {
+        yield()
+        return stored.values
+            .filter { it.isPending && !it.createdAt.isAfter(createdUpTo) && it.attemptNumber < maxAttempts }
+            .sortedBy { it.createdAt }
+            .take(limit)
+    }
+
+    override suspend fun markVoided(id: PaymentAttemptId): Boolean {
+        yield()
+        val attempt = stored[id]
+        return if (attempt == null || !attempt.isPending || voidedElsewhere) {
+            false
+        } else {
+            stored[id] = attempt.void()
             true
         }
     }
@@ -165,18 +216,41 @@ class InMemoryRefunds : RefundRepository {
     }
 }
 
+class InMemoryCancellations : CancelledOrderRepository {
+    val stored = linkedMapOf<OrderId, CancelledOrderRecord>()
+    val locks = mutableListOf<OrderId>()
+
+    override suspend fun lock(orderId: OrderId) {
+        yield()
+        locks += orderId
+    }
+
+    override suspend fun remember(order: CancelledOrderRecord): Boolean {
+        yield()
+        return stored.putIfAbsent(order.orderId, order) == null
+    }
+
+    override suspend fun find(orderId: OrderId): CancelledOrderRecord? {
+        yield()
+        return stored[orderId]
+    }
+}
+
 class FakeProvider(
     var decision: ProviderDecision = ProviderDecision.Approved(CHARGE_REF),
 ) : PaymentProviderPort {
     val charges = mutableListOf<Pair<PaymentMethodRef, Money>>()
+    val attemptNumbers = mutableListOf<Int>()
     val refunds = mutableListOf<Pair<ProviderReference, Money>>()
 
     override suspend fun charge(
         paymentMethod: PaymentMethodRef,
         amount: Money,
+        attemptNumber: Int,
     ): ProviderDecision {
         yield()
         charges += paymentMethod to amount
+        attemptNumbers += attemptNumber
         return decision
     }
 
@@ -218,22 +292,35 @@ class SequentialIds : PaymentIds {
     override fun nextRefund(): RefundId = RefundId(UUID.randomUUID()).also { refunds += it }
 }
 
+/** The retry policy of the fakes: a pending attempt is due 60 seconds after it was created, 3 attempts at most. */
+val POLICY = RetryPolicy(Duration.ofSeconds(60), 3)
+
 /** Every fake wired into the use cases, as the infrastructure wires the adapters. */
-class Backend {
+class Backend(
+    val clock: Clock = fixedClock(),
+) {
     val attempts = InMemoryAttempts()
     val refunds = InMemoryRefunds()
+    val cancellations = InMemoryCancellations()
     val events = RecordingEvents()
     val transactions = DirectTransactions()
     val provider = FakeProvider()
     val ids = SequentialIds()
-    val clock: Clock = fixedClock()
-    val ledger = PaymentLedger(attempts, refunds, events, transactions)
-    val authoriseCharge = AuthoriseCharge(ledger, provider, ids, clock)
+    val ledger = PaymentLedger(attempts, refunds, cancellations, events, transactions)
     val recordRefund = RecordRefund(ledger, provider, ids, clock)
+    val settlement = ChargeSettlement(ledger, recordRefund)
+    val authoriseCharge = AuthoriseCharge(ledger, provider, ids, clock, settlement)
     val chargePlacedOrder = ChargePlacedOrder(authoriseCharge)
-    val refundCancelledOrder = RefundCancelledOrder(ledger, recordRefund, clock)
+    val settleCancelledOrder = SettleCancelledOrder(ledger, recordRefund, clock)
+    val retryPendingCharges = RetryPendingCharges(ledger, provider, ids, clock, POLICY, settlement)
 
     fun stored(attempt: PaymentAttempt): PaymentAttempt = attempt.also { attempts.stored[it.id] = it }
+
+    fun cancelled(
+        orderId: OrderId,
+        recipient: Recipient = ADA_CONTACT,
+    ): CancelledOrderRecord =
+        CancelledOrderRecord(orderId, recipient, clock.instant()).also { cancellations.stored[orderId] = it }
 
     fun stored(refund: RefundRecord): RefundRecord = refund.also { refunds.stored[it.id] = it }
 

@@ -47,6 +47,8 @@ object PaymentViews {
             attempt.providerReference?.let { put("providerReference", it.value) }
             put("idempotencyKey", attempt.idempotencyKey.toString())
             put("createdAt", attempt.createdAt.toString())
+            put("attemptNumber", attempt.attemptNumber)
+            attempt.previousAttemptId?.let { put("retryOf", it.toString()) }
         }
 
     /** `Refund` of payment.yaml: a recorded refund is an approved refund attempt of the simulated provider. */
@@ -97,6 +99,7 @@ object PaymentViews {
             )
             put("outcome", rule.outcome.wire)
             rule.declineCategory?.let { put("declineReason", it.wire) }
+            rule.maxAttemptNumber?.let { put("maxAttemptNumber", it) }
         }
 
     private fun money(amount: Money): Map<String, Any> =

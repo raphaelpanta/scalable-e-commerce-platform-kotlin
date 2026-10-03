@@ -61,7 +61,10 @@ paths:
       summary: List the payment attempts of an order
       description: |
         Required role - `operator`, or the `shopper` who owns the order. Attempts are returned
-        newest first. A retry of a `pending` payment adds a new attempt to the same order.
+        newest first. A retry of a `pending` payment adds a new attempt to the same order: the
+        payment service retries a pending attempt once it is 60 seconds old (configurable), up to
+        3 attempts per order (configurable); the retry carries `attemptNumber` + 1 and `retryOf`,
+        and the attempt it retries becomes `voided`.
       parameters:
         - $ref: '#/components/parameters/OrderIdQuery'
         - $ref: '#/components/parameters/Page'
@@ -148,8 +151,13 @@ paths:
       description: |
         Required role - `operator`; shoppers receive 403. Returns the documented rule set the
         simulated provider uses to approve, decline or leave a charge pending (FR-014). Rules
-        are evaluated in `order`; the first match wins, otherwise `defaultOutcome` applies. The
-        document is read-only; changing rules is a code change, not an API call.
+        are evaluated in `order`; the first rule that applies wins, otherwise `defaultOutcome`
+        applies. A rule with `maxAttemptNumber` applies only to the attempts of an order up to that
+        number (the first attempt is 1, each retry of a pending attempt adds 1): `tok_sim_unreachable`
+        leaves the first attempt pending and its retry is decided by the other rules (approved
+        unless an amount rule declines it), while `tok_sim_unreachable_forever` leaves every attempt
+        pending, so the 30-minute payment expiry can be exercised. The document is read-only;
+        changing rules is a code change, not an API call.
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
       responses:
@@ -160,13 +168,14 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/SimulatorRules'}
               example:
-                version: 1
+                version: 2
                 defaultOutcome: approved
                 rules:
-                  - {order: 1, id: provider-unreachable, description: Token marks the provider as unreachable., match: {field: token, operator: equals, value: tok_sim_unreachable}, outcome: pending}
-                  - {order: 2, id: insufficient-funds, description: Amounts whose last two minor digits are 13 are declined., match: {field: amountMinor, operator: endsWith, value: '13'}, outcome: declined, declineReason: insufficient_funds}
-                  - {order: 3, id: card-expired, description: Amounts whose last two minor digits are 14 are declined., match: {field: amountMinor, operator: endsWith, value: '14'}, outcome: declined, declineReason: card_expired}
-                  - {order: 4, id: card-rejected, description: Tokens starting tok_sim_decline are declined., match: {field: token, operator: startsWith, value: tok_sim_decline}, outcome: declined, declineReason: card_rejected}
+                  - {order: 1, id: provider-unreachable, description: Token marks the provider as unreachable for the first attempt; a retry is decided by the other rules., match: {field: token, operator: equals, value: tok_sim_unreachable}, outcome: pending, maxAttemptNumber: 1}
+                  - {order: 2, id: provider-unreachable-forever, description: Token marks the provider as unreachable for every attempt., match: {field: token, operator: equals, value: tok_sim_unreachable_forever}, outcome: pending}
+                  - {order: 3, id: insufficient-funds, description: Amounts whose last two minor digits are 13 are declined., match: {field: amountMinor, operator: endsWith, value: '13'}, outcome: declined, declineReason: insufficient_funds}
+                  - {order: 4, id: card-expired, description: Amounts whose last two minor digits are 14 are declined., match: {field: amountMinor, operator: endsWith, value: '14'}, outcome: declined, declineReason: card_expired}
+                  - {order: 5, id: card-rejected, description: Tokens starting tok_sim_decline are declined., match: {field: token, operator: startsWith, value: tok_sim_decline}, outcome: declined, declineReason: card_rejected}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '429': {$ref: '#/components/responses/TooManyRequests'}
@@ -240,8 +249,12 @@ components:
       properties: {amountMinor: {type: integer, format: int64, minimum: 0}, currency: {type: string, pattern: '^[A-Z]{3}$', description: ISO-4217 code.}}
     Outcome:
       type: string
-      description: approved and declined are final; pending means the provider was unreachable and a retry is expected.
-      enum: [approved, declined, pending]
+      description: >-
+        approved and declined are final; pending means the provider was unreachable and a retry is
+        expected; voided is final too - a pending attempt that will never be resolved, because its
+        order was cancelled (or its payment expired) or because a retry superseded it. A voided
+        attempt has no provider reference and publishes no event. A simulator rule never answers voided.
+      enum: [approved, declined, pending, voided]
     DeclineReason:
       type: string
       description: Decline category (no provider internals).
@@ -256,8 +269,10 @@ components:
         outcome: {$ref: '#/components/schemas/Outcome'}
         declineReason: {$ref: '#/components/schemas/DeclineReason', description: Present only when outcome is declined.}
         providerReference: {type: string, description: Reference issued by the (simulated) provider.}
-        idempotencyKey: {type: string, format: uuid, description: Key that guarantees one attempt per checkout request.}
+        idempotencyKey: {type: string, format: uuid, description: Key that guarantees one attempt per checkout request (a retry carries a key derived from the attempt it retries).}
         createdAt: {type: string, format: date-time}
+        attemptNumber: {type: integer, minimum: 1, description: 1 for the first attempt of the order; each retry of a pending attempt adds 1.}
+        retryOf: {type: string, format: uuid, description: Id of the pending attempt this retry superseded (now voided); absent on the first attempt.}
     Refund:
       type: object
       required: [id, orderId, refundOf, amount, outcome, providerReference, idempotencyKey, createdAt]
@@ -295,6 +310,7 @@ components:
             value: {type: string}
         outcome: {$ref: '#/components/schemas/Outcome'}
         declineReason: {$ref: '#/components/schemas/DeclineReason'}
+        maxAttemptNumber: {type: integer, minimum: 1, description: The rule applies only to attempts numbered up to this value; absent means every attempt.}
     SimulatorRules:
       type: object
       required: [version, defaultOutcome, rules]

@@ -88,16 +88,24 @@ class PublicPaymentApiIT : PaymentIntegrationTest() {
     fun `the simulator rules are published to operators, shoppers get 403`() {
         val rules = body(read("$PAYMENTS/simulator/rules", operatorId, OPERATOR).expectStatus().isOk)
 
-        rules["version"] shouldBe 1
+        rules["version"] shouldBe 2
         rules["defaultOutcome"] shouldBe "approved"
         val list = (rules["rules"] as List<*>).map { it as Map<*, *> }
         list.map { it["id"] } shouldContainExactly
-            listOf("provider-unreachable", "insufficient-funds", "card-expired", "card-rejected")
+            listOf(
+                "provider-unreachable",
+                "provider-unreachable-forever",
+                "insufficient-funds",
+                "card-expired",
+                "card-rejected",
+            )
         list.first()["match"] shouldBe
             mapOf("field" to "token", "operator" to "equals", "value" to "tok_sim_unreachable")
         list.first().containsKey("declineReason") shouldBe false
         list.map { it["declineReason"] } shouldContainExactly
-            listOf(null, "insufficient_funds", "card_expired", "card_rejected")
+            listOf(null, null, "insufficient_funds", "card_expired", "card_rejected")
+        list.map { it["maxAttemptNumber"] } shouldContainExactly listOf(1, null, null, null, null)
+        list[1].containsKey("maxAttemptNumber") shouldBe false
         read("$PAYMENTS/simulator/rules", UUID.randomUUID()).expectProblem(ProblemType.FORBIDDEN)
     }
 }

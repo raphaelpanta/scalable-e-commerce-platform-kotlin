@@ -21,6 +21,6 @@ class ServiceBaselineIntegrationTest : PaymentIntegrationTest() {
     @Test
     fun migrationsAreApplied() {
         column("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank") shouldBe
-            listOf("1", "1.1", "2")
+            listOf("1", "1.1", "2", "3", "4", "5")
     }
 }

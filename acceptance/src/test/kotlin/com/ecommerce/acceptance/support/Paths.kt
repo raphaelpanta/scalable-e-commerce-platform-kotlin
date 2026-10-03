@@ -107,5 +107,10 @@ object Status {
 object Cards {
     const val APPROVED = "tok_sim_approve_4242"
     const val DECLINED = "tok_sim_decline_0001"
+
+    /** Pending on the first attempt; the payment service's retry (about a minute later) approves it. */
     const val UNREACHABLE = "tok_sim_unreachable"
+
+    /** Pending on every attempt, so the payment stays pending until the order's 30-minute expiry. */
+    const val UNREACHABLE_FOREVER = "tok_sim_unreachable_forever"
 }

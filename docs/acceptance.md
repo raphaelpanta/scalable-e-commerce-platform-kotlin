@@ -41,6 +41,7 @@ not only on the inputs.
 | `OPERATOR_EMAIL` / `OPERATOR_PASSWORD` | `operator@ecommerce.example` / `Operator-Passw0rd!2026` | The operator account created by the identity seed |
 | `PLATFORM_CURRENCY` | `BRL` | Currency of the prices the suite creates |
 | `NOTIFICATION_FAILURE_TIMEOUT_MINUTES` | `15` | How long `@chaos` waits for a failing email to run out of retries |
+| `PAYMENT_RETRY_TIMEOUT_SECONDS` | `150` | How long the retry scenario waits for the payment service to retry a pending payment (its `PAYMENT_RETRY_DELAY` is 60 s by default) |
 
 The suite never logs credentials or tokens. Response bodies in assertion messages have `accessToken`,
 `refreshToken`, `password`, `token` and `code` masked.
@@ -51,9 +52,11 @@ The suite never logs credentials or tokens. Response bodies in assertion message
   seeded catalogue", plus the operator account. The identity seed must create the operator with the credentials
   above, or the run must set `OPERATOR_EMAIL`/`OPERATOR_PASSWORD` to match it.
 - **Simulated payment provider** card tokens (rules: `GET /api/v1/payments/simulator/rules`, operator only):
-  `tok_sim_approve_4242` is approved, `tok_sim_decline_0001` is declined as `card_rejected`, and
-  `tok_sim_unreachable` leaves the payment `pending` (provider unreachable). Amounts whose last two minor digits are
-  `13` or `14` are declined, so every price in the features keeps totals away from those endings.
+  `tok_sim_approve_4242` is approved, `tok_sim_decline_0001` is declined as `card_rejected`,
+  `tok_sim_unreachable` leaves the first attempt `pending` (provider unreachable) and the payment service's retry
+  (once the attempt is `PAYMENT_RETRY_DELAY` old, 60 s by default) approves it, and `tok_sim_unreachable_forever`
+  leaves every attempt `pending`, for scenarios that need the payment to stay pending. Amounts whose last two minor
+  digits are `13` or `14` are declined, so every price in the features keeps totals away from those endings.
 - **Rate limits.** The gateway's `auth` tier allows 10 credential calls per minute per source address
   (`contracts/gateway-routes.md`). Every scenario registers, verifies and signs in a fresh shopper, so set-up
   calls wait on 429 with `untilNotThrottled`. The suite stays correct but becomes slow; raise the tier in the local
@@ -77,7 +80,7 @@ The suite never logs credentials or tokens. Response bodies in assertion message
 | US1 browse the catalogue | `catalogue-browsing.feature` | 4 | `CatalogueSteps` |
 | US2 cart and merge on sign-in | `shopping-cart.feature` | 6 | `CartSteps` |
 | US3 account | `account.feature` | 7 | `AccountSteps` |
-| US4 checkout and payment | `checkout.feature` | 7 | `CheckoutSteps` |
+| US4 checkout and payment | `checkout.feature` | 8 | `CheckoutSteps` |
 | US5 order tracking | `order-tracking.feature` | 6 | `OrderTrackingSteps` |
 | US6 notifications | `notifications.feature` | 5 | `NotificationSteps` |
 | US7 catalogue operations | `catalogue-operations.feature` | 9 | `CatalogueOperationsSteps` |
@@ -95,9 +98,16 @@ above.
 
 These follow from the contracts:
 
-- **US4.7 provider unreachable.** The suite checks that the order stays `placed` with payment `pending` and that a
-  retry with the same key does not duplicate it. A retry has to resend the same body (same card token), so it cannot
-  turn the payment `approved`. The 30-minute expiry is not waited for.
+- **US4.7 provider unreachable.** The suite checks that the order stays `placed` with payment `pending`, that a
+  resubmission with the same key does not duplicate it, and (`@slow`) that the payment service's own retry of the
+  pending charge approves the order later (two attempts: the first `voided`, the retry `approved`). A shopper
+  resubmission has to resend the same body (same card token), so it is not what resolves the payment.
+- **US4.7 30-minute expiry (`PAYMENT_EXPIRED`, stock released) is not covered.** The window is the order domain's
+  constant `Order.PAYMENT_WINDOW` (30 minutes); no property of the order service shortens it, so a scenario would
+  have to wait more than 30 minutes. The expiry is covered by the order service's integration test
+  (`OrderLifecycleIT`, the expiry job against a clock) and the payment side (the pending attempt voided by
+  `OrderCancelled`) by the payment integration tests. Making the window configurable would let a later scenario use
+  `tok_sim_unreachable_forever` and wait for the expiry.
 - **US6.4 duplicate events.** Events cannot be injected through the public API. The suite resubmits the same
   checkout with the same idempotency key instead, and checks that exactly one confirmation email and one history entry
   exist.

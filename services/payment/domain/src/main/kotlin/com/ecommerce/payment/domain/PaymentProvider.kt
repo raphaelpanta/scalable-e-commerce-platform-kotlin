@@ -35,10 +35,14 @@ sealed interface ProviderDecision {
  * [SimulatedPaymentRules]; a real provider later implements the same port without touching the order journey.
  */
 interface PaymentProviderPort {
-    /** Charges [amount] to [paymentMethod]. */
+    /**
+     * Charges [amount] to [paymentMethod]; [attemptNumber] is 1 for the first attempt of an order and grows with each
+     * retry of a pending charge (a real provider may use it to deduplicate, the simulator's rules may depend on it).
+     */
     suspend fun charge(
         paymentMethod: PaymentMethodRef,
         amount: Money,
+        attemptNumber: Int,
     ): ProviderDecision
 
     /** Refunds [amount] of the charge the provider knows as [charge]; returns the refund's reference. */
@@ -50,7 +54,10 @@ interface PaymentProviderPort {
 
 /** The events of the payment context (`payment.payment.v1`), published through the outbox. */
 sealed interface PaymentEvent {
-    /** A charge attempt was recorded: `PaymentApproved`, `PaymentDeclined` or `PaymentPending` by its outcome. */
+    /**
+     * A charge attempt was recorded: `PaymentApproved`, `PaymentDeclined` or `PaymentPending` by its outcome (a voided
+     * attempt is never published).
+     */
     data class ChargeRecorded(
         val attempt: PaymentAttempt,
     ) : PaymentEvent

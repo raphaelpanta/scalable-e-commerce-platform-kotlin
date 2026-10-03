@@ -12,12 +12,13 @@ import com.ecommerce.payment.domain.PaymentOutcome
 import kotlinx.coroutines.reactor.awaitSingle
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.r2dbc.core.awaitOneOrNull
+import java.time.Instant
 import java.util.UUID
 
 /**
- * Charge attempts in `payment_attempts`. The insert does nothing on a unique conflict, the idempotency key or the
- * one-approved-charge-per-order index, so two concurrent requests serialise on the constraint: one stores its
- * attempt, the other learns that it lost and reads the winner back.
+ * Charge attempts in `payment_attempts`. The insert does nothing on a unique conflict, the idempotency key, the
+ * one-approved-charge-per-order index or the one-retry-per-attempt constraint, so two concurrent requests serialise on
+ * the constraint: one stores its attempt, the other learns that it lost and reads the winner back.
  */
 class R2dbcPaymentAttemptRepository(
     private val database: DatabaseClient,
@@ -37,6 +38,8 @@ class R2dbcPaymentAttemptRepository(
             .bindNullable("providerReference", attempt.providerReference?.value, String::class.java)
             .bind("idempotencyKey", attempt.idempotencyKey.value)
             .bind("createdAt", attempt.createdAt)
+            .bind("attemptNumber", attempt.attemptNumber)
+            .bindNullable("previousAttemptId", attempt.previousAttemptId?.value, UUID::class.java)
             .awaitRowsUpdated() == 1L
 
     override suspend fun findById(id: PaymentAttemptId): PaymentAttempt? = one("id = :value", id.value)
@@ -82,6 +85,42 @@ class R2dbcPaymentAttemptRepository(
         return Page(items, page, total)
     }
 
+    override suspend fun findPendingOf(orderId: OrderId): List<PaymentAttempt> =
+        database
+            .sql("$SELECT WHERE order_id = :orderId AND outcome = :pending ORDER BY created_at, id")
+            .bind("orderId", orderId.value)
+            .bind("pending", PaymentOutcome.PENDING.wire)
+            .map { row, _ -> row.toAttempt() }
+            .all()
+            .collectList()
+            .awaitSingle()
+
+    override suspend fun findDueForRetry(
+        createdUpTo: Instant,
+        maxAttempts: Int,
+        limit: Int,
+    ): List<PaymentAttempt> =
+        database
+            .sql(
+                "$SELECT WHERE outcome = :pending AND created_at <= :createdUpTo AND attempt_number < :maxAttempts " +
+                    "ORDER BY created_at, id LIMIT :limit",
+            ).bind("pending", PaymentOutcome.PENDING.wire)
+            .bind("createdUpTo", createdUpTo)
+            .bind("maxAttempts", maxAttempts)
+            .bind("limit", limit)
+            .map { row, _ -> row.toAttempt() }
+            .all()
+            .collectList()
+            .awaitSingle()
+
+    override suspend fun markVoided(id: PaymentAttemptId): Boolean =
+        database
+            .sql("UPDATE payment_attempts SET outcome = :voided WHERE id = :id AND outcome = :pending")
+            .bind("voided", PaymentOutcome.VOIDED.wire)
+            .bind("id", id.value)
+            .bind("pending", PaymentOutcome.PENDING.wire)
+            .awaitRowsUpdated() == 1L
+
     private suspend fun one(
         condition: String,
         value: UUID,
@@ -97,13 +136,14 @@ class R2dbcPaymentAttemptRepository(
             " WHERE order_id = :orderId ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset"
         const val SELECT =
             "SELECT id, order_id, account_id, amount_minor, currency, payment_method_ref, outcome, decline_category, " +
-                "provider_reference, idempotency_key, created_at FROM payment_attempts"
+                "provider_reference, idempotency_key, created_at, attempt_number, previous_attempt_id " +
+                "FROM payment_attempts"
         const val PAGE_OF_ORDER = SELECT + ORDER_PAGE_CLAUSE
         const val INSERT =
             "INSERT INTO payment_attempts (id, order_id, account_id, kind, amount_minor, currency, " +
-                "payment_method_ref, outcome, decline_category, provider_reference, idempotency_key, created_at) " +
-                "VALUES (:id, :orderId, " +
-                ":accountId, :kind, :amountMinor, :currency, :paymentMethodRef, :outcome, :declineCategory, " +
-                ":providerReference, :idempotencyKey, :createdAt) ON CONFLICT DO NOTHING"
+                "payment_method_ref, outcome, decline_category, provider_reference, idempotency_key, created_at, " +
+                "attempt_number, previous_attempt_id) VALUES (:id, :orderId, :accountId, :kind, :amountMinor, " +
+                ":currency, :paymentMethodRef, :outcome, :declineCategory, :providerReference, :idempotencyKey, " +
+                ":createdAt, :attemptNumber, :previousAttemptId) ON CONFLICT DO NOTHING"
     }
 }
