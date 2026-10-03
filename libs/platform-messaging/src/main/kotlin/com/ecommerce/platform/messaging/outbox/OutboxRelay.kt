@@ -5,8 +5,12 @@ import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.future.await
+import kotlinx.coroutines.job
 import kotlinx.coroutines.reactor.awaitSingle
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -75,12 +79,26 @@ class OutboxRelay(
     /**
      * Relays one batch and returns the number of rows Kafka acknowledged; a full batch means more rows may be
      * waiting, a batch with failures waits for the poll interval before the next attempt.
+     *
+     * Cancellation (the relay job stopping with the application) is honoured between rows, never inside a
+     * statement: the transaction runs [NonCancellable], stops sending once the caller is cancelled, commits the
+     * rows Kafka already acknowledged and only then rethrows the cancellation. Cancelling an R2DBC statement in
+     * flight drops the bind parameters r2dbc-postgresql has already encoded into Netty buffers without releasing
+     * them (`LEAK: ByteBuf.release() was not called`) and lets the pool close the connection under the statement.
+     * A stop therefore waits for at most the statement in flight and one Kafka send ([Settings.sendTimeout]).
      */
-    suspend fun relayBatch(): Int =
+    suspend fun relayBatch(): Int {
+        val caller = currentCoroutineContext().job
+        val acknowledged = withContext(NonCancellable) { relayBatchUntil { !caller.isActive } }
+        caller.ensureActive()
+        return acknowledged
+    }
+
+    private suspend fun relayBatchUntil(cancelled: () -> Boolean): Int =
         transactions.executeAndAwait {
             val blockedKeys = HashSet<String>()
             var acknowledged = 0
-            for (row in lockPending()) {
+            for (row in lockPending().asSequence().takeWhile { !cancelled() }) {
                 if (row.key in blockedKeys) continue
                 val failure = send(row)
                 if (failure == null) {
