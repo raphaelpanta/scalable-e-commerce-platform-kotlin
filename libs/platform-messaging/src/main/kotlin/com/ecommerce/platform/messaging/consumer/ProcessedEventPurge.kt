@@ -1,6 +1,8 @@
 package com.ecommerce.platform.messaging.consumer
 
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.reactor.awaitSingle
+import kotlinx.coroutines.withContext
 import org.springframework.r2dbc.core.DatabaseClient
 import java.time.Clock
 import java.time.Duration
@@ -14,12 +16,17 @@ class ProcessedEventPurge(
     private val retention: Duration,
     private val clock: Clock = Clock.systemUTC(),
 ) {
-    /** Deletes the expired rows and returns how many were removed. */
+    /**
+     * Deletes the expired rows and returns how many were removed. The statement is never cancelled half-way (see
+     * `OutboxRelay.relayBatch`): a cancellation takes effect once it completed.
+     */
     suspend fun purge(): Long =
-        database
-            .sql("DELETE FROM processed_event WHERE processed_at < :cutoff")
-            .bind("cutoff", clock.instant().minus(retention))
-            .fetch()
-            .rowsUpdated()
-            .awaitSingle()
+        withContext(NonCancellable) {
+            database
+                .sql("DELETE FROM processed_event WHERE processed_at < :cutoff")
+                .bind("cutoff", clock.instant().minus(retention))
+                .fetch()
+                .rowsUpdated()
+                .awaitSingle()
+        }
 }
