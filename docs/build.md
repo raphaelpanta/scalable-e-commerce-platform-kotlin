@@ -311,6 +311,22 @@ producer side has no such exception: the outbox relay runs on a coroutine scope 
 reads and updates rows over R2DBC and calls `KafkaProducer.send`, which can block while it fetches metadata, on
 `Dispatchers.IO`.
 
+`dispatch` also binds the envelope's `correlationId` around the handler (T145): it is put in the MDC of the consumer
+thread and in the Reactor context of the handler's coroutine (`CorrelationIds.bind`), and the coroutine runs with
+`ReactorThreadLocals` of platform-core, which restores that context into the thread locals every time the coroutine
+resumes (after the `processed_event` insert, on another dispatcher, ...). Consumer-side log lines therefore carry
+`correlationId`, `CorrelationIds.current()` returns it, and internal calls and outbox events made by the handler copy
+it. An id that is not 1 to 64 characters of `[A-Za-z0-9-]` is replaced by a UUID for the whole handler. Covered by
+`EventListenerSupportTest` (unit) and `IdempotentConsumerIntegrationTest` (real Kafka and R2DBC).
+
+Trace context (T144): internal clients are built by `WebClientDefaults.internalClient` on Boot's auto-configured
+`WebClient.Builder` (platform-core exposes `spring-boot-starter-webclient`), and `awaitBodyOrProblem` /
+`awaitOptionalBodyOrProblem` run the exchange inside `withReactorThreadLocals`, so the client observation is a child
+of the request's observation even after the suspending handler resumed on another thread and the outbound request
+carries the inbound trace in `traceparent` (`TracePropagationTest` in platform-core). Boot installs the W3C propagator
+only while tracing export is enabled (`management.tracing.export.enabled`, on by default); tests that assert
+propagation enable it and switch the OTLP exporter off with `management.tracing.export.otlp.enabled=false`.
+
 Integration tests that load `platform-messaging` (outbox relay, listeners) keep the context shutdown quiet with
 `logging.level.com.ecommerce.platform.messaging.PeriodicJob: error` and `org.apache.kafka: error` in their test
 configuration. Without Ryuk (Podman), Testcontainers stops the containers in a JVM hook that runs concurrently with

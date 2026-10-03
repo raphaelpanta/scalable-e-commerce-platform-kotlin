@@ -1,10 +1,14 @@
 package com.ecommerce.platform.messaging.consumer
 
+import com.ecommerce.platform.core.values.CorrelationId
+import com.ecommerce.platform.correlation.CorrelationIds
 import com.ecommerce.platform.messaging.envelope.EnvelopeJson
 import com.ecommerce.platform.messaging.envelope.MalformedEnvelopeException
 import com.ecommerce.platform.messaging.envelope.ReceivedEnvelope
+import com.ecommerce.platform.observability.ReactorThreadLocals
 import kotlinx.coroutines.reactor.mono
 import org.apache.kafka.clients.consumer.ConsumerRecord
+import org.slf4j.MDC
 import org.springframework.kafka.support.Acknowledgment
 
 /**
@@ -20,6 +24,13 @@ import org.springframework.kafka.support.Acknowledgment
  * suspending block runs once per `eventId` through [IdempotentConsumer], and the offset is acknowledged
  * (`MANUAL_IMMEDIATE`) after the transaction committed, also for a duplicate. An exception propagates to the
  * container's error handler, which retries with backoff and then publishes the record to `<topic>.dlt`.
+ *
+ * The envelope's `correlationId` (kept when it is 1 to 64 characters of `[A-Za-z0-9-]`, otherwise replaced by a UUID,
+ * as [CorrelationId.sanitise] does for requests) is bound around the handler (T145, FR-025): in the MDC of the
+ * consumer thread, and in the Reactor context of the handler's coroutine ([CorrelationIds.bind]), which
+ * [ReactorThreadLocals] restores into the MDC wherever the coroutine resumes. Every log line of the handler therefore
+ * carries `correlationId`, [CorrelationIds.current] returns it, and the internal calls and events of the handler copy
+ * it.
  *
  * The listener method stays non-suspending on purpose: Spring Kafka hands a `suspend` listener's next record over
  * before the previous one completes, which would break the per-key ordering of events.yaml. The Kafka consumer
@@ -40,8 +51,14 @@ class EventListenerSupport(
         val value: String =
             record.value() ?: throw MalformedEnvelopeException("record ${coordinates(record)} has no value")
         val envelope = EnvelopeJson.read(value)
-        // Blocking wait on the Kafka consumer thread (see the class documentation).
-        val handled = mono { idempotent.handle(envelope, consumer, block) }.block()
+        val correlationId = CorrelationId.sanitise(envelope.correlationId).value.value
+        val handled =
+            MDC.putCloseable(CorrelationIds.MDC_KEY, correlationId).use {
+                // Blocking wait on the Kafka consumer thread (see the class documentation).
+                mono(ReactorThreadLocals.INSTANCE) { idempotent.handle(envelope, consumer, block) }
+                    .contextWrite { context -> CorrelationIds.bind(context, correlationId) }
+                    .block()
+            }
         ack.acknowledge()
         return checkNotNull(handled) { "no outcome for record ${coordinates(record)}" }
     }

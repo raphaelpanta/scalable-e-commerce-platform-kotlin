@@ -5,6 +5,7 @@ import arrow.core.left
 import arrow.core.right
 import com.ecommerce.platform.core.problem.Problem
 import com.ecommerce.platform.core.problem.ProblemType
+import com.ecommerce.platform.observability.withReactorThreadLocals
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.core.ParameterizedTypeReference
 import org.springframework.web.reactive.function.client.ClientResponse
@@ -39,24 +40,31 @@ class ProblemClientException(
 /**
  * Sends the request and returns the decoded 2xx body, or a [ProblemClientException] for a 4xx/5xx answer.
  * Connection failures (after the retries of [WebClientDefaults]) still throw.
+ *
+ * The exchange runs [withReactorThreadLocals], so the client observation is a child of the caller's observation (the
+ * inbound request's) even after the calling coroutine changed threads, and the request carries its `traceparent`.
  */
 suspend inline fun <reified T : Any> WebClient.RequestHeadersSpec<*>.awaitBodyOrProblem():
     Either<ProblemClientException, T> =
-    awaitExchange { response ->
-        if (response.statusCode().isError) {
-            ProblemClientException.from(response).left()
-        } else {
-            response.awaitBody<T>().right()
+    withReactorThreadLocals {
+        awaitExchange { response ->
+            if (response.statusCode().isError) {
+                ProblemClientException.from(response).left()
+            } else {
+                response.awaitBody<T>().right()
+            }
         }
     }
 
 /** Like [awaitBodyOrProblem] for answers without a body (204) or an optional body. */
 suspend inline fun <reified T : Any> WebClient.RequestHeadersSpec<*>.awaitOptionalBodyOrProblem():
     Either<ProblemClientException, T?> =
-    awaitExchange { response ->
-        if (response.statusCode().isError) {
-            ProblemClientException.from(response).left()
-        } else {
-            response.awaitBodyOrNull<T>().right()
+    withReactorThreadLocals {
+        awaitExchange { response ->
+            if (response.statusCode().isError) {
+                ProblemClientException.from(response).left()
+            } else {
+                response.awaitBodyOrNull<T>().right()
+            }
         }
     }

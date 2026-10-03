@@ -29,6 +29,15 @@ import java.time.Duration
  *
  * Every request carries `X-Internal-Token` (when configured) and the caller's `X-Correlation-Id` from the Reactor
  * context. Connect timeout 2 s and response timeout 5 s by default.
+ *
+ * Tracing (T144, FR-025): the client must be built on Boot's auto-configured `WebClient.Builder` (injected, never
+ * `WebClient.builder()`), whose `ObservationWebClientCustomizer` makes every exchange an observation; platform-core
+ * brings `spring-boot-starter-webclient` for that. The exchange observation takes its parent from the Reactor context
+ * of the subscription, which Spring's coroutine extensions overwrite with the thread locals of the calling thread;
+ * [awaitBodyOrProblem] and [awaitOptionalBodyOrProblem] therefore run the exchange inside
+ * [com.ecommerce.platform.observability.withReactorThreadLocals] (the coroutine's Reactor context restored into the
+ * thread locals), so the request's `traceparent` names the inbound request's trace even after the handler resumed on
+ * another thread.
  */
 object WebClientDefaults {
     val CONNECT_TIMEOUT: Duration = Duration.ofSeconds(2)
@@ -38,8 +47,8 @@ object WebClientDefaults {
     val DNS_CACHE_TTL: Duration = Duration.ofSeconds(5)
 
     /**
-     * An internal client for [baseUrl] built on the application's [builder] (keeps Boot's codecs and observation).
-     * A blank [internalToken] sends no token header.
+     * An internal client for [baseUrl] built on the application's auto-configured [builder] (keeps Boot's codecs and
+     * observation, hence `traceparent`). A blank [internalToken] sends no token header.
      */
     fun internalClient(
         builder: WebClient.Builder,

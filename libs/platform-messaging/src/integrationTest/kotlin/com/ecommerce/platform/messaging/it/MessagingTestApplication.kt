@@ -1,5 +1,6 @@
 package com.ecommerce.platform.messaging.it
 
+import com.ecommerce.platform.correlation.CorrelationIds
 import com.ecommerce.platform.messaging.consumer.EventListenerSupport
 import com.ecommerce.platform.messaging.consumer.Handled
 import com.ecommerce.platform.messaging.envelope.EnvelopeJson
@@ -7,6 +8,7 @@ import com.ecommerce.platform.messaging.envelope.Topic
 import com.ecommerce.platform.messaging.testing.KafkaTestConfig
 import com.ecommerce.platform.messaging.testing.RecordedEventsConfig
 import org.apache.kafka.clients.consumer.ConsumerRecord
+import org.slf4j.MDC
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
@@ -50,6 +52,9 @@ class TestListeners(
     private val events: EventListenerSupport,
 ) {
     val effects = CopyOnWriteArrayList<UUID>()
+
+    /** The MDC `correlationId` seen by the payment handler, after the real `processed_event` insert (T145). */
+    val handlerCorrelationIds = ConcurrentHashMap<UUID, String>()
     val outcomes = ConcurrentHashMap<UUID, MutableList<Handled<Unit>>>()
     val failingAttempts = ConcurrentHashMap<UUID, AtomicInteger>()
 
@@ -58,7 +63,11 @@ class TestListeners(
         record: ConsumerRecord<String, String>,
         ack: Acknowledgment,
     ) {
-        val handled = events.dispatch(record, ack) { envelope -> effects += envelope.eventId }
+        val handled =
+            events.dispatch(record, ack) { envelope ->
+                MDC.get(CorrelationIds.MDC_KEY)?.let { handlerCorrelationIds[envelope.eventId] = it }
+                effects += envelope.eventId
+            }
         val eventId = EnvelopeJson.read(record.value()).eventId
         outcomes.computeIfAbsent(eventId) { CopyOnWriteArrayList() } += handled
     }

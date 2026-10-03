@@ -29,7 +29,7 @@ class IdempotentConsumerIntegrationTest(
     @Autowired private val database: DatabaseClient,
 ) {
     @Test
-    fun `the same eventId delivered twice runs the handler once and reports the second delivery as Duplicate`() {
+    fun `the same eventId twice runs the handler once, with its correlation id, then reports a Duplicate`() {
         val envelope = EnvelopeFixtures.paymentApproved(paymentId = UUID.randomUUID())
         val json = EnvelopeJson.write(envelope)
 
@@ -41,6 +41,7 @@ class IdempotentConsumerIntegrationTest(
         listeners.outcomes.getValue(envelope.eventId) shouldContainExactly
             listOf(Handled.Processed(Unit), Handled.Duplicate)
         listeners.effects.count { it == envelope.eventId } shouldBe 1
+        listeners.handlerCorrelationIds[envelope.eventId] shouldBe envelope.correlationId
         processedMarkers(envelope.eventId) shouldBe 1L
     }
 
