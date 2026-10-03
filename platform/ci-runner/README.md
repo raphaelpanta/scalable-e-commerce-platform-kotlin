@@ -56,7 +56,7 @@ gh secret set PACT_BROKER_PASSWORD         # PACT_BROKER_BASIC_AUTH_PASSWORD of 
 
 | Name | Kind | Used by | Meaning |
 | --- | --- | --- | --- |
-| `REGISTRY_HOST` | variable | `service-ci.yml` image job | `host:port` that Docker on the runner host uses for the registry |
+| `REGISTRY_HOST` | variable | `service-ci.yml` image and publish jobs | `host:port` that Docker on the runner host uses for the registry |
 | `REGISTRY_USERNAME`, `REGISTRY_PASSWORD` | secrets | push step only | registry basic-auth credentials |
 | `PACT_BROKER_URL` | secret | contract steps | base URL of the broker; unset skips every broker step |
 | `PACT_BROKER_USERNAME`, `PACT_BROKER_PASSWORD` | secrets | contract steps | broker basic-auth credentials |

@@ -97,19 +97,93 @@ git diff --name-only origin/main...HEAD | .github/scripts/path-filter-check.sh -
 | | Provider verification | `./gradlew -q <module>:contractVerify` with `PACT_BROKER_URL`, credentials and `PACT_PUBLISH_RESULTS=true` (`pact.provider.version` = commit SHA) | a pact is not honoured; the output names the consumer and the interaction |
 | | `can-i-deploy` | `pact-broker can-i-deploy --pacticipant <ctx> --version <sha> [--to-environment $PACT_ENVIRONMENT]`, retried for 60 s while verification results are unknown | an integrated version is incompatible; disabled by the variable `PACT_CAN_I_DEPLOY=false` |
 | | Dependency scan | `gradle ... dependencies --configuration runtimeClasspath` converted by `.github/scripts/gradle-deps-to-lockfile.sh` to a `gradle.lockfile`, scanned by `osv-scanner` | a dependency has a known vulnerability; `DEPENDENCY_SCAN_ENFORCE=false` downgrades it to an annotation |
-| `image` | Build | `docker build -f platform/docker/Dockerfile --build-arg SERVICE_MODULE=<module> .` with `BUILDAH_FORMAT=docker` | the build fails |
+| `jar` | Boot jar | `./gradlew -q <module>:bootJar`, artifact `jar-<ctx>` (1 day) | the service does not compile or package |
+| `image` | Build | `docker build -f platform/docker/Dockerfile --build-arg SERVICE_MODULE=<module> --build-arg APP_JAR=ci-jar/app.jar .` with `BUILDAH_FORMAT=docker`; the build stage copies the jar of the `jar` job instead of compiling | the build fails |
 | | Image scan | `aquasec/trivy image --severity CRITICAL --ignore-unfixed --exit-code 1` | a CRITICAL vulnerability with a fix is in the image |
 | | SBOM | `anchore/syft` CycloneDX JSON, artifact `sbom-<ctx>` (30 days) | |
-| | Push (push to `main` only) | `docker login --password-stdin`, `docker push <REGISTRY_HOST>/<ctx>:<sha>` and `:<branch>` | the registry rejects the push; skipped with a warning when `REGISTRY_HOST` or the secrets are missing |
-| `<ctx>` | Aggregate | shell | `gate` or `image` did not succeed (a skipped job counts as failure) |
+| | Start and health | `.github/scripts/image-health.sh <ctx> <image>`: run the image (with a `postgres:18-alpine` sidecar except for the gateway), wait up to 90 s for `/actuator/health` to report UP, stop everything | the container exits or does not report UP in 90 s; the last 80 log lines are printed |
+| | Hand-over (push to `main` only) | `docker save` to the artifact `image-<ctx>` (1 day) | |
+| `publish` (push to `main` only) | Push | `docker login --password-stdin`, `docker push <REGISTRY_HOST>/<ctx>:<sha>` and `:<branch>`; runs only when `gate` and `image` both succeeded | the registry rejects the push; skipped with a warning when `REGISTRY_HOST` or the secrets are missing |
+| `<ctx>` | Aggregate | shell | `gate` or `image` did not succeed, or `publish` failed (a skipped `publish` is fine; a skipped `gate` or `image` counts as failure) |
 
-`gate` and `image` each have `timeout-minutes: 15` and a concurrency group per service and ref
+`gate`, `jar`, `image` and `publish` each have `timeout-minutes: 15` and a concurrency group per service and ref
 (`service-ci-<ctx>-<event>-<ref>`; pull-request runs are cancelled by a newer push, `main` runs never are). SC-009 asks for
-build, test and publication of a single service within 15 minutes; the timeouts are hard bounds per job, and the
-end-to-end time of the first real runs still has to be measured (the image build compiles the service a second time
-inside Docker, with a BuildKit cache for the Gradle home). Pull requests build and scan the image but never push it.
+build, test and publication of a single service within 15 minutes; see "Parallel jobs and the jar" and "Measuring the
+end-to-end time" below. Pull requests build, scan and start the image but never push it.
 On a failed `gate` the artifact `reports-<ctx>` (a tar of `**/build/reports`, `**/build/test-results` and the Pitest
 log) is kept for 7 days; `dependencies-<ctx>` holds the dependency list and lockfile.
+
+#### Parallel jobs and the jar (T150)
+
+`gate` (checks, pacts, dependency scan) and `jar` (compile and package) have no dependency on each other and start together;
+`image` follows `jar` only, so the image build, the Trivy scan, the SBOM and the start-and-health check overlap with the
+Gradle `check` instead of waiting for it. `publish` needs both `gate` and `image`: nothing is pushed unless the gate passed,
+and the image that is pushed is the one that was scanned and started (it travels as the artifact `image-<ctx>`, loaded with
+`docker load`, so it does not matter which runner or engine the job lands on). The aggregate `service-ci / <ctx>` needs all
+of them. Parallelism needs two free runner slots: with one runner replica the jobs queue one after the other, as before.
+
+The Docker build no longer compiles when the pipeline hands it the jar: `platform/docker/Dockerfile` has the optional build
+argument `APP_JAR` (default empty), the path of a pre-built boot jar inside the build context. When it is set, the build
+stage copies that file; when it is empty (Compose, `./gradlew :services:<ctx>:infrastructure:dockerImage`, a developer's
+`docker build`) it runs `bootJar` with Gradle exactly as before. The jar job and the gate each compile once on their own
+runner, in parallel, instead of the image build compiling a second time behind the gate.
+
+#### Start-and-health check (T149, US9/AC3)
+
+`image` runs `.github/scripts/image-health.sh <ctx> <image>` against the image it built. Approach, chosen to be the simplest
+check that does not need the platform:
+
+- A service reports UP when its own PostgreSQL answers (the `CheckServiceHealth` use case; Kafka, the JWKS endpoint and the
+  observability stack are not part of the result). The script therefore starts one throw-away `postgres:18-alpine` (the
+  tag Compose uses) on a private network with random credentials, and starts the image with `<CTX>_DB_HOST`,
+  `<CTX>_DB_USER`, `<CTX>_DB_PASSWORD`, a random `INTERNAL_API_TOKEN` and `SEED=false` (docs/service-conventions.md section 2).
+  Flyway migrates the empty database. Kafka and the OTLP collector keep their unreachable `localhost` defaults;
+  `SPRING_KAFKA_ADMIN_AUTO_CREATE=false` keeps the topic admin from waiting for a broker.
+- The gateway has no database: it is started alone with its defaults.
+- The probe runs inside the container (`docker exec ... bash` with `/dev/tcp` to `127.0.0.1:8081`, the same as the image
+  HEALTHCHECK), so no port is published and the runner's host network, a remote engine or Podman all behave the same. It
+  polls every 2 seconds for up to 90 seconds for `"status":"UP"` (the gateway's body also lists `groups`).
+- On failure the step prints the last 80 log lines of the service (and 20 of the database) and exits non-zero; an exit of
+  the container ends the wait early. A shell `trap` always removes the containers, their volumes and the network.
+
+Rehearse it locally against an image you built: `.github/scripts/image-health.sh cart ecommerce-platform/cart:local`
+(`HEALTH_TIMEOUT=30` shortens the wait). It was run that way against the Compose images of the gateway, catalog and cart
+(UP after 5 to 7 seconds). The service images are pinned by the registry digest only for the base images in the
+Dockerfile; `postgres:18-alpine` is a tag, like in Compose (override with `POSTGRES_IMAGE`).
+
+#### Measuring the end-to-end time (T150, SC-009, FR-028)
+
+SC-009 allows 15 minutes from push to published image for one service. After a run of a service workflow on `main` (a push
+publishes), read its wall-clock time and the time of each job:
+
+```bash
+# recent runs of one service workflow: id, event, conclusion, minutes from first job start to last update
+gh run list --workflow cart.yml --branch main --limit 10 --json databaseId,event,conclusion,startedAt,updatedAt \
+  --jq '.[] | [.databaseId, .event, .conclusion, (((.updatedAt|fromdate) - (.startedAt|fromdate)) / 60 * 10 | floor / 10)] | @tsv'
+
+# one run: the end-to-end minutes, then the seconds of every job (gate, jar, image, publish, aggregate)
+gh run view <run-id> --json startedAt,updatedAt,jobs --jq '
+  "end-to-end: \(((.updatedAt|fromdate) - (.startedAt|fromdate)) / 60 * 10 | floor / 10) min",
+  (.jobs[] | "\(.name)\t\((.completedAt|fromdate) - (.startedAt|fromdate)) s\t\(.conclusion)")'
+```
+
+With the jobs in parallel the end-to-end time is the longest path, `max(gate, jar + image) + publish`, not the sum. Record the
+first accepted measurements here, per service, when real runs exist (none has run on a runner yet, so there is no number to
+claim): date, service, run id, end-to-end minutes, slowest job.
+
+| Date | Service | Run | End-to-end (min) | Slowest job |
+| --- | --- | --- | --- | --- |
+| (not measured yet) | | | | |
+
+#### SBOM (T116, T167)
+
+The software bill of materials of every service is the CycloneDX JSON that `anchore/syft` writes for the built image
+(`service-ci.yml`, job `image`, artifact `sbom-<ctx>`, 30 days). It lists what is actually in the image (the layered jar
+contents and the base image packages), which is what a consumer of the image needs, and it satisfies the SBOM requirement
+(T116). A Gradle-side SBOM is **deferred**: if a bill of materials of the build (before packaging) is wanted, add the
+CycloneDX Gradle plugin (`org.cyclonedx.bom`) in `build-logic` as a convention plugin applied to the deployable modules,
+pin its version in `gradle/libs.versions.toml`, and publish `cyclonedxBom` output next to the syft artifact. Tracked in
+`docs/build.md`, Follow-ups.
 
 Choices: `osv-scanner` for dependencies (no API key, reads the resolved versions; OWASP dependency-check needs an NVD key
 and a long database update); Trivy and syft run as containers pinned by tag and digest instead of third-party

@@ -95,7 +95,13 @@ grep -q 'publish-image:' "$S" || _t_fail "service-ci.yml needs the publish-image
 [ "$(grep -c 'timeout-minutes: 15' "$S")" -ge 2 ] || _t_fail "service-ci.yml: gate and image need timeout-minutes: 15"
 # shellcheck disable=SC2016  # literal workflow expression
 grep -qF 'name: ${{ inputs.service }}' "$S" || _t_fail "service-ci.yml: the aggregate job must be named after the service"
-grep -q 'needs: \[gate, image\]' "$S" || _t_fail "service-ci.yml: the aggregate job must need gate and image"
+grep -q 'needs: \[gate, image, publish\]' "$S" || _t_fail "service-ci.yml: the aggregate job must need gate, image and publish"
+# T149/T150: gate and jar run in parallel, image needs only jar, publish needs gate AND image, the image is started
+grep -q '^  jar:' "$S" || _t_fail "service-ci.yml: the jar job is missing"
+awk '/^  image:/{f=1} f&&/^    needs:/{print; exit}' "$S" | grep -q 'needs: jar$' || _t_fail "service-ci.yml: image must need only jar (it runs in parallel with gate)"
+awk '/^  publish:/{f=1} f&&/^    needs:/{print; exit}' "$S" | grep -q 'needs: \[gate, image\]$' || _t_fail "service-ci.yml: publish must need gate and image"
+grep -q 'APP_JAR=ci-jar/app.jar' "$S" || _t_fail "service-ci.yml: the image build must reuse the jar (APP_JAR)"
+grep -q 'image-health.sh' "$S" || _t_fail "service-ci.yml: the image job must start the image and wait for its health (image-health.sh)"
 grep -q 'platform/docker/Dockerfile' "$S" || _t_fail "service-ci.yml must build platform/docker/Dockerfile"
 grep -q 'BUILDAH_FORMAT: docker' "$S" || _t_fail "service-ci.yml must set BUILDAH_FORMAT=docker"
 grep -q -- '--password-stdin' "$S" || _t_fail "service-ci.yml must docker login with --password-stdin"

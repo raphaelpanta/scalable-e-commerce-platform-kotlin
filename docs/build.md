@@ -371,3 +371,9 @@ Non-blocking items left open by the bootstrap feature:
   advisory names them: resolve the new digest (`docker buildx imagetools inspect eclipse-temurin:25-jre`) or
   commit SHA (`gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`), update the value and its comment
   together, and run `./gradlew -q verify` plus `./gradlew :services:catalog:infrastructure:dockerImage`.
+- **Gradle SBOM (CycloneDX), deferred (T167).** The SBOM requirement is met by the CycloneDX JSON that `syft`
+  writes for every built image (`.github/workflows/service-ci.yml`, job `image`, artifact `sbom-<service>`; see
+  `docs/ci-cd.md`, "SBOM"). A build-time SBOM, if wanted later, is the CycloneDX Gradle plugin
+  (`org.cyclonedx.bom`) applied from a `build-logic` convention plugin to the deployable modules, with its version in
+  `gradle/libs.versions.toml` (the only place for versions) and its `cyclonedxBom` output published beside the syft
+  artifact.
