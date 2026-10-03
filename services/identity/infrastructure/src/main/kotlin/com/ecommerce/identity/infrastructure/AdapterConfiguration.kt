@@ -15,31 +15,35 @@ import com.ecommerce.identity.application.IdentityEvents
 import com.ecommerce.identity.application.ListAddresses
 import com.ecommerce.identity.application.PasswordHasher
 import com.ecommerce.identity.application.PreferenceRepository
+import com.ecommerce.identity.application.PurgeRetainedData
 import com.ecommerce.identity.application.RefreshSession
 import com.ecommerce.identity.application.RegisterAccount
 import com.ecommerce.identity.application.RemoveAddress
 import com.ecommerce.identity.application.ReplaceAddress
 import com.ecommerce.identity.application.RequestPasswordReset
 import com.ecommerce.identity.application.RequestPhoneVerification
+import com.ecommerce.identity.application.RetentionRepository
 import com.ecommerce.identity.application.Secrets
 import com.ecommerce.identity.application.SessionRepository
 import com.ecommerce.identity.application.SignIn
 import com.ecommerce.identity.application.SignOut
 import com.ecommerce.identity.application.SmsSenderPort
-import com.ecommerce.identity.application.SourceThrottleRepository
+import com.ecommerce.identity.application.ThrottleRepository
 import com.ecommerce.identity.application.TokenRepository
 import com.ecommerce.identity.application.TokenSigner
 import com.ecommerce.identity.application.Transactions
 import com.ecommerce.identity.application.UpdateNotificationPreferences
 import com.ecommerce.identity.application.UpdateProfile
 import com.ecommerce.identity.application.VerifyEmail
+import com.ecommerce.identity.infrastructure.jobs.IdentityPurgeJob
 import com.ecommerce.identity.infrastructure.messaging.IdentityEnvelopes
 import com.ecommerce.identity.infrastructure.messaging.IdentityEventPublisher
 import com.ecommerce.identity.infrastructure.persistence.R2dbcAccountRepository
 import com.ecommerce.identity.infrastructure.persistence.R2dbcAddressRepository
 import com.ecommerce.identity.infrastructure.persistence.R2dbcPreferenceRepository
+import com.ecommerce.identity.infrastructure.persistence.R2dbcRetentionRepository
 import com.ecommerce.identity.infrastructure.persistence.R2dbcSessionRepository
-import com.ecommerce.identity.infrastructure.persistence.R2dbcSourceThrottleRepository
+import com.ecommerce.identity.infrastructure.persistence.R2dbcThrottleRepository
 import com.ecommerce.identity.infrastructure.persistence.R2dbcTokenRepository
 import com.ecommerce.identity.infrastructure.persistence.ReactiveTransactions
 import com.ecommerce.identity.infrastructure.security.Argon2idPasswordHasher
@@ -64,6 +68,8 @@ import com.ecommerce.platform.security.PlatformSecurityAutoConfiguration
 import com.ecommerce.platform.security.PlatformSecurityProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
+import org.springframework.core.env.Environment
+import org.springframework.core.env.Profiles
 import org.springframework.mail.javamail.JavaMailSender
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.security.oauth2.jwt.NimbusReactiveJwtDecoder
@@ -71,6 +77,9 @@ import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder
 import org.springframework.transaction.ReactiveTransactionManager
 import org.springframework.transaction.reactive.TransactionalOperator
 import java.time.Clock as JavaClock
+
+/** The Spring profiles in which a missing signing key is generated at start-up instead of refused (FR-024). */
+private const val KEY_GENERATING_PROFILES = "dev | test"
 
 /** The adapters around the use cases: persistence, keys and tokens, hashing, SMS, outbox, web handlers. */
 @Suppress("TooManyFunctions") // one bean per adapter
@@ -91,7 +100,10 @@ class AdapterConfiguration {
         ReactiveTransactions(identityTransactionalOperator)
 
     @Bean
-    fun accountRepository(database: DatabaseClient): AccountRepository = R2dbcAccountRepository(database)
+    fun accountRepository(
+        database: DatabaseClient,
+        identityTransactionalOperator: TransactionalOperator,
+    ): AccountRepository = R2dbcAccountRepository(database, identityTransactionalOperator)
 
     @Bean
     fun addressRepository(
@@ -115,21 +127,33 @@ class AdapterConfiguration {
     ): SessionRepository = R2dbcSessionRepository(database, identityTransactionalOperator)
 
     @Bean
-    fun sourceThrottleRepository(
+    fun throttleRepository(
         database: DatabaseClient,
+        identityTransactionalOperator: TransactionalOperator,
         javaClock: JavaClock,
-    ): SourceThrottleRepository = R2dbcSourceThrottleRepository(database, javaClock)
+    ): ThrottleRepository = R2dbcThrottleRepository(database, identityTransactionalOperator, javaClock)
 
-    /** The signing key: imported from `identity.signing-key`, or generated at start-up. */
     @Bean
-    fun signingKeyRing(properties: IdentityProperties): SigningKeyRing {
-        val keyId = properties.signingKeyId.ifBlank { null }
+    fun retentionRepository(database: DatabaseClient): RetentionRepository = R2dbcRetentionRepository(database)
+
+    @Bean
+    fun identityPurgeJob(
+        purgeRetainedData: PurgeRetainedData,
+        properties: IdentityProperties,
+    ): IdentityPurgeJob = IdentityPurgeJob(purgeRetainedData, properties.retention.purgeInterval)
+
+    /**
+     * The signing key shared by every instance: `identity.signing-key`; generated at start-up only under the profile
+     * `dev` or `test`, otherwise a missing key stops the start-up (FR-024).
+     */
+    @Bean
+    fun signingKeyRing(
+        properties: IdentityProperties,
+        environment: Environment,
+    ): SigningKeyRing {
+        val generationAllowed = environment.acceptsProfiles(Profiles.of(KEY_GENERATING_PROFILES))
         val key =
-            if (properties.signingKey.isBlank()) {
-                SigningKey.generate(keyId)
-            } else {
-                SigningKey.fromPkcs8(properties.signingKey, keyId)
-            }
+            SigningKey.configured(properties.signingKey, properties.signingKeyId.ifBlank { null }, generationAllowed)
         return SigningKeyRing(listOf(key))
     }
 

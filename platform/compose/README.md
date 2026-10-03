@@ -4,6 +4,8 @@ Everything runs from this directory. Works with `docker compose` (v2 plugin) and
 
 ```bash
 cp .env.example .env                 # once; example values are safe for local use
+# once: the identity signing key (required; the scripts below generate it when they create .env)
+sed -i.bak "s|^IDENTITY_SIGNING_KEY=.*|IDENTITY_SIGNING_KEY=$(openssl genpkey -algorithm ed25519 -outform DER | base64)|" .env
 docker compose --profile core --profile observability up -d --build
 docker compose ps                    # wait until every service reports "healthy"
 ```
@@ -38,8 +40,20 @@ they live on the `internal` network; only the gateway is also on `edge` (FR-023)
 
 | File | Content |
 |---|---|
-| `.env` (git-ignored, from `.env.example`) | `INTERNAL_API_TOKEN`, `SEED`, `GRAFANA_ADMIN_PASSWORD`, `PACT_BROKER_*`, `BIND_ADDRESS`, optional `JWT_ISSUER`/`JWT_AUDIENCE` |
-| `env/<ctx>.env` (committed, local-only defaults) | `<CTX>_DB_HOST`, `<CTX>_DB_USER`, `<CTX>_DB_PASSWORD` for the service and `POSTGRES_USER/PASSWORD/DB` for its database |
+| `.env` (git-ignored, from `.env.example`) | `INTERNAL_API_TOKEN`, `IDENTITY_SIGNING_KEY`, `SEED`, `GRAFANA_ADMIN_PASSWORD`, `PACT_BROKER_*`, `BIND_ADDRESS`, optional `JWT_ISSUER`/`JWT_AUDIENCE` |
+| `env/<ctx>.env` (committed, local-only defaults) | `<CTX>_DB_HOST`, `<CTX>_DB_USER`, `<CTX>_DB_PASSWORD` for the service and `POSTGRES_USER/PASSWORD/DB` for its database; `env/identity.env` also passes `IDENTITY_SIGNING_KEY` from `.env` and raises `IDENTITY_SOURCE_MAX_FAILURES` to 20 (one acceptance runner address) |
+
+`IDENTITY_SIGNING_KEY` is the Ed25519 private key that signs every access token (PKCS#8 DER in Base64). All identity
+replicas must share it (FR-024: a token issued by one replica validates against the JWKS served by any other, and
+after a restart), so it is not generated per container: identity refuses to start while it is blank. Generate it
+once per environment and keep it secret:
+
+```bash
+openssl genpkey -algorithm ed25519 -outform DER | base64    # paste the line after IDENTITY_SIGNING_KEY= in .env
+```
+
+`scripts/smoke.sh` and `scripts/resilience.sh` (and CI) write a fresh key into a `.env` that has none. Changing the key
+invalidates the access tokens issued before it (15 minutes at most); refresh tokens keep working.
 | `docker-compose.yml` | shared values of `docs/service-conventions.md` section 2 |
 
 Environment of every service (`identity`, `catalog`, `cart`, `order`, `payment`, `notification`): `env/<ctx>.env`,

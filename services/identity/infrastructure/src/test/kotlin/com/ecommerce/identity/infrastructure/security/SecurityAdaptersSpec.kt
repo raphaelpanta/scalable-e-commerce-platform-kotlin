@@ -16,6 +16,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldMatch
 import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.string.shouldStartWith
 import org.springframework.security.oauth2.jwt.BadJwtException
 import java.security.KeyPairGenerator
 import java.time.Duration
@@ -74,6 +75,22 @@ class SecurityAdaptersSpec :
             fromBase64.keyId shouldBe "imported"
             val signature = fromPem.sign("input".toByteArray())
             Ed25519Jwks.verify(pair.public, "input".toByteArray(), signature) shouldBe true
+        }
+
+        test("the configured key is shared; a missing one fails start-up unless generation is allowed (T135)") {
+            val pair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
+            val base64 = Base64.getEncoder().encodeToString(pair.private.encoded)
+
+            SigningKey.configured(base64, null, generationAllowed = false).publicKey.encoded shouldBe
+                pair.public.encoded
+            SigningKey.configured(base64, "kid-1", generationAllowed = true).let { configured ->
+                configured.publicKey.encoded shouldBe pair.public.encoded
+                configured.keyId shouldBe "kid-1"
+            }
+            SigningKey.configured(" ", "dev-key", generationAllowed = true).keyId shouldBe "dev-key"
+            val refused =
+                shouldThrow<IllegalStateException> { SigningKey.configured("", null, generationAllowed = false) }
+            refused.message.shouldNotBeNull() shouldStartWith "IDENTITY_SIGNING_KEY is not set"
         }
 
         test("the ring publishes its keys newest first, keeps one previous key on rotation, and may be empty") {

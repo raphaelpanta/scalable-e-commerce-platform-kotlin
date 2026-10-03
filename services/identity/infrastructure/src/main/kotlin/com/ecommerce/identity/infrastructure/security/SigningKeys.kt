@@ -38,6 +38,27 @@ class SigningKey(
         private val X509_PREFIX: ByteArray = HexFormat.of().parseHex("302a300506032b6570032100")
         private val PEM_ARMOUR = Regex("-----(BEGIN|END) [A-Z ]+-----|\\s")
 
+        /**
+         * The configured key (`IDENTITY_SIGNING_KEY`, PKCS#8 as PEM or Base64). Every instance must sign with the same
+         * key (FR-024), so a blank one fails start-up unless [generationAllowed] (profile `dev` or `test`), which
+         * generates a throw-away pair.
+         */
+        fun configured(
+            encoded: String,
+            keyId: String?,
+            generationAllowed: Boolean,
+        ): SigningKey =
+            when {
+                encoded.isNotBlank() -> fromPkcs8(encoded, keyId)
+                generationAllowed -> generate(keyId)
+                else -> error(MISSING_KEY)
+            }
+
+        private const val MISSING_KEY: String =
+            "IDENTITY_SIGNING_KEY is not set: every identity instance must sign with one shared Ed25519 key " +
+                "(FR-024). Generate one with `openssl genpkey -algorithm ed25519 -outform DER | base64`, or " +
+                "activate the Spring profile dev or test for a throw-away key (services/identity/README.md)."
+
         /** A fresh key pair. */
         fun generate(keyId: String? = null): SigningKey {
             val pair = KeyPairGenerator.getInstance(Ed25519Jwks.ALGORITHM).generateKeyPair()

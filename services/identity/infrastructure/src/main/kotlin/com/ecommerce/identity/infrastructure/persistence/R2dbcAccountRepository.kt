@@ -14,6 +14,8 @@ import io.r2dbc.spi.Readable
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.r2dbc.core.awaitOneOrNull
 import org.springframework.r2dbc.core.awaitRowsUpdated
+import org.springframework.transaction.reactive.TransactionalOperator
+import org.springframework.transaction.reactive.executeAndAwait
 import java.time.Instant
 import java.util.UUID
 
@@ -21,9 +23,13 @@ private const val COLUMNS =
     "id, email, password_hash, status, roles, display_name, created_at, verified_at, failed_sign_ins, " +
         "locked_until, deleted_at, pseudonym, version"
 
-/** Outbound adapter: accounts in the `account` table (V2__identity_schema.sql), optimistic locking on `version`. */
+/**
+ * Outbound adapter: accounts in the `account` table (V2__identity_schema.sql), optimistic locking on `version`, and
+ * pessimistic (`SELECT ... FOR UPDATE`) for [changeLocked].
+ */
 class R2dbcAccountRepository(
     private val database: DatabaseClient,
+    private val transactions: TransactionalOperator,
 ) : AccountRepository {
     override suspend fun findById(id: AccountId): Account? =
         database
@@ -65,6 +71,26 @@ class R2dbcAccountRepository(
             .bind("expected", expectedVersion)
             .fetch()
             .awaitRowsUpdated() == 1L
+
+    // The row lock serialises concurrent sign-in failures of one account (FR-006): each one reads the count the
+    // previous one stored, so none is lost; the version check cannot fail while the lock is held.
+    override suspend fun changeLocked(
+        id: AccountId,
+        change: (Account) -> Account,
+    ): Account? =
+        transactions.executeAndAwait {
+            val current =
+                database
+                    .sql("SELECT $COLUMNS FROM account WHERE id = :id FOR UPDATE")
+                    .bind("id", id.value)
+                    .map(::accountOf)
+                    .awaitOneOrNull()
+            current?.let { stored ->
+                val changed = change(stored)
+                if (changed !== stored) check(update(changed, stored.version)) { "locked account changed" }
+                changed
+            }
+        }
 
     private fun DatabaseClient.GenericExecuteSpec.bindColumns(account: Account): DatabaseClient.GenericExecuteSpec =
         bind("id", account.id.value)

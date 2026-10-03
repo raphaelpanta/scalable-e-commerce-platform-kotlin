@@ -16,18 +16,20 @@ import com.ecommerce.identity.application.IdentityStore
 import com.ecommerce.identity.application.ListAddresses
 import com.ecommerce.identity.application.PasswordHasher
 import com.ecommerce.identity.application.PreferenceRepository
+import com.ecommerce.identity.application.PurgeRetainedData
 import com.ecommerce.identity.application.RefreshSession
 import com.ecommerce.identity.application.RegisterAccount
 import com.ecommerce.identity.application.RemoveAddress
 import com.ecommerce.identity.application.ReplaceAddress
 import com.ecommerce.identity.application.RequestPasswordReset
 import com.ecommerce.identity.application.RequestPhoneVerification
+import com.ecommerce.identity.application.RetentionRepository
 import com.ecommerce.identity.application.Secrets
 import com.ecommerce.identity.application.SessionRepository
 import com.ecommerce.identity.application.SignIn
 import com.ecommerce.identity.application.SignOut
 import com.ecommerce.identity.application.SmsSenderPort
-import com.ecommerce.identity.application.SourceThrottleRepository
+import com.ecommerce.identity.application.ThrottleRepository
 import com.ecommerce.identity.application.TokenRepository
 import com.ecommerce.identity.application.TokenSigner
 import com.ecommerce.identity.application.Transactions
@@ -51,7 +53,7 @@ class UseCaseConfiguration {
         preferences: PreferenceRepository,
         tokens: TokenRepository,
         sessions: SessionRepository,
-        sourceThrottles: SourceThrottleRepository,
+        throttles: ThrottleRepository,
         hasher: PasswordHasher,
         signer: TokenSigner,
         secrets: Secrets,
@@ -67,7 +69,7 @@ class UseCaseConfiguration {
             preferences,
             tokens,
             sessions,
-            sourceThrottles,
+            throttles,
             hasher,
             signer,
             secrets,
@@ -138,4 +140,11 @@ class UseCaseConfiguration {
 
     @Bean
     fun getAccountContact(store: IdentityStore): GetAccountContact = GetAccountContact(store)
+
+    @Bean
+    fun purgeRetainedData(
+        retention: RetentionRepository,
+        clock: Clock,
+        properties: IdentityProperties,
+    ): PurgeRetainedData = PurgeRetainedData(retention, clock, properties.retention.policy())
 }

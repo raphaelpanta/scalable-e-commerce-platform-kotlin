@@ -26,6 +26,7 @@ import com.ecommerce.identity.domain.TokenPurpose
 import com.ecommerce.identity.domain.VerificationCode
 import java.time.Duration
 import java.time.Instant
+import java.util.Locale
 import java.util.UUID
 
 /** Outbound port: the accounts, with optimistic locking on [Account.version]. */
@@ -43,6 +44,16 @@ interface AccountRepository {
         account: Account,
         expectedVersion: Long,
     ): Boolean
+
+    /**
+     * Applies [change] to account [id] while holding its row lock and stores the result in one transaction, so that
+     * concurrent changes (parallel failed sign-ins) serialise instead of losing updates (FR-006). Nothing is written
+     * when [change] returns its argument; null when the account does not exist.
+     */
+    suspend fun changeLocked(
+        id: AccountId,
+        change: (Account) -> Account,
+    ): Account?
 }
 
 /** Outbound port: the delivery addresses of each account. */
@@ -115,14 +126,60 @@ interface SessionRepository {
     )
 }
 
-/** Outbound port: the sign-in throttle of source addresses (only a hash of the address is stored). */
-interface SourceThrottleRepository {
-    suspend fun find(source: String): SignInThrottle
+/**
+ * What a stored sign-in throttle counts (FR-006): a source address, or an email address without a live account, so
+ * that unknown addresses lock exactly like accounts do. Holds personal data: only its hash is stored and `toString()`
+ * shows the kind only.
+ */
+class ThrottleKey private constructor(
+    /** `source:<address>` or `email:<trimmed, lower-cased address>`. */
+    val value: String,
+) {
+    override fun toString(): String = "ThrottleKey(${value.substringBefore(':')})"
 
-    suspend fun save(
-        source: String,
-        throttle: SignInThrottle,
-    )
+    override fun equals(other: Any?): Boolean = other is ThrottleKey && other.value == value
+
+    override fun hashCode(): Int = value.hashCode()
+
+    companion object {
+        fun source(address: String): ThrottleKey = ThrottleKey("source:$address")
+
+        /** The key of an email as typed: case and surrounding blanks do not matter, as for [Email]. */
+        fun email(raw: String): ThrottleKey = ThrottleKey("email:" + raw.trim().lowercase(Locale.ROOT))
+    }
+}
+
+/** Outbound port: the sign-in throttles of source addresses and unknown emails (only a hash of the key is stored). */
+interface ThrottleRepository {
+    /** The stored throttle of [key], [SignInThrottle.CLEAR] when there is none. */
+    suspend fun find(key: ThrottleKey): SignInThrottle
+
+    /**
+     * Applies [change] to the throttle of [key] (CLEAR when none is stored) while holding its row lock and stores the
+     * result, so that concurrent failures are all counted (FR-006).
+     */
+    suspend fun change(
+        key: ThrottleKey,
+        change: (SignInThrottle) -> SignInThrottle,
+    ): SignInThrottle
+}
+
+/** Outbound port: deletes the records whose retention ended (data-model section 5); each call answers the count. */
+interface RetentionRepository {
+    /** Verification and reset tokens that expired before [cutoff]. */
+    suspend fun deleteTokensExpiredBefore(cutoff: Instant): Long
+
+    /** Sessions (with the hashes of their refresh tokens) that expired or were revoked before [cutoff]. */
+    suspend fun deleteSessionsEndedBefore(cutoff: Instant): Long
+
+    /** Throttle counters last changed before [cutoff] whose lock, if any, is over at [now]. */
+    suspend fun deleteThrottlesIdleSince(
+        cutoff: Instant,
+        now: Instant,
+    ): Long
+
+    /** Pending phone verifications that expired before [cutoff]. */
+    suspend fun deletePhoneVerificationsExpiredBefore(cutoff: Instant): Long
 }
 
 /** Outbound port: the slow adaptive password hash (Argon2id). */

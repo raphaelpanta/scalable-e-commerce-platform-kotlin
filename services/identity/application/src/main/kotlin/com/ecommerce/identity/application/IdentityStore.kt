@@ -13,9 +13,9 @@ import java.time.Duration
 
 /** Tunable rules of the identity context (data-model section 1, research section 9). */
 data class IdentityPolicies(
-    /** Per-account sign-in throttle: 5 consecutive failures lock for 15 minutes. */
+    /** Per-account (and per unknown email) sign-in throttle: 5 consecutive failures lock for 15 minutes. */
     val accountThrottle: ThrottlePolicy = ThrottlePolicy(),
-    /** Per-source-address sign-in throttle (several people may share one address, so it is configurable). */
+    /** Per-source-address sign-in throttle (5 by default; configurable: several people may share an address). */
     val sourceThrottle: ThrottlePolicy = ThrottlePolicy(),
     /** Lifetime of access tokens (15 minutes). */
     val accessTokenLifetime: Duration = Duration.ofMinutes(DEFAULT_ACCESS_MINUTES),
@@ -28,9 +28,6 @@ data class IdentityPolicies(
     }
 }
 
-/** Attempts of an account change that lost an optimistic-locking race before it gives up. */
-internal const val CONFLICT_ATTEMPTS: Int = 3
-
 /** Every port the use cases need, plus the [policies]; shared by all use cases. */
 data class IdentityStore(
     val accounts: AccountRepository,
@@ -38,7 +35,7 @@ data class IdentityStore(
     val preferences: PreferenceRepository,
     val tokens: TokenRepository,
     val sessions: SessionRepository,
-    val sourceThrottles: SourceThrottleRepository,
+    val throttles: ThrottleRepository,
     val hasher: PasswordHasher,
     val signer: TokenSigner,
     val secrets: Secrets,
@@ -65,19 +62,4 @@ data class IdentityStore(
         changed: Account,
     ): Either<IdentityError, Account> =
         if (accounts.update(changed, original.version)) changed.right() else IdentityError.ConcurrentUpdate.left()
-
-    /** Re-reads account [id] and stores [change] of it until it sticks, at most [CONFLICT_ATTEMPTS] times. */
-    suspend fun changeAccount(
-        id: AccountId,
-        change: (Account) -> Account,
-    ) {
-        var attempt = 0
-        var stored = false
-        while (!stored && attempt < CONFLICT_ATTEMPTS) {
-            attempt++
-            val account = accounts.findById(id) ?: return
-            val changed = change(account)
-            stored = changed === account || accounts.update(changed, account.version)
-        }
-    }
 }

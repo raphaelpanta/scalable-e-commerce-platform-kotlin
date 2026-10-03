@@ -1,5 +1,10 @@
 # Test-only overrides, loaded on top of the main application.yml. Spring's test context cache closes the
 # application in a JVM shutdown hook, after Gradle stops capturing test output; keep that shutdown quiet.
+spring:
+  profiles:
+    # T135: no IDENTITY_SIGNING_KEY in tests; the profile `test` lets the service generate a throw-away key.
+    include: test
+
 logging:
   level:
     org.springframework.boot.reactor.netty.GracefulShutdown: warn

@@ -63,6 +63,34 @@ class RegistrationTest :
             harness.transactions.transactions shouldBe 0
         }
 
+        test("registering again while unverified re-sends a fresh token, keeps the password and answers the same") {
+            val harness = Harness()
+            RegisterAccount(harness.store)(Registration(ADA, PASSWORD, "Ada")).value()
+            val account =
+                harness.accounts.accounts.values
+                    .single()
+            harness.clock.advance(Duration.ofHours(2))
+
+            RegisterAccount(harness.store)(Registration(" ADA@example.test", "Another-passphrase1", "Eve")).value()
+
+            harness.accounts.accounts.values
+                .single() shouldBe account
+            harness.events.registered shouldHaveSize 2
+            val again = harness.events.registered.last()
+            again.verificationToken shouldBe FakeSecrets.token(1)
+            again.tokenExpiresAt shouldBe NOW.plus(Duration.ofHours(26))
+            again.recipient shouldBe
+                harness.events.registered
+                    .first()
+                    .recipient
+            harness.hasher.hashed shouldBe 2
+            harness.transactions.transactions shouldBe 2
+            VerifyEmail(harness.store)(FakeSecrets.token(0).value).error() shouldBe IdentityError.InvalidToken
+            VerifyEmail(harness.store)(FakeSecrets.token(1).value).value()
+            RegisterAccount(harness.store)(Registration(ADA, PASSWORD, null)).value()
+            harness.events.registered shouldHaveSize 2
+        }
+
         test("a registration that loses the race for its email creates nothing more") {
             val harness = Harness()
             val racing =

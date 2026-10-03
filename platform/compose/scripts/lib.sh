@@ -29,12 +29,21 @@ compose() {
   (cd "$COMPOSE_DIR" && "${COMPOSE[@]}" "${PROFILES[@]}" "$@")
 }
 
-# Creates .env from the example when missing (example values are safe for local use).
+# Creates .env from the example when missing (example values are safe for local use), and gives it a fresh
+# identity signing key (IDENTITY_SIGNING_KEY, required by identity, never committed) when it has none.
 ensure_env() {
   if [[ ! -f "$COMPOSE_DIR/.env" ]]; then
     cp "$COMPOSE_DIR/.env.example" "$COMPOSE_DIR/.env"
     CREATED_ENV=true
     log "created .env from .env.example"
+  fi
+  if ! grep -Eq '^IDENTITY_SIGNING_KEY=.+' "$COMPOSE_DIR/.env"; then
+    local key
+    key="$(openssl genpkey -algorithm ed25519 -outform DER | base64 | tr -d '\n')"
+    grep -v '^IDENTITY_SIGNING_KEY=' "$COMPOSE_DIR/.env" >"$COMPOSE_DIR/.env.tmp" || true
+    echo "IDENTITY_SIGNING_KEY=$key" >>"$COMPOSE_DIR/.env.tmp"
+    mv "$COMPOSE_DIR/.env.tmp" "$COMPOSE_DIR/.env"
+    log "generated IDENTITY_SIGNING_KEY in .env"
   fi
 }
 
