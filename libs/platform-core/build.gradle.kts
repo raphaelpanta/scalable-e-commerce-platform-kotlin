@@ -17,6 +17,9 @@ dependencies {
     api(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactor)
     implementation(libs.spring.boot.starter.webflux)
+    // Boot's observation-enabled WebClient.Builder (Boot 4 moved it out of WebFlux): every service that builds an
+    // internal client with WebClientDefaults gets the auto-configured builder, so outbound calls carry `traceparent`.
+    api(libs.spring.boot.starter.webclient)
     implementation(libs.spring.boot.starter.security)
     implementation(libs.spring.boot.starter.oauth2.resource.server)
     implementation(libs.spring.boot.starter.actuator)
@@ -24,10 +27,12 @@ dependencies {
     // Logback events as OpenTelemetry log records for Loki (logback-spring.xml, OpenTelemetryLogbackAutoConfiguration)
     implementation(libs.opentelemetry.logback.appender)
     implementation(libs.jackson.module.kotlin)
-    implementation(libs.context.propagation)
+    // Public through com.ecommerce.platform.observability.ReactorThreadLocals (a ThreadContextElement of its Scope)
+    api(libs.context.propagation)
     implementation(libs.micrometer.registry.prometheus)
 
     testImplementation(libs.opentelemetry.sdk.testing)
+    testImplementation(libs.awaitility)
 
     testFixturesApi(libs.testcontainers.postgresql)
     testFixturesApi(libs.testcontainers.kafka)

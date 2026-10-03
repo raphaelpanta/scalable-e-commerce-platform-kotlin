@@ -22,7 +22,6 @@ import com.ecommerce.platform.http.WebClientDefaults
 import com.ecommerce.platform.messaging.consumer.EventListenerSupport
 import com.ecommerce.platform.messaging.envelope.EnvelopeFactory
 import com.ecommerce.platform.messaging.outbox.OutboxPublisher
-import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -54,15 +53,11 @@ class AdapterConfiguration {
 
     @Bean
     fun identityContactClient(
-        builder: ObjectProvider<WebClient.Builder>,
+        builder: WebClient.Builder,
         properties: NotificationProperties,
     ): IdentityContactClient =
         IdentityContactClient(
-            WebClientDefaults.internalClient(
-                builder.getIfAvailable(WebClient::builder),
-                properties.identityUrl,
-                properties.internalToken,
-            ),
+            WebClientDefaults.internalClient(builder, properties.identityUrl, properties.internalToken),
         )
 
     @Bean

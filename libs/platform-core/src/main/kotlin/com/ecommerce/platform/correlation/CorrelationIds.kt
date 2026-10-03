@@ -5,6 +5,7 @@ import kotlinx.coroutines.reactor.ReactorContext
 import org.slf4j.MDC
 import org.springframework.web.reactive.function.server.ServerRequest
 import org.springframework.web.server.ServerWebExchange
+import reactor.util.context.Context
 import reactor.util.context.ContextView
 
 /**
@@ -41,6 +42,20 @@ object CorrelationIds {
      * the coroutine, falling back to the MDC.
      */
     suspend fun current(): String? = currentCoroutineContext()[ReactorContext]?.context?.let(::from) ?: MDC.get(MDC_KEY)
+
+    /**
+     * [context] carrying [id] the way [CorrelationIdWebFilter] writes it: under [CONTEXT_KEY] (restored into the MDC)
+     * and, when the OpenTelemetry API is present, under [BAGGAGE_CONTEXT_KEY] (restored into the baggage). Event
+     * listeners use it to bind an envelope's `correlationId` around the handler.
+     */
+    fun bind(
+        context: Context,
+        id: String,
+    ): Context {
+        CorrelationContext.register()
+        val withId = context.put(CONTEXT_KEY, id)
+        return if (CorrelationContext.baggageSupported) withId.put(BAGGAGE_CONTEXT_KEY, id) else withId
+    }
 
     /** The correlation id stored in a Reactor [context]. */
     fun from(context: ContextView): String? = context.getOrDefault<String>(CONTEXT_KEY, null)

@@ -12,7 +12,12 @@ import reactor.core.publisher.Mono
 
 /**
  * First filter of every service (FR-025, contracts/gateway-routes.md "Correlation id"): reads `X-Correlation-Id`,
- * keeps it when it is 1..64 characters of `[A-Za-z0-9-]` and otherwise generates a UUID, then
+ * keeps it when it is 1 to 64 characters of `[A-Za-z0-9-]` ([CorrelationId.sanitise]) and otherwise generates a UUID.
+ *
+ * This is the second layer of the rule of research.md §3: the gateway, the only public entry, already accepts only a
+ * UUID or 16 to 64 characters of `[A-Za-z0-9-]` and replaces anything else, so every request routed by it arrives here
+ * with an acceptable value; the wider 1-64 range of the services only matters for calls that reach a service directly
+ * (internal service-to-service calls, tests), which may use a shorter id. The filter then
  * - replaces the request header with the sanitised value and stores it in the exchange attribute
  *   [CorrelationIds.ATTRIBUTE];
  * - echoes it in the response header (also on errors written by the problem handler);
@@ -52,10 +57,7 @@ class CorrelationIdWebFilter :
         }
         chain
             .filter(mutated)
-            .contextWrite { context ->
-                val withId = context.put(CorrelationIds.CONTEXT_KEY, id)
-                if (CorrelationContext.baggageSupported) withId.put(CorrelationIds.BAGGAGE_CONTEXT_KEY, id) else withId
-            }
+            .contextWrite { context -> CorrelationIds.bind(context, id) }
     }
 
     private fun logAccess(

@@ -35,7 +35,6 @@ import com.ecommerce.platform.messaging.consumer.EventListenerSupport
 import com.ecommerce.platform.messaging.envelope.EnvelopeFactory
 import com.ecommerce.platform.messaging.outbox.OutboxPublisher
 import com.ecommerce.platform.security.PlatformSecurityProperties
-import org.springframework.beans.factory.ObjectProvider
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -98,11 +97,10 @@ class UseCaseConfiguration {
 
     @Bean
     fun internalClients(
-        builder: ObjectProvider<WebClient.Builder>,
+        builder: WebClient.Builder,
         properties: OrderProperties,
         security: PlatformSecurityProperties,
-    ): InternalClients =
-        InternalClients(builder.getIfAvailable(WebClient::builder), properties.clients, security.internalToken)
+    ): InternalClients = InternalClients(builder, properties.clients, security.internalToken)
 
     @Bean
     fun checkoutResponseRenderer(json: JsonMapper): CheckoutResponseRenderer = CheckoutResponseRenderer(json)
