@@ -26,11 +26,15 @@ class OrderStore(
     private val events: OrderEventPublisher,
     private val transactions: Transactions,
 ) {
-    /** Stores a new order with its `OrderPlaced` event. */
-    suspend fun create(change: OrderChange) {
+    /** Stores a new order with its `OrderPlaced` event; [alongside] runs in the same transaction. */
+    suspend fun create(
+        change: OrderChange,
+        alongside: suspend () -> Unit = {},
+    ) {
         transactions.run {
             orders.insert(change.order)
             events.publish(change.events)
+            alongside()
         }
     }
 

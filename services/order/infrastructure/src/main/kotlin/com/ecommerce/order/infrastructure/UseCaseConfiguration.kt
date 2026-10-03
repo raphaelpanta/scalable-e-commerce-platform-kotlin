@@ -12,6 +12,7 @@ import com.ecommerce.order.application.ListOwnOrders
 import com.ecommerce.order.application.OrderRepository
 import com.ecommerce.order.application.OrderStore
 import com.ecommerce.order.application.PlaceOrder
+import com.ecommerce.order.application.PurgeExpiredIdempotencyRecords
 import com.ecommerce.order.application.RecordRefund
 import com.ecommerce.order.application.TransitionOrderStatus
 import com.ecommerce.order.domain.OrderId
@@ -19,6 +20,7 @@ import com.ecommerce.order.infrastructure.clients.AddressClient
 import com.ecommerce.order.infrastructure.clients.CartClient
 import com.ecommerce.order.infrastructure.clients.PaymentClient
 import com.ecommerce.order.infrastructure.clients.StockReservationClient
+import com.ecommerce.order.infrastructure.jobs.IdempotencyPurgeJob
 import com.ecommerce.order.infrastructure.messaging.OrderEventHandlers
 import com.ecommerce.order.infrastructure.messaging.OrderEventListeners
 import com.ecommerce.order.infrastructure.messaging.OutboxOrderEventPublisher
@@ -139,6 +141,14 @@ class UseCaseConfiguration {
         catalog: CatalogPort,
         clock: Clock,
     ): ExpirePendingPayments = ExpirePendingPayments(store, catalog, clock)
+
+    @Bean
+    fun idempotencyPurgeJob(
+        idempotency: IdempotencyStore,
+        properties: OrderProperties,
+        clock: Clock,
+    ): IdempotencyPurgeJob =
+        IdempotencyPurgeJob(PurgeExpiredIdempotencyRecords(idempotency, clock), properties.idempotencyPurge.interval)
 
     @Bean
     fun orderEventHandlers(

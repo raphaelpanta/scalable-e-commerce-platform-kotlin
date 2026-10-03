@@ -56,13 +56,15 @@ interface OrderRepository {
 /** Idempotency records of checkouts, unique per (account, key). */
 interface IdempotencyStore {
     /**
-     * Inserts [claim] unless a live record exists for its account and key (an expired record, or a claim abandoned
-     * for longer than [IdempotencyRecord.CLAIM_TIMEOUT], is replaced); true when this request owns the key now.
+     * Inserts [claim] unless a live record exists for its account and key. An expired record is replaced; a claim
+     * abandoned for longer than [IdempotencyRecord.CLAIM_TIMEOUT] is taken over when it has no order yet or comes
+     * from the same request, keeping its order. Returns the claim this request owns now (with the order id an
+     * abandoned claim carried over), or null when another request holds the key.
      */
     suspend fun claim(
         claim: IdempotencyRecord,
         now: Instant,
-    ): Boolean
+    ): IdempotencyRecord?
 
     /** The live record of [key] for [accountId], if any. */
     suspend fun find(
@@ -70,6 +72,13 @@ interface IdempotencyStore {
         key: IdempotencyKey,
         now: Instant,
     ): IdempotencyRecord?
+
+    /** Notes the order a claim created, as soon as it exists (inside the transaction that stores the order). */
+    suspend fun recordOrder(
+        accountId: AccountId,
+        key: IdempotencyKey,
+        orderId: OrderId,
+    )
 
     /** Completes the claim with the order and the answer. */
     suspend fun complete(record: IdempotencyRecord)
@@ -79,6 +88,9 @@ interface IdempotencyStore {
         accountId: AccountId,
         key: IdempotencyKey,
     )
+
+    /** Deletes the records whose 24-hour retention ended at [now] (data-model section 5); returns how many. */
+    suspend fun purgeExpired(now: Instant): Long
 }
 
 /** The cart context: read the account cart and empty it after a paid checkout. */

@@ -76,3 +76,14 @@ class ExpirePendingPayments(
         }
     }
 }
+
+/**
+ * The idempotency purge (data-model section 5, Constitution III): checkout records whose 24-hour replay window has
+ * ended are deleted; returns how many. A live record, completed or still claimed, is never touched.
+ */
+class PurgeExpiredIdempotencyRecords(
+    private val idempotency: IdempotencyStore,
+    private val clock: Clock,
+) {
+    suspend operator fun invoke(): Long = idempotency.purgeExpired(clock.instant())
+}

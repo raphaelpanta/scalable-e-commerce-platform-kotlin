@@ -39,3 +39,5 @@ platform:
 order:
   payment-expiry:
     interval: 300ms
+  idempotency-purge:
+    interval: 300ms

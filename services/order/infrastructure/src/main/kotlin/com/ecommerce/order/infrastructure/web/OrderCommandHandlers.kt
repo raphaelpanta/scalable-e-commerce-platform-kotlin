@@ -8,6 +8,7 @@ import com.ecommerce.order.application.PlaceOrder
 import com.ecommerce.order.application.PlaceOrderCommand
 import com.ecommerce.order.application.TransitionOrderStatus
 import com.ecommerce.order.domain.OrderId
+import com.ecommerce.order.domain.StoredResponse
 import com.ecommerce.platform.problem.toServerResponse
 import com.ecommerce.platform.security.requireOperator
 import com.ecommerce.platform.security.requireShopper
@@ -30,7 +31,7 @@ class OrderCommandHandlers(
     private val transitionOrderStatus: TransitionOrderStatus,
     private val responses: CheckoutResponseRenderer,
 ) {
-    /** `POST /api/v1/orders`: 201 paid, 202 pending, 409 refused, 422 declined or key reused. */
+    /** `POST /api/v1/orders`: 201 paid, 202 pending, 409 refused or cancelled meanwhile, 422 declined or key reused. */
     suspend fun placeOrder(request: ServerRequest): ServerResponse =
         either {
             val shopper = requireShopper().bind()
@@ -79,29 +80,36 @@ class OrderCommandHandlers(
                         )
                     }
 
-                    is CheckoutOutcome.Declined -> {
-                        declined(
-                            request,
-                            responses.snapshot(outcome).let(responses::declinedMembers),
-                        )
+                    is CheckoutOutcome.Declined, is CheckoutOutcome.Cancelled -> {
+                        refused(request, responses.snapshot(outcome))
                     }
                 }
             }
 
             is CheckoutResult.Replayed -> {
                 val stored = result.response
-                if (stored.status == CheckoutResponseRenderer.UNPROCESSABLE) {
-                    declined(request, responses.declinedMembers(stored))
+                if (stored.status >= HttpStatus.BAD_REQUEST.value()) {
+                    refused(request, stored)
                 } else {
                     created(result.orderId, HttpStatus.valueOf(stored.status), stored.body)
                 }
             }
         }
 
-    private suspend fun declined(
+    /** A checkout that created an order but answers a problem: 422 `payment-declined` or 409 `order-cancelled`. */
+    private suspend fun refused(
         request: ServerRequest,
-        members: Map<String, Any?>,
-    ): ServerResponse = OrderProblems.paymentDeclined(members).toServerResponse(request)
+        stored: StoredResponse,
+    ): ServerResponse {
+        val members = responses.members(stored)
+        val problem =
+            if (stored.status == CheckoutResponseRenderer.CONFLICT) {
+                OrderProblems.orderCancelled(members)
+            } else {
+                OrderProblems.paymentDeclined(members)
+            }
+        return problem.toServerResponse(request)
+    }
 
     private suspend fun created(
         orderId: OrderId,

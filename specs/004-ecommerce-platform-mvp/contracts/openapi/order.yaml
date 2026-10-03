@@ -130,6 +130,13 @@ paths:
               line with its old and new price and `currentCartRevision` is the revision to
               resubmit. Resubmitting the request with `cartRevision` set to `currentCartRevision`
               (and a new `Idempotency-Key`) places the order at the current prices.
+
+            One further outcome concerns an order that was created:
+            - `https://ecommerce.example/problems/order-cancelled`: a cancellation (by the shopper,
+              an operator or the payment expiry) won the race against the synchronous charge (US4/AC2).
+              The order is `cancelled` with that `cancellationReason` and its payment voided
+              (`failed`, no `declineReason`); the stock is released and the cart kept. `orderId`
+              names the order. Replays of the same request answer the same problem.
           headers:
             X-Correlation-Id: {$ref: '#/components/headers/CorrelationId'}
           content:
@@ -138,6 +145,7 @@ paths:
                 oneOf:
                   - $ref: '#/components/schemas/InsufficientStockProblem'
                   - $ref: '#/components/schemas/PriceChangedProblem'
+                  - $ref: '#/components/schemas/OrderCancelledProblem'
               examples:
                 insufficientStock:
                   summary: Stock could not be reserved
@@ -163,6 +171,16 @@ paths:
                         oldPrice: {amountMinor: 14900, currency: BRL}
                         newPrice: {amountMinor: 15900, currency: BRL}
                     currentCartRevision: rev-9d4c1b37
+                orderCancelled:
+                  summary: The order was cancelled while its payment was being processed
+                  value:
+                    type: https://ecommerce.example/problems/order-cancelled
+                    title: Order cancelled
+                    status: 409
+                    detail: The order was cancelled while its payment was being processed; the payment no longer applies.
+                    instance: /api/v1/orders
+                    orderId: 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a13
+                    cancellationReason: SHOPPER_REQUEST
         '422':
           description: |
             The payment was declined: the order is recorded as `orderStatus` cancelled with
@@ -442,6 +460,15 @@ components:
                   oldPrice: {$ref: '#/components/schemas/Money'}
                   newPrice: {$ref: '#/components/schemas/Money'}
             currentCartRevision: {type: string, description: Revision to send as `cartRevision` when resubmitting to accept the new prices.}
+    OrderCancelledProblem:
+      description: 409 problem with `type` ending in `/problems/order-cancelled`; the order exists and is cancelled.
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          required: [orderId, cancellationReason]
+          properties:
+            orderId: {type: string, format: uuid, description: The order that was cancelled while it was being charged.}
+            cancellationReason: {type: string, enum: [SHOPPER_REQUEST, OPERATOR, PAYMENT_EXPIRED]}
     PlaceOrderRejectedProblem:
       allOf:
         - $ref: '#/components/schemas/Problem'
