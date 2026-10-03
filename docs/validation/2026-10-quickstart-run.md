@@ -29,11 +29,44 @@ with images present the core stack is healthy in about 90 s.
 
 ## 3. Journey (quickstart §4)
 
-JOURNEY_PLACEHOLDER
+Run through the gateway on `http://localhost:18080` with `curl` (seed data loaded, Mailpit on 8025):
+
+| # | Step | Result |
+|---|---|---|
+| 1 | Register a shopper (`POST /api/v1/identity/accounts`) | 202 (generic, no account enumeration) |
+| 2 | Read the verification mail in Mailpit | one message within 8 s, token extracted from the link |
+| 3 | Verify (`POST .../accounts/verify-email`) | 204 |
+| 4 | Sign in (`POST .../sessions`) | 200 with an EdDSA access token |
+| 5 | Add an address (`POST .../accounts/me/addresses`) | 201 |
+| 6-8 | Add a seeded product to the account cart, read the cart | 201; cart carries `revision` |
+| 9 | Checkout with `tok_sim_approve_4242` | **201** `ORD-20261003-0001`, `orderStatus=placed`, `paymentStatus=approved`, total 65 800 BRL |
+| 9b | Same `Idempotency-Key` replayed | 201 with the same order (no duplicate) |
+| 10 | Order history | one order, newest first |
+| 11 | Cart after the order | empty |
+| 12 | Confirmation email | "Order ORD-20261003-0001 confirmed" in Mailpit within 12 s (SC-005) |
+| 13 | Shopper cancels the placed order | 200, `cancelled` / `approved`, reason `SHOPPER_REQUEST` |
+| 14 | Checkout with `tok_sim_decline_0001` | 422 `payment-declined`, `declineReason=card_rejected` |
+| 15 | Checkout with a stale `cartRevision` | 409 `price-changed` with `currentCartRevision` |
+| 16 | Simulator rules as operator / as shopper | 200 / 403 |
+| 17 | Failed notifications as operator | 200 |
+
+The first checkout attempt with the field names of the quickstart prose (`deliveryAddressId`, `paymentMethodRef`) was
+refused with 400 and a field-level problem; the contract (`addressId`, `paymentMethod{type,token}`) is authoritative and
+the quickstart wording should be aligned.
 
 ## 4. Observability and resilience (quickstart §5-§6, T102)
 
-OBS_PLACEHOLDER
+- **Resilience (SC-008, T102)**: with `catalog` scaled to two replicas, a browse loop every 200 ms kept returning 200
+  while one replica was stopped: 60 of 60 requests after the stop succeeded (DNS round-robin with a 5 s TTL plus
+  connection-error retry; no Spring Cloud LoadBalancer). To fit the keyring quota, the other services were stopped for
+  this check and restarted afterwards.
+- **Observability (quickstart §5)**: not exercised in this run. The observability containers had to be stopped to free
+  Podman's keyring quota for the gateway, so no logs reached Loki during the journey. The collector, Loki, Tempo,
+  Prometheus and Grafana configurations are validated statically only; run `docker compose --profile observability up -d`
+  on an engine with headroom and query `{service=~".+"} | json | correlationId="<id>"` in Grafana.
+- **Environment ceiling**: rootless Podman limits the number of concurrently running containers through the kernel
+  keyring quota (`kernel.keys.maxkeys`); with the unrelated containers already on this machine, the full `core` +
+  `observability` stack (20 containers) does not fit. Raise the quota in the Podman machine or stop other containers.
 
 ## 5. Quality gate (quickstart §7)
 

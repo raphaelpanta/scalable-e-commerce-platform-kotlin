@@ -262,8 +262,8 @@
 
 ### Tests for User Story 8
 
-- [ ] T101 [P] [US8] Compose smoke test script `platform/compose/scripts/smoke.sh` (start `core`+`observability`, wait for all health checks within 5 min, call the gateway, assert services unreachable on host ports except gateway/Grafana/Mailpit)
-- [ ] T102 [P] [US8] Resilience test script `platform/compose/scripts/resilience.sh` (`--scale catalog=2`, continuous browse loop, stop one instance, assert zero non-2xx after in-flight requests)
+- [X] T101 [P] [US8] Compose smoke test script `platform/compose/scripts/smoke.sh` (start `core`+`observability`, wait for all health checks within 5 min, call the gateway, assert services unreachable on host ports except gateway/Grafana/Mailpit)
+- [X] T102 [P] [US8] Resilience test script `platform/compose/scripts/resilience.sh` (`--scale catalog=2`, continuous browse loop, stop one instance, assert zero non-2xx after in-flight requests)
 - [X] T103 [P] [US8] Cucumber feature `acceptance/src/test/resources/features/platform-observability.feature` (request traceable across services by correlation id via Loki API, health and metrics exposed by every service) and steps in `acceptance/src/test/kotlin/com/ecommerce/acceptance/steps/ObservabilitySteps.kt`
 
 ### Implementation for User Story 8
@@ -310,7 +310,7 @@
 - [X] T118 [P] Mutation thresholds: enable Pitest with the Kotlin plugin (Arcmutate licence per research §14, or documented exclusions fallback) at 80 % for every `domain` and `application` module in `build-logic/src/main/kotlin/pitest.gradle.kts`
 - [X] T119 [P] Write `docs/architecture.md` (bounded contexts, layers, event flows, status model) and `docs/adr/0001-two-status-order-model.md`, `docs/adr/0002-synchronous-stock-reservation.md`, `docs/adr/0003-cart-revision-checkout.md`
 - [X] T120 Propose the constitution PATCH amendment ("Spring Boot, latest GA major") via `/speckit-constitution` and record the Flyway blocking-at-boot exception in `docs/architecture.md`
-- [ ] T121 Run the full `specs/004-ecommerce-platform-mvp/quickstart.md` on a clean machine and record results in `docs/validation/2026-10-quickstart-run.md`
+- [X] T121 Run the full `specs/004-ecommerce-platform-mvp/quickstart.md` on a clean machine and record results in `docs/validation/2026-10-quickstart-run.md`
 
 ---
 
