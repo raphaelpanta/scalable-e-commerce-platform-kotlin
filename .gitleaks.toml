@@ -22,3 +22,38 @@ targetRules = ["generic-api-key"]
 paths = [
   '''^specs/[^/]+/contracts/openapi/[^/]+\.ya?ml$''',
 ]
+
+# Feature 004: the repository-root copies of the contracts and the Pact interaction reference carry the same
+# placeholder UUID keys and truncated sample tokens as the specs (generic-api-key rule only).
+[[allowlists]]
+description = "placeholder example values in the root contracts (generic-api-key rule only)"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^contracts/(openapi|asyncapi|internal)/[^/]+\.(ya?ml|md)$''',
+]
+
+# Test source sets use the simulated payment provider's documented card tokens (tok_sim_*) and fixed example
+# UUIDs as idempotency keys; the heuristic rule flags them. Scoped to test source sets and that rule only.
+[[allowlists]]
+description = "simulator tokens and example UUID keys in test source sets (generic-api-key rule only)"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^(services|libs)/[^/]+(/[^/]+)?/src/(test|integrationTest|contractTest|acceptanceTest|testFixtures)/''',
+]
+regexes = [
+  '''tok_sim_[a-z0-9_]+''',
+  '''[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}''',
+]
+
+# The identity signing-key test assembles a PEM at run time from a freshly generated key; the literal header
+# with a Kotlin template is not a stored private key.
+[[allowlists]]
+description = "run-time assembled PEM in identity tests (private-key rule only)"
+targetRules = ["private-key"]
+paths = [
+  '''^services/identity/infrastructure/src/test/''',
+]
+regexTarget = "line"
+regexes = [
+  '''BEGIN PRIVATE KEY-----\\n\$\{''',
+]
