@@ -36,14 +36,15 @@ x-app: &app
   # seven unbounded JVMs exhausted an 8 GiB Podman machine.
   mem_limit: ${SERVICE_MEM_LIMIT:-640m}
   cpus: ${SERVICE_CPUS:-1.0}
-  # Probe the actuator health endpoint on the management port (the JRE image has no curl; bash's /dev/tcp is enough).
-  # Declared here so it also applies to images built before the Dockerfile carried the same check.
+  # Probe the readiness health group on the management port (the JRE image has no curl; bash's /dev/tcp is enough), the
+  # same check as the image HEALTHCHECK; declared here so it also applies to images built before the Dockerfile
+  # carried it. `depends_on: condition: service_healthy` therefore waits until a service accepts traffic.
   healthcheck:
     test:
       - CMD
       - bash
       - -c
-      - "exec 3<>/dev/tcp/127.0.0.1/8081 && printf 'GET /actuator/health HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '\"status\":\"UP\"' <&3"
+      - "exec 3<>/dev/tcp/127.0.0.1/8081 && printf 'GET /actuator/health/readiness HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '\"status\":\"UP\"' <&3"
     interval: 15s
     timeout: 5s
     retries: 8

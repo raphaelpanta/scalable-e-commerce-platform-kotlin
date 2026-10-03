@@ -36,9 +36,12 @@ Base images are pinned by digest; refresh them deliberately.
 
 - `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75 -Dnetworkaddress.cache.ttl=5`: heap sized from the container memory limit and a
   5 s JVM DNS cache so that DNS-based discovery notices added and removed replicas quickly.
-- `HEALTHCHECK` probes `GET /actuator/health/readiness` on port 8081 (bash `/dev/tcp`, the JRE image has no curl). Compose
-  uses this health check for `depends_on: condition: service_healthy` and for `docker compose ps`. The services must enable the
-  readiness probe group (`management.endpoint.health.probes.enabled=true`).
+- `HEALTHCHECK` probes `GET /actuator/health/readiness` on port 8081 (bash `/dev/tcp`, the JRE image has no curl) and
+  expects `"status":"UP"`. Compose declares the same check (`x-app` in `platform/compose/docker-compose.yml`) and uses it for
+  `depends_on: condition: service_healthy` and `docker compose ps`; the CI start-and-health step
+  (`.github/scripts/image-health.sh`) polls the same path. Every service and the gateway enable the probe groups
+  (`management.endpoint.health.probes.enabled=true`, readiness = `readinessState`, plus the database contributor `db`
+  in catalog; docs/service-conventions.md section 2).
 
 ## How Compose uses it
 

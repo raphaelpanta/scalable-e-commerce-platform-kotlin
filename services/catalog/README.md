@@ -128,7 +128,10 @@ Mutation testing (threshold 80): `./gradlew -q :services:catalog:domain:pitest :
 ./gradlew -q :services:catalog:infrastructure:bootRun
 ```
 
-- Health: `http://localhost:8081/actuator/health` (`{"status":"UP"}` or 503 `{"status":"DOWN"}`, no details)
+- Health: `http://localhost:8081/actuator/health` (`{"status":"UP","groups":["liveness","readiness"]}` or 503 with
+  `"status":"DOWN"`, no components or details); readiness `.../actuator/health/readiness` (`readinessState` and the
+  database contributor `db`: 503 `{"status":"DOWN"}` while PostgreSQL does not answer) and liveness
+  `.../actuator/health/liveness` (`{"status":"UP"}` while the process runs)
 - Metrics: `http://localhost:8081/actuator/prometheus`
 - Logs: ECS JSON on the console; every request line carries `correlationId` (platform-core's
   `CorrelationIdWebFilter`).

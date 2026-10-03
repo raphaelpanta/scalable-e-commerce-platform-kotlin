@@ -32,6 +32,14 @@ Every service and the gateway listen on **8080** (API) and **8081** (management:
 `/actuator/health/readiness`, `/actuator/health/liveness`, `/actuator/prometheus`). Inside Compose the DNS name of a
 service is its context name (`identity`, `catalog`, `cart`, `order`, `payment`, `notification`, `gateway`).
 
+Health (FR-026): `management.endpoint.health.probes.enabled=true` with `show-components` and `show-details` set to
+`never`. The liveness group (`livenessState`) and the readiness group (`readinessState`, plus the database contributor
+`db` where the service has one: catalog's `HealthProbe` adapter with a two-second timeout; the built-in R2DBC indicator
+stays disabled because it has no timeout) answer exactly `{"status":"UP"}` (200) or `{"status":"DOWN"}` (503).
+`/actuator/health` answers the aggregate status and the group names, `{"status":"UP","groups":["liveness","readiness"]}`;
+clients read only `status`. The image `HEALTHCHECK`, the Compose health check, the CI start-and-health step and the
+`platform-probe` health pact use `/actuator/health/readiness`.
+
 | Variable | Used by | Meaning / default |
 |---|---|---|
 | `<CTX>_DB_HOST`, `<CTX>_DB_USER`, `<CTX>_DB_PASSWORD` | each service | PostgreSQL host and credentials; database name is `<ctx>`, port 5432. Host defaults to `localhost`; credentials have **no committed default**. |
