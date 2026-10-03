@@ -21,6 +21,19 @@ object OrderProblems {
             extensions,
         )
 
+    /**
+     * `order-cancelled` (409): a cancellation won the race against the charge; the members name the order and its
+     * cancellation reason.
+     */
+    fun orderCancelled(extensions: Map<String, Any?>): Problem =
+        Problem.custom(
+            "order-cancelled",
+            "Order cancelled",
+            CONFLICT,
+            "The order was cancelled while its payment was being processed; the payment no longer applies.",
+            extensions,
+        )
+
     /** The problem answering [error]. */
     fun of(error: OrderError): Problem =
         when (error) {

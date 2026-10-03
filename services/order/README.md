@@ -2,15 +2,16 @@
 
 Service for the bounded context **order** (feature 004, FR-011..FR-017): checkout with a synchronous stock
 reservation and `Idempotency-Key` handling, order history, shopper cancellation, operator lifecycle transitions, the
-payment and account event consumers and the 30-minute payment expiry job. Public API: `contracts/openapi/order.yaml`.
+payment and account event consumers, the 30-minute payment expiry job and the hourly purge of expired idempotency
+records. Public API: `contracts/openapi/order.yaml`.
 
 Package root: `com.ecommerce.order`.
 
 | Module | Contents |
 |---|---|
 | `domain` | `Order` aggregate (two statuses, ADR 0001), lifecycle and payment rules, checkout decisions, idempotency record |
-| `application` | ports and use cases: `PlaceOrder`, `ListOwnOrders`, `GetOwnOrder`, `CancelOwnOrder`, `TransitionOrderStatus`, `ApplyPaymentOutcome`, `RecordRefund`, `AnonymiseAccountOrders`, `ExpirePendingPayments` |
-| `infrastructure` | coroutine routes under `/api/v1/orders`, R2DBC persistence (`V2__order_schema.sql`), internal WebClients (cart, catalog, payment, identity), outbox publication, Kafka consumers, expiry job |
+| `application` | ports and use cases: `PlaceOrder`, `ListOwnOrders`, `GetOwnOrder`, `CancelOwnOrder`, `TransitionOrderStatus`, `ApplyPaymentOutcome`, `RecordRefund`, `AnonymiseAccountOrders`, `ExpirePendingPayments`, `PurgeExpiredIdempotencyRecords` |
+| `infrastructure` | coroutine routes under `/api/v1/orders`, R2DBC persistence (`V2__order_schema.sql`), internal WebClients (cart, catalog, payment, identity), outbox publication, Kafka consumers, expiry and idempotency purge jobs |
 
 | Layer | Where | Run alone |
 |---|---|---|

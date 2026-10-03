@@ -25,6 +25,11 @@ const val APPROVED_TOKEN = "tok_sim_approve_4242"
 const val DECLINED_TOKEN = "tok_sim_decline_0001"
 const val UNREACHABLE_TOKEN = "tok_sim_unreachable"
 
+/** A card whose (approved) charge takes [SLOW_CHARGE_MILLIS] to answer, so a test can act while it is in flight. */
+const val SLOW_TOKEN = "tok_sim_slow_approve"
+const val SLOW_CHARGE_MILLIS = 2_000
+private const val UNAVAILABLE = 503
+
 /** One shopper with a one-line cart, a saved address and the catalogue product of that line. */
 data class Shopper(
     val accountId: UUID = UUID.randomUUID(),
@@ -174,7 +179,16 @@ class Stubs(
         }
     }
 
+    /** Identity answers 503 for the address of [shopper] until [identity] is stubbed again. */
+    fun identityUnavailable(shopper: Shopper) {
+        wiremock.stubFor(
+            internal(get(urlPathEqualTo("/internal/accounts/${shopper.accountId}/addresses/${shopper.addressId}")))
+                .willReturn(aResponse().withStatus(UNAVAILABLE)),
+        )
+    }
+
     fun charges() {
+        charge(SLOW_TOKEN, """"outcome":"approved","providerReference":"sim_ch_3"""", SLOW_CHARGE_MILLIS)
         charge(APPROVED_TOKEN, """"outcome":"approved","providerReference":"sim_ch_1"""")
         charge(
             DECLINED_TOKEN,
@@ -205,6 +219,7 @@ class Stubs(
     private fun charge(
         token: String,
         outcome: String,
+        delayMillis: Int = 0,
     ) {
         wiremock.stubFor(
             internal(post(urlPathEqualTo("/internal/charges")))
@@ -212,6 +227,7 @@ class Stubs(
                 .willReturn(
                     aResponse()
                         .withStatus(CREATED)
+                        .withFixedDelay(delayMillis)
                         .withHeader("Content-Type", "application/json")
                         .withBody(
                             """{"attemptId":"${UUID.randomUUID()}","orderId":"${UUID.randomUUID()}","kind":"charge",

@@ -58,8 +58,8 @@ Kafka are reachable only on the internal network (FR-023).
 - Errors are RFC 9457 `application/problem+json` using `com.ecommerce.platform.core.problem.Problem` (responses via `com.ecommerce.platform.problem.ProblemResponses`); type URIs are
   `https://ecommerce.example/problems/<slug>` with slugs `validation`, `not-found`, `conflict`, `throttled`,
   `insufficient-stock`, `price-changed`, `stale-revision`, `unauthorized`, `forbidden`, `unavailable` (503), and the
-  order-specific `payment-declined` (422), `order-not-cancellable` (409), `invalid-transition` (409),
-  `idempotency-key-reuse` (422) exactly as `contracts/openapi/order.yaml` uses them; gateway-only `payload-too-large`
+  order-specific `payment-declined` (422), `order-cancelled` (409), `order-not-cancellable` (409),
+  `invalid-transition` (409), `idempotency-key-reuse` (422) exactly as `contracts/openapi/order.yaml` uses them; gateway-only `payload-too-large`
   (413) and `internal` (500). Every error
   carries `correlationId`. The public OpenAPI copies use the same host.
 - `X-Correlation-Id` is read, sanitised, echoed and logged by the `CorrelationIdWebFilter` of `platform-core`
@@ -129,7 +129,7 @@ Where the design documents disagree, the implementation follows these rules.
 | Topic | Rule |
 |---|---|
 | Checkout hops | Synchronous: order reads the cart (`GET /internal/carts/by-account/{id}`), reserves stock (`POST /internal/reservations`), charges (`POST /internal/charges`), then commits or releases the reservation and clears the cart synchronously. Events (`OrderPlaced`, `OrderPaid`, `OrderPaymentFailed`, `OrderCancelled`) are published too; their consumers in payment, catalog and cart are idempotent safety nets that must converge on the same state (payment keys the charge on the checkout `Idempotency-Key`, so an `OrderPlaced` consumer never creates a second attempt). |
-| Checkout responses | 201 `placed`/`approved`; 202 `placed`/`pending` (provider unreachable); 409 `insufficient-stock`; 409 `price-changed`; 422 `payment-declined` with the order `cancelled`/`failed`. |
+| Checkout responses | 201 `placed`/`approved`; 202 `placed`/`pending` (provider unreachable); 409 `insufficient-stock`; 409 `price-changed`; 409 `order-cancelled` when a cancellation won the race against the charge (order `cancelled`/`failed`, `orderId`, `cancellationReason`); 422 `payment-declined` with the order `cancelled`/`failed` and its `declineReason`. |
 | Cart revision mismatch | Any `cartRevision` that is not the cart's current revision is refused with 409 `price-changed`, `changedLines` (possibly empty when only quantities or lines changed) and `currentCartRevision`. `stale-revision` is reserved for optimistic-concurrency conflicts inside a service. |
 | Idempotency after a refusal | A refused checkout (409) stores no idempotency record; the shopper may resubmit with the same key or a new one. |
 | Cancellation while payment is pending | Shopper or operator cancellation of a `placed` order whose payment is `pending` voids the attempt: `paymentStatus` becomes `failed`, the reservation is released, no refund is recorded. No cancelled order keeps `pending`. |

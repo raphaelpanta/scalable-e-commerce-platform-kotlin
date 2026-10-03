@@ -31,6 +31,9 @@ order:
     # How often the job looks for payments still pending 30 minutes after placement, and how many per pass.
     interval: 1m
     batch-size: 100
+  idempotency-purge:
+    # Checkout idempotency records are kept 24 hours (data-model section 5); expired ones are deleted this often.
+    interval: 1h
 
 management:
   server:

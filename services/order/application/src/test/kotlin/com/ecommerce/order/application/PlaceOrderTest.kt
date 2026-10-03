@@ -35,42 +35,11 @@ import io.kotest.property.checkAll
 import java.time.LocalDate
 import java.util.UUID
 
-private val ATTEMPT = PaymentAttemptId(UUID.fromString("c2f1d0a9-5b3e-4e7a-9a60-8d1b2c3e4f50"))
-private val KEY = IdempotencyKey(UUID.fromString("6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f"))
-private const val TOKEN = "tok_sim_approve_4242"
+private val ATTEMPT = CHECKOUT_ATTEMPT
+private val KEY = CHECKOUT_KEY
+private const val TOKEN = CARD_TOKEN
 
-/** A checkout against fakes of every port. */
-private class World(
-    lines: List<com.ecommerce.order.domain.CartLine> = listOf(cartLine(14900), cartLine(2450, quantity = 2)),
-    outcome: PaymentOutcome = PaymentOutcome.Approved(ATTEMPT),
-) {
-    val cart = FakeCart(Cart("rev-1", lines))
-    val catalog = FakeCatalog(prices = lines.map { priceOf(it) })
-    val payment = FakePayment(outcome)
-    val accounts = FakeAccounts()
-    val orders = InMemoryOrders()
-    val events = RecordingEvents()
-    val idempotency = InMemoryIdempotency()
-    val orderId = OrderId(UUID.randomUUID())
-    val placeOrder =
-        PlaceOrder(
-            CheckoutPorts(cart, catalog, payment, accounts),
-            OrderStore(orders, events, DirectTransactions()),
-            idempotency,
-            TEST_RESPONSES,
-            { orderId },
-            fixedClock(),
-        )
-
-    fun command(
-        revision: String = "rev-1",
-        token: String = TOKEN,
-        roles: Set<Role> = setOf(Role.SHOPPER),
-    ): PlaceOrderCommand =
-        PlaceOrderCommand(Caller(SHOPPER, roles), KEY, CheckoutRequest(ADDRESS_ID, revision, "card", token))
-
-    suspend fun place(command: PlaceOrderCommand = command()) = placeOrder(command)
-}
+private typealias World = CheckoutWorld
 
 class PlaceOrderTest :
     FunSpec({
