@@ -10,7 +10,7 @@
 #   jar     ./gradlew bootJar of the service, handed over as the artifact jar-<svc> (no tests: the Docker build copies it
 #           instead of compiling a second time, build-arg APP_JAR of platform/docker/Dockerfile)
 #   image   docker build with that jar, Trivy image scan (fails on CRITICAL), CycloneDX SBOM (syft), start-and-health
-#           (the image boots next to a postgres sidecar and reports UP on /actuator/health within 90 s)
+#           (the image boots next to a postgres sidecar and reports UP on /actuator/health/readiness within 90 s)
 #   publish on pushes to main only, after gate AND image succeeded: push of <REGISTRY_HOST>/<service>:<sha> and :<branch>
 #           to the private registry (the image travels from `image` as the artifact image-<svc>)
 #   <svc>   aggregate named after the service; the check `service-ci / <svc>` of the caller job is this one and it
