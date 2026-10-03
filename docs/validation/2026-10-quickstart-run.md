@@ -60,10 +60,23 @@ the quickstart wording should be aligned.
   while one replica was stopped: 60 of 60 requests after the stop succeeded (DNS round-robin with a 5 s TTL plus
   connection-error retry; no Spring Cloud LoadBalancer). To fit the keyring quota, the other services were stopped for
   this check and restarted afterwards.
-- **Observability (quickstart §5)**: not exercised in this run. The observability containers had to be stopped to free
-  Podman's keyring quota for the gateway, so no logs reached Loki during the journey. The collector, Loki, Tempo,
-  Prometheus and Grafana configurations are validated statically only; run `docker compose --profile observability up -d`
-  on an engine with headroom and query `{service=~".+"} | json | correlationId="<id>"` in Grafana.
+- **Observability (quickstart §5, SC-007)**: exercised on 2026-10-03 after adding the Logback → OpenTelemetry
+  appender (platform-core and gateway `logback-spring.xml`, `opentelemetry-logback-appender-1.0` 2.28.1-alpha) and
+  rebuilding all seven images. One fixed `X-Correlation-Id` (`obs-journey-1791018499-b2`) was sent with registration
+  → verification (token from Mailpit) → sign-in → add to cart → read cart through the gateway on port 18080. About
+  15 s later the Loki data source (queried through Grafana's data source proxy) answered
+  `{service=~".+"} | correlationId="obs-journey-1791018499-b2"` with 15 lines from **four services: gateway,
+  identity, cart and catalog** (the identity line `GET /internal/accounts/{id}/contact` is the notification
+  service's lookup for the verification mail, carrying the same id through Kafka). A second run with anonymous
+  catalogue reads and an anonymous cart line returned gateway, catalog and cart.
+  - Labels: `/loki/api/v1/labels` lists `level`, `service`, `service_name`; `service` has all seven values.
+  - Lines carry `correlationId`, `traceId`, `spanId` and the line's key-value pairs as structured metadata, so the
+    query needs no `| json` stage (the quickstart's `| json | correlationId=...` form still returns the same lines,
+    marked `__error__=JSONParserErr` because the body is the plain message).
+  - Trace linkage: the `traceId` of the identity line `POST /api/v1/identity/accounts 202`
+    (`149da01890830685f4d5d89229385f38`) resolves in Tempo to one trace with spans from `gateway` and `identity`.
+    The gateway's own access line has no `traceId`: it is written after the request's span has ended.
+  - The console output stays ECS JSON (`docker compose logs`), unchanged.
 - **Environment ceiling**: rootless Podman limits the number of concurrently running containers through the kernel
   keyring quota (`kernel.keys.maxkeys`); with the unrelated containers already on this machine, the full `core` +
   `observability` stack (20 containers) does not fit. Raise the quota in the Podman machine or stop other containers.
@@ -91,5 +104,5 @@ also cleared the leaked keyring quota. With the images already built:
 | `docker compose --profile core --profile observability up -d` | all 20 containers healthy in about 90 s (SC-006 met with warm images) |
 | `smoke.sh --no-build` | compose up, health, port isolation PASS; the gateway read raced its own start (000 five seconds after creation) and answered 200 in 0.4 s immediately afterwards |
 | Prometheus targets (`up`) | all seven service targets plus the collector report 1 |
-| Loki | no log streams: the services had no Logback → OpenTelemetry appender, so only traces and metrics were exported (fix in progress, see section 4 once updated) |
+| Loki | no log streams at first: the services had no Logback → OpenTelemetry appender, so only traces and metrics were exported; fixed the same day, see section 4 (four services found for one correlation id) |
 | Quality gate | every module's `check` green with the engine healthy |
