@@ -33,6 +33,6 @@ class ServiceBaselineIntegrationTest : IdentityIntegrationTest() {
                 .collectList()
                 .block(TIMEOUT)
 
-        versions shouldBe listOf("1", "1.1", "2")
+        versions shouldBe listOf("1", "1.1", "2", "3")
     }
 }

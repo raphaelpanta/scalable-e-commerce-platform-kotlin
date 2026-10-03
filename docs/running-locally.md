@@ -21,6 +21,8 @@ starting.
 cd platform/compose
 cp .env.example .env     # first time only
 export BUILDAH_FORMAT=docker   # Podman only (see above)
+# first time only: the identity signing key shared by every identity replica (required, FR-024)
+sed -i.bak "s|^IDENTITY_SIGNING_KEY=.*|IDENTITY_SIGNING_KEY=$(openssl genpkey -algorithm ed25519 -outform DER | base64)|" .env
 docker compose --profile core --profile observability up -d --build
 docker compose ps        # every service must become "healthy" (first build: a few minutes)
 ```

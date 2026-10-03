@@ -47,10 +47,12 @@ private suspend fun Raise<IdentityError>.accessToken(
 
 /**
  * `signIn` (FR-004, FR-006): email and password for a token pair. Unknown email and wrong password answer the same
- * [IdentityError.InvalidCredentials] and count as a failure of the account (when it exists) and of the source
- * address; the fifth consecutive failure locks for 15 minutes, during which every attempt (even with the right
- * password) answers [IdentityError.Throttled]. A success resets both counts; an unverified email is refused with
- * [IdentityError.EmailNotVerified].
+ * [IdentityError.InvalidCredentials] and count as a failure of the source address and of the account, or, for an
+ * email without a live account, of that email (so that unknown addresses lock exactly like accounts and the 429 tells
+ * nothing). The fifth consecutive failure locks for 15 minutes, during which every attempt (even with the right
+ * password) answers [IdentityError.Throttled]. Locks are checked before the slow password hash, and failures are
+ * counted under a row lock so that parallel attempts are all counted. A success resets both counts; an unverified
+ * email is refused with [IdentityError.EmailNotVerified].
  */
 class SignIn(
     private val store: IdentityStore,
@@ -58,21 +60,26 @@ class SignIn(
     suspend operator fun invoke(credentials: Credentials): Either<IdentityError, TokenPair> =
         either {
             val now = store.clock.now()
-            val source = store.sourceThrottles.find(credentials.source)
-            ensure(!source.isLocked(now)) { IdentityError.Throttled(source.retryAfter(now)) }
+            val source = ThrottleKey.source(credentials.source)
+            val sourceThrottle = store.throttles.find(source)
+            ensureUnlocked(sourceThrottle, now)
             val account = Email.of(credentials.email).getOrNull()?.let { store.accounts.findByEmail(it) }
-            if (account != null) {
-                ensure(!account.throttle.isLocked(now)) { IdentityError.Throttled(account.throttle.retryAfter(now)) }
-            }
+            val unknownEmail = ThrottleKey.email(credentials.email)
+            ensureUnlocked(account?.throttle ?: store.throttles.find(unknownEmail), now)
             val matches = store.hasher.verify(credentials.password, account?.passwordHash)
             ensure(matches && account != null) {
-                failed(account?.id, credentials.source, source, now)
+                failed(account, unknownEmail, source, now)
                 IdentityError.InvalidCredentials
             }
-            succeeded(account, credentials.source, source)
+            succeeded(account, source, sourceThrottle)
             ensure(account.status == AccountStatus.ACTIVE) { IdentityError.EmailNotVerified }
             startSession(account, now)
         }
+
+    private fun Raise<IdentityError>.ensureUnlocked(
+        throttle: SignInThrottle,
+        now: Instant,
+    ) = ensure(!throttle.isLocked(now)) { IdentityError.Throttled(throttle.retryAfter(now)) }
 
     private suspend fun Raise<IdentityError>.startSession(
         account: Account,
@@ -93,22 +100,26 @@ class SignIn(
     }
 
     private suspend fun failed(
-        accountId: AccountId?,
-        source: String,
-        throttle: SignInThrottle,
+        account: Account?,
+        unknownEmail: ThrottleKey,
+        source: ThrottleKey,
         now: Instant,
     ) {
-        store.sourceThrottles.save(source, throttle.afterFailure(now, store.policies.sourceThrottle))
-        if (accountId != null) store.changeAccount(accountId) { it.failedSignIn(now, store.policies.accountThrottle) }
+        store.throttles.change(source) { it.afterFailure(now, store.policies.sourceThrottle) }
+        if (account == null) {
+            store.throttles.change(unknownEmail) { it.afterFailure(now, store.policies.accountThrottle) }
+        } else {
+            store.accounts.changeLocked(account.id) { it.failedSignIn(now, store.policies.accountThrottle) }
+        }
     }
 
     private suspend fun succeeded(
         account: Account,
-        source: String,
-        throttle: SignInThrottle,
+        source: ThrottleKey,
+        sourceThrottle: SignInThrottle,
     ) {
-        if (throttle != SignInThrottle.CLEAR) store.sourceThrottles.save(source, SignInThrottle.CLEAR)
-        store.changeAccount(account.id) { it.succeededSignIn() }
+        if (sourceThrottle != SignInThrottle.CLEAR) store.throttles.change(source) { SignInThrottle.CLEAR }
+        if (account.throttle != SignInThrottle.CLEAR) store.accounts.changeLocked(account.id) { it.succeededSignIn() }
     }
 }
 

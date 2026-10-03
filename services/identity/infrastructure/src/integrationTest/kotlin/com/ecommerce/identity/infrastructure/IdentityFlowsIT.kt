@@ -24,7 +24,7 @@ import java.util.UUID
 
 private const val NEW_PASSWORD = "Another-passphrase-2026"
 private const val ACCESS_SECONDS = 900L
-private const val SOURCE_LIMIT = 20
+private const val SOURCE_LIMIT = 5
 private const val LOCK_AFTER = 5
 private const val TOKEN_LENGTH = 43
 private const val DEFAULT_PAGE_SIZE = 20
@@ -130,6 +130,30 @@ class IdentityFlowsIT : IdentityIntegrationTest() {
             mapOf("email" to freshEmail(), "password" to "short"),
         ).expectProblem(ProblemType.VALIDATION)
         post("$IDENTITY/accounts", mapOf("email" to freshEmail())).expectProblem(ProblemType.VALIDATION, BAD_REQUEST)
+    }
+
+    @Test
+    fun `registering again while unverified re-sends a fresh verification token with the same answer (T134)`() {
+        val email = freshEmail()
+        post("$IDENTITY/accounts", mapOf("email" to email, "password" to PASSWORD)).json(ACCEPTED)
+        val first = registeredEvent(email)
+
+        val again =
+            post("$IDENTITY/accounts", mapOf("email" to email.uppercase(), "password" to NEW_PASSWORD)).json(ACCEPTED)
+
+        again["message"] shouldBe "If the address can be registered, a verification message has been sent."
+        val second =
+            recorded.awaitType(EventType.AccountRegistered) {
+                recipientEmail(it) == email && it.eventId != first.eventId
+            }
+        second.aggregateId shouldBe first.aggregateId
+        val firstToken = first.payloadAs<Json>()["verificationToken"] as String
+        val secondToken = second.payloadAs<Json>()["verificationToken"] as String
+        secondToken shouldNotBe firstToken
+        post("$IDENTITY/accounts/verify-email", mapOf("token" to firstToken)).expectProblem(ProblemType.VALIDATION)
+        post("$IDENTITY/accounts/verify-email", mapOf("token" to secondToken)).expectStatus().isNoContent
+        signIn(email, NEW_PASSWORD).expectProblem(ProblemType.UNAUTHORIZED)
+        signIn(email, PASSWORD).expectStatus().isOk
     }
 
     @Test

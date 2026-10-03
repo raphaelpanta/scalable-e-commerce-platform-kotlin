@@ -1,7 +1,8 @@
 package com.ecommerce.identity.infrastructure.persistence
 
 import com.ecommerce.identity.application.SessionRepository
-import com.ecommerce.identity.application.SourceThrottleRepository
+import com.ecommerce.identity.application.ThrottleKey
+import com.ecommerce.identity.application.ThrottleRepository
 import com.ecommerce.identity.application.TokenRepository
 import com.ecommerce.identity.domain.AccountId
 import com.ecommerce.identity.domain.Digests
@@ -200,37 +201,64 @@ class R2dbcSessionRepository(
     }
 }
 
-/** Outbound adapter: the `sign_in_source` table, keyed by the SHA-256 of the source address (no address is stored). */
-class R2dbcSourceThrottleRepository(
+/**
+ * Outbound adapter: the `sign_in_source` table of sign-in throttles, keyed by the SHA-256 of the [ThrottleKey] (a
+ * source address or an email without an account; neither is stored). [change] holds the row lock while it counts.
+ */
+class R2dbcThrottleRepository(
     private val database: DatabaseClient,
+    private val transactions: TransactionalOperator,
     private val clock: Clock,
-) : SourceThrottleRepository {
-    override suspend fun find(source: String): SignInThrottle =
+) : ThrottleRepository {
+    override suspend fun find(key: ThrottleKey): SignInThrottle =
         database
             .sql("SELECT failures, locked_until FROM sign_in_source WHERE source_hash = :hash")
-            .bind("hash", hashOf(source))
-            .map { row -> SignInThrottle(row.required("failures"), row.optional("locked_until")) }
+            .bind("hash", hashOf(key))
+            .map(::throttleOf)
             .awaitOneOrNull() ?: SignInThrottle.CLEAR
 
-    override suspend fun save(
-        source: String,
-        throttle: SignInThrottle,
-    ) {
-        database
-            .sql(
-                "INSERT INTO sign_in_source (source_hash, failures, locked_until, updated_at) " +
-                    "VALUES (:hash, :failures, :lockedUntil, :now) ON CONFLICT (source_hash) DO UPDATE SET " +
-                    "failures = EXCLUDED.failures, locked_until = EXCLUDED.locked_until, " +
-                    "updated_at = EXCLUDED.updated_at",
-            ).bind("hash", hashOf(source))
-            .bind("failures", throttle.failures)
-            .bindNullable("lockedUntil", throttle.lockedUntil, Instant::class.java)
-            .bind("now", clock.instant())
-            .fetch()
-            .awaitRowsUpdated()
-    }
+    // INSERT ... ON CONFLICT DO NOTHING makes sure a row exists to lock; SELECT ... FOR UPDATE then serialises
+    // concurrent failures of one key, so each reads the count the previous one stored (FR-006).
+    override suspend fun change(
+        key: ThrottleKey,
+        change: (SignInThrottle) -> SignInThrottle,
+    ): SignInThrottle =
+        transactions.executeAndAwait {
+            val hash = hashOf(key)
+            val now = clock.instant()
+            database
+                .sql(
+                    "INSERT INTO sign_in_source (source_hash, failures, locked_until, updated_at) " +
+                        "VALUES (:hash, 0, NULL, :now) ON CONFLICT (source_hash) DO NOTHING",
+                ).bind("hash", hash)
+                .bind("now", now)
+                .fetch()
+                .awaitRowsUpdated()
+            val current =
+                database
+                    .sql("SELECT failures, locked_until FROM sign_in_source WHERE source_hash = :hash FOR UPDATE")
+                    .bind("hash", hash)
+                    .map(::throttleOf)
+                    .awaitOneOrNull() ?: SignInThrottle.CLEAR
+            val changed = change(current)
+            database
+                .sql(
+                    "UPDATE sign_in_source SET failures = :failures, locked_until = :lockedUntil, " +
+                        "updated_at = :now WHERE source_hash = :hash",
+                ).bind("failures", changed.failures)
+                .bindNullable("lockedUntil", changed.lockedUntil, Instant::class.java)
+                .bind("now", now)
+                .bind("hash", hash)
+                .fetch()
+                .awaitRowsUpdated()
+            changed
+        }
 
     private companion object {
-        fun hashOf(source: String): String = Digests.sha256Hex("sign-in-source:$source")
+        /** `sign-in-source:<address>` keeps the hashes stored before unknown emails were throttled too. */
+        fun hashOf(key: ThrottleKey): String = Digests.sha256Hex("sign-in-" + key.value)
+
+        fun throttleOf(row: Readable): SignInThrottle =
+            SignInThrottle(row.required("failures"), row.optional("locked_until"))
     }
 }

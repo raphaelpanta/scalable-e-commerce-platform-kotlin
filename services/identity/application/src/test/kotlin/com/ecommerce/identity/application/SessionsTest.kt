@@ -42,7 +42,7 @@ class SessionsTest :
             val grant = harness.signer.grants.single()
             grant shouldBe AccessGrant(ada.id, setOf(Role.SHOPPER), session.id, NOW, Duration.ofMinutes(15))
             harness.accounts[ada.id] shouldBe ada
-            harness.sourceThrottles.saves shouldBe 0
+            harness.throttles.changes shouldBe 0
             pair.toString() shouldNotContain "jwt-1"
             credentials().toString() shouldNotContain PASSWORD
         }
@@ -57,7 +57,10 @@ class SessionsTest :
             signIn(credentials(password = "Wrong-passphrase!")).error() shouldBe IdentityError.InvalidCredentials
 
             harness.hasher.verified shouldBe 3
-            harness.sourceThrottles.throttles[SOURCE] shouldBe SignInThrottle(3, null)
+            harness.throttles[ThrottleKey.source(SOURCE)] shouldBe SignInThrottle(3, null)
+            harness.throttles[ThrottleKey.email("Nobody@example.test ")] shouldBe SignInThrottle(1, null)
+            harness.throttles[ThrottleKey.email("not-an-email")] shouldBe SignInThrottle(1, null)
+            harness.throttles[ThrottleKey.email(ADA)] shouldBe SignInThrottle.CLEAR
             harness.accounts.accounts.values
                 .single()
                 .throttle shouldBe SignInThrottle(1, null)
@@ -91,7 +94,7 @@ class SessionsTest :
             repeat(4) { signIn(credentials(password = "Wrong-$it")).error() }
             signIn(credentials()).value()
             harness.accounts[ada.id].throttle shouldBe SignInThrottle.CLEAR
-            harness.sourceThrottles.throttles[SOURCE] shouldBe SignInThrottle.CLEAR
+            harness.throttles[ThrottleKey.source(SOURCE)] shouldBe SignInThrottle.CLEAR
             repeat(4) { signIn(credentials(password = "Wrong-$it")).error() shouldBe IdentityError.InvalidCredentials }
             signIn(credentials()).value()
         }
@@ -110,22 +113,38 @@ class SessionsTest :
             signIn(credentials(source = "elsewhere")).value()
         }
 
-        test("an account failure lost to a concurrent change is retried, and a vanished account is left alone") {
+        test("account failures are counted under its row lock, and an account that vanished is left alone") {
             val harness = Harness()
             val ada = harness.shopper()
-            harness.accounts.losingUpdates = 2
 
             SignIn(harness.store)(credentials(password = "Wrong")).error()
 
             harness.accounts[ada.id].throttle.failures shouldBe 1
-            harness.accounts.updates shouldBe 3
+            harness.accounts.lockedChanges shouldBe 1
+            harness.accounts.updates shouldBe 0
+            harness.accounts.changeLocked(AccountId(UUID.randomUUID())) { it.succeededSignIn() }.shouldBeNull()
+            harness.accounts.lockedChanges shouldBe 1
+        }
 
-            harness.accounts.losingUpdates = 3
-            SignIn(harness.store)(credentials(password = "Wrong")).error()
-            harness.accounts[ada.id].throttle.failures shouldBe 1
+        test("five failures of an unknown email lock it like an account, with the same answer") {
+            val harness = Harness()
+            val ada = harness.shopper()
+            val signIn = SignIn(harness.store)
 
-            harness.store.changeAccount(AccountId(UUID.randomUUID())) { it.succeededSignIn() }
-            harness.accounts.updates shouldBe 6
+            repeat(ThrottlePolicy.DEFAULT_MAX_FAILURES) { attempt ->
+                signIn(credentials(address = "nobody@example.test", source = "u$attempt")).error() shouldBe
+                    IdentityError.InvalidCredentials
+                signIn(credentials(password = "Wrong-$attempt", source = "a$attempt")).error() shouldBe
+                    IdentityError.InvalidCredentials
+            }
+            harness.clock.advance(Duration.ofMinutes(1))
+
+            val unknown = signIn(credentials(address = " NOBODY@example.test", source = "fresh")).error()
+            val known = signIn(credentials(source = "fresh")).error()
+            unknown shouldBe IdentityError.Throttled(Duration.ofMinutes(14))
+            unknown shouldBe known
+            harness.hasher.verified shouldBe 2 * ThrottlePolicy.DEFAULT_MAX_FAILURES
+            harness.accounts[ada.id].throttle.failures shouldBe ThrottlePolicy.DEFAULT_MAX_FAILURES
         }
 
         test("an unverified account is refused with 403 after a correct password") {

@@ -41,6 +41,7 @@ service is its context name (`identity`, `catalog`, `cart`, `order`, `payment`, 
 | `JWT_ISSUER` | identity, gateway, services | default `https://identity.ecommerce.local` |
 | `JWT_AUDIENCE` | identity, gateway, services | default `ecommerce-api` |
 | `IDENTITY_URL`, `CATALOG_URL`, `CART_URL`, `ORDER_URL`, `PAYMENT_URL`, `NOTIFICATION_URL` | internal HTTP clients, gateway routes | default `http://localhost:8080`; Compose `http://<ctx>:8080` |
+| `IDENTITY_SIGNING_KEY` | identity | Ed25519 PKCS#8 private key (DER, base64) shared by every identity replica; **required** outside the `dev`/`test` profiles; generated into `.env` by the compose scripts |
 | `INTERNAL_API_TOKEN` | services with `/internal/**` endpoints and their clients | shared secret sent as `X-Internal-Token`; **no committed default** |
 | `PLATFORM_CURRENCY` | all | `BRL` |
 | `PUBLIC_BASE_URL` | notification | base of links in messages, default `http://localhost:8080` |

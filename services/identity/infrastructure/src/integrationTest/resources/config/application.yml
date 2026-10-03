@@ -2,6 +2,11 @@
 # application in a JVM shutdown hook, after Gradle stops capturing test output; keep that shutdown quiet. Without
 # Ryuk (Podman) Testcontainers stops the containers in a concurrent hook, so the R2DBC driver, the outbox relay and
 # the Kafka clients may still talk to containers that are already gone.
+spring:
+  profiles:
+    # T135: no IDENTITY_SIGNING_KEY in tests; the profile `test` lets the service generate a throw-away key.
+    include: test
+
 logging:
   level:
     org.springframework.boot.reactor.netty.GracefulShutdown: warn

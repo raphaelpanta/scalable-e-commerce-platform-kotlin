@@ -159,6 +159,19 @@ class InMemoryAccounts : AccountRepository {
         accounts[account.id] = account
         return true
     }
+
+    var lockedChanges = 0
+
+    /** Atomic like the row lock of the adapter: nothing suspends between the read and the write. */
+    override suspend fun changeLocked(
+        id: AccountId,
+        change: (Account) -> Account,
+    ): Account? {
+        yield()
+        val account = accounts[id] ?: return null
+        lockedChanges++
+        return change(account).also { accounts[id] = it }
+    }
 }
 
 class InMemoryAddresses : AddressRepository {
@@ -314,22 +327,25 @@ class InMemorySessions : SessionRepository {
     fun of(accountId: AccountId): List<SessionRecord> = sessions.values.filter { it.accountId == accountId }
 }
 
-class InMemorySourceThrottles : SourceThrottleRepository {
-    val throttles = linkedMapOf<String, SignInThrottle>()
-    var saves = 0
+class InMemoryThrottles : ThrottleRepository {
+    val throttles = linkedMapOf<ThrottleKey, SignInThrottle>()
+    var changes = 0
 
-    override suspend fun find(source: String): SignInThrottle {
+    operator fun get(key: ThrottleKey): SignInThrottle = throttles[key] ?: SignInThrottle.CLEAR
+
+    override suspend fun find(key: ThrottleKey): SignInThrottle {
         yield()
-        return throttles[source] ?: SignInThrottle.CLEAR
+        return get(key)
     }
 
-    override suspend fun save(
-        source: String,
-        throttle: SignInThrottle,
-    ) {
+    /** Atomic like the row lock of the adapter: nothing suspends between the read and the write. */
+    override suspend fun change(
+        key: ThrottleKey,
+        change: (SignInThrottle) -> SignInThrottle,
+    ): SignInThrottle {
         yield()
-        saves++
-        throttles[source] = throttle
+        changes++
+        return change(get(key)).also { throttles[key] = it }
     }
 }
 
@@ -389,7 +405,7 @@ class Harness(
     val preferences = InMemoryPreferences()
     val tokens = InMemoryTokens()
     val sessions = InMemorySessions()
-    val sourceThrottles = InMemorySourceThrottles()
+    val throttles = InMemoryThrottles()
     val hasher = FakeHasher()
     val signer = FakeSigner()
     val secrets = FakeSecrets()
@@ -404,7 +420,7 @@ class Harness(
             preferences,
             tokens,
             sessions,
-            sourceThrottles,
+            throttles,
             hasher,
             signer,
             secrets,
