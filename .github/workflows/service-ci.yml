@@ -404,7 +404,7 @@ jobs:
       # US9/AC3: the image must boot and report UP. The service runs with throw-away credentials next to a postgres
       # sidecar (none for the gateway), is probed from inside the container for up to 90 s, and is always stopped; the
       # last log lines are printed on failure (.github/scripts/image-health.sh, docs/ci-cd.md "Start-and-health check").
-      - name: Start the image and wait for /actuator/health
+      - name: Start the image and wait for /actuator/health/readiness
         env:
           HEALTH_TIMEOUT: "90"
         run: .github/scripts/image-health.sh "$SERVICE" "$IMAGE_SHA"
