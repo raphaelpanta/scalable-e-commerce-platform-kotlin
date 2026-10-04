@@ -61,6 +61,7 @@ private fun newOrder(
                     RESERVATION,
                     placedAt,
                 ),
+                Order.DEFAULT_PAYMENT_WINDOW,
             ).getOrNull(),
     ).order
 
@@ -153,6 +154,7 @@ class OrderUseCasesTest :
                             RESERVATION,
                             NOW,
                         ),
+                        Order.DEFAULT_PAYMENT_WINDOW,
                     )
                 backend.store.create(checkNotNull(change.getOrNull()))
                 backend.orders.stored.size shouldBe 1

@@ -165,6 +165,7 @@ object OrderEventExamples {
                         ReservationId(UUID.fromString("4a8f2c60-9d13-4b7e-a5c1-3e6d0b9f7a15")),
                         at(time),
                     ),
+                    Order.DEFAULT_PAYMENT_WINDOW,
                 ).getOrNull(),
         )
 

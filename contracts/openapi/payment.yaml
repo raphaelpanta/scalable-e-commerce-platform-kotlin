@@ -261,14 +261,14 @@ components:
       enum: [insufficient_funds, card_expired, card_rejected, suspected_fraud, invalid_payment_method]
     PaymentAttempt:
       type: object
-      required: [id, orderId, amount, outcome, providerReference, idempotencyKey, createdAt]
+      required: [id, orderId, amount, outcome, idempotencyKey, createdAt]
       properties:
         id: {type: string, format: uuid}
         orderId: {type: string, format: uuid}
         amount: {$ref: '#/components/schemas/Money'}
         outcome: {$ref: '#/components/schemas/Outcome'}
         declineReason: {$ref: '#/components/schemas/DeclineReason', description: Present only when outcome is declined.}
-        providerReference: {type: string, description: Reference issued by the (simulated) provider.}
+        providerReference: {type: string, description: Reference issued by the (simulated) provider once it answered; absent while the attempt is pending and when it was voided (the provider never answered it).}
         idempotencyKey: {type: string, format: uuid, description: Key that guarantees one attempt per checkout request (a retry carries a key derived from the attempt it retries).}
         createdAt: {type: string, format: date-time}
         attemptNumber: {type: integer, minimum: 1, description: 1 for the first attempt of the order; each retry of a pending attempt adds 1.}

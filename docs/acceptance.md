@@ -46,6 +46,7 @@ not only on the inputs.
 | `PLATFORM_CURRENCY` | `BRL` | Currency of the prices the suite creates |
 | `NOTIFICATION_FAILURE_TIMEOUT_MINUTES` | `15` | How long `@chaos` waits for a failing email to run out of retries |
 | `PAYMENT_RETRY_TIMEOUT_SECONDS` | `150` | How long the retry scenario waits for the payment service to retry a pending payment (its `PAYMENT_RETRY_DELAY` is 60 s by default) |
+| `PAYMENT_EXPIRY_TIMEOUT_SECONDS` | `210` | How long the expiry scenario waits for an order whose payment stays pending to expire: the order service's `ORDER_PAYMENT_WINDOW` (2 min with `platform/perf/compose.perf.yml`) plus its `ORDER_PAYMENT_EXPIRY_INTERVAL` (5 s there) |
 
 The suite never logs credentials or tokens. Response bodies in assertion messages have `accessToken`,
 `refreshToken`, `password`, `token` and `code` masked.
@@ -89,7 +90,7 @@ The suite never logs credentials or tokens. Response bodies in assertion message
 | US1 browse the catalogue | `catalogue-browsing.feature` | 4 | `CatalogueSteps` |
 | US2 cart and merge on sign-in | `shopping-cart.feature` | 6 | `CartSteps` |
 | US3 account | `account.feature` | 7 | `AccountSteps` |
-| US4 checkout and payment | `checkout.feature` | 8 | `CheckoutSteps` |
+| US4 checkout and payment | `checkout.feature` | 9 | `CheckoutSteps` |
 | US5 order tracking | `order-tracking.feature` | 6 | `OrderTrackingSteps` |
 | US6 notifications | `notifications.feature` | 5 | `NotificationSteps` |
 | US7 catalogue operations | `catalogue-operations.feature` | 9 | `CatalogueOperationsSteps` |
@@ -111,12 +112,13 @@ These follow from the contracts:
   resubmission with the same key does not duplicate it, and (`@slow`) that the payment service's own retry of the
   pending charge approves the order later (two attempts: the first `voided`, the retry `approved`). A shopper
   resubmission has to resend the same body (same card token), so it is not what resolves the payment.
-- **US4.7 30-minute expiry (`PAYMENT_EXPIRED`, stock released) is not covered.** The window is the order domain's
-  constant `Order.PAYMENT_WINDOW` (30 minutes); no property of the order service shortens it, so a scenario would
-  have to wait more than 30 minutes. The expiry is covered by the order service's integration test
-  (`OrderLifecycleIT`, the expiry job against a clock) and the payment side (the pending attempt voided by
-  `OrderCancelled`) by the payment integration tests. Making the window configurable would let a later scenario use
-  `tok_sim_unreachable_forever` and wait for the expiry.
+- **US4.7 payment expiry (`PAYMENT_EXPIRED`, stock released, attempt voided)** runs (`@slow`) with a shortened window:
+  the order service reads its payment window from `order.payment-window` (`ORDER_PAYMENT_WINDOW`, 30 minutes by
+  default), and the acceptance override `platform/perf/compose.perf.yml` sets it to 2 minutes with a 5-second expiry
+  job interval (`ORDER_PAYMENT_EXPIRY_INTERVAL`). The scenario pays with `tok_sim_unreachable_forever` and waits for the
+  expiry. Against a stack started without the override it would wait the full 30 minutes, beyond its budget. The
+  window must stay longer than the payment retry (`PAYMENT_RETRY_DELAY` plus its interval), or the retry scenario's
+  order would expire first.
 - **US6.4 duplicate events.** Events cannot be injected through the public API. The suite resubmits the same
   checkout with the same idempotency key instead, and checks that exactly one confirmation email and one history entry
   exist.

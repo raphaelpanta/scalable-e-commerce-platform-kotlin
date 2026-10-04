@@ -6,11 +6,13 @@ import com.ecommerce.payment.domain.OrderId
 import kotlinx.coroutines.reactor.awaitSingleOrNull
 import org.springframework.r2dbc.core.DatabaseClient
 import org.springframework.r2dbc.core.awaitOneOrNull
+import java.time.Instant
 
 /**
- * Cancelled orders in `cancelled_orders` (inserted once, never updated), and the per-order lock: a PostgreSQL
- * transaction-level advisory lock keyed by the order id, released when the running transaction ends. Charges and
- * cancellations of the same order take it before they read each other's rows, so neither misses the other.
+ * Cancelled orders in `cancelled_orders` (inserted once, never updated, deleted once their retention ended), and the
+ * per-order lock: a PostgreSQL transaction-level advisory lock keyed by the order id, released when the running
+ * transaction ends. Charges and cancellations of the same order take it before they read each other's rows, so
+ * neither misses the other.
  */
 class R2dbcCancelledOrderRepository(
     private val database: DatabaseClient,
@@ -42,6 +44,12 @@ class R2dbcCancelledOrderRepository(
             ).bind("orderId", orderId.value)
             .map { row, _ -> row.toCancelledOrder() }
             .awaitOneOrNull()
+
+    override suspend fun forgetRecordedBefore(cutoff: Instant): Long =
+        database
+            .sql("DELETE FROM cancelled_orders WHERE recorded_at < :cutoff")
+            .bind("cutoff", cutoff)
+            .awaitRowsUpdated()
 
     private companion object {
         /** Namespace of the payment context's advisory locks, folded into the order id's 64-bit key. */

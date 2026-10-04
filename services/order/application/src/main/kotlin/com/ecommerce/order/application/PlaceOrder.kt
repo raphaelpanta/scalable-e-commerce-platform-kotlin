@@ -25,6 +25,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.time.Clock
+import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneOffset
 import kotlin.time.Duration.Companion.milliseconds
@@ -109,7 +110,11 @@ data class CheckoutPorts(
  * and the claim. The order id is written on the claim in the transaction that stores the order, and any failure after
  * that completes the claim with the order as last known, so neither a retry with the same key nor a takeover of an
  * abandoned claim ever places a second order.
+ *
+ * The order's payment expires [paymentWindow] after placement (`order.payment-window`, [Order.DEFAULT_PAYMENT_WINDOW]
+ * by default), when the expiry job cancels it if the payment is still pending.
  */
+@Suppress("LongParameterList") // the checkout's collaborators plus its one setting, the payment window
 class PlaceOrder(
     private val ports: CheckoutPorts,
     private val store: OrderStore,
@@ -117,6 +122,7 @@ class PlaceOrder(
     private val responses: CheckoutResponses,
     private val ids: OrderIds,
     private val clock: Clock,
+    private val paymentWindow: Duration,
 ) {
     suspend operator fun invoke(command: PlaceOrderCommand): Either<OrderError, CheckoutResult> =
         if (command.caller.isShopper) {
@@ -198,7 +204,7 @@ class PlaceOrder(
     ): Either<OrderError, CheckoutOutcome> =
         either {
             val placement = prepare(command, claim, progress).bind()
-            val placed = Order.place(placement).bind()
+            val placed = Order.place(placement, paymentWindow).bind()
             store.create(placed) { idempotency.recordOrder(claim.accountId, claim.key, placement.id) }
             progress.order = placed.order
             val charge =

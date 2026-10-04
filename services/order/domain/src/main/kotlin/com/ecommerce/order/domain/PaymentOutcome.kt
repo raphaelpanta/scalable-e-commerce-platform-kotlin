@@ -92,7 +92,7 @@ private fun Order.notePending(attemptId: PaymentAttemptId?): OrderChange =
         unchanged()
     }
 
-/** True when the payment is still `pending` at [now], 30 minutes or more after placement. */
+/** True when the payment is still `pending` at [now], once its payment window (from placement) has ended. */
 fun Order.paymentExpired(now: Instant): Boolean =
     paymentStatus == PaymentStatus.PENDING && paymentExpiresAt != null && !now.isBefore(paymentExpiresAt)
 

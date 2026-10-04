@@ -11,9 +11,20 @@
 # The checkout (20/min) and operator tiers are keyed by account and stay at their defaults: the suite paces each
 # shopper below them, so what is measured is the real per-account policy.
 # Override values with PERF_RATELIMIT_AUTH, PERF_RATELIMIT_BROWSE and PERF_RATELIMIT_STANDARD in the shell or .env.
+#
+# The same override starts the stack the acceptance suite runs against (.github/workflows/platform.yml, both jobs;
+# docs/acceptance.md), so it also shortens the order's payment window (default 30m, order.payment-window) for the
+# @slow expiry scenario of checkout.feature: a payment still pending ORDER_PAYMENT_WINDOW after placement expires the
+# order (PAYMENT_EXPIRED) within one ORDER_PAYMENT_EXPIRY_INTERVAL. The window must stay longer than the payment
+# retry (PAYMENT_RETRY_DELAY, 60 s, plus its 10 s interval), or the retry scenario's order would expire before its
+# retry approves it. The performance run only pays with approved cards, so it never waits on the window.
 services:
   gateway:
     environment:
       GATEWAY_RATELIMIT_REQUESTSPERMINUTE_AUTH: ${PERF_RATELIMIT_AUTH:-100000}
       GATEWAY_RATELIMIT_REQUESTSPERMINUTE_BROWSE: ${PERF_RATELIMIT_BROWSE:-10000000}
       GATEWAY_RATELIMIT_REQUESTSPERMINUTE_STANDARD: ${PERF_RATELIMIT_STANDARD:-100000}
+  order:
+    environment:
+      ORDER_PAYMENT_WINDOW: ${ACCEPTANCE_ORDER_PAYMENT_WINDOW:-2m}
+      ORDER_PAYMENT_EXPIRY_INTERVAL: ${ACCEPTANCE_ORDER_PAYMENT_EXPIRY_INTERVAL:-5s}

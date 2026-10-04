@@ -11,7 +11,7 @@ Package root: `com.ecommerce.payment`.
 |---|---|
 | `domain` | `PaymentAttempt`, `RefundRecord`, value objects, `PaymentProviderPort`, the pure `SimulatedPaymentRules` document |
 | `application` | ports and use cases: `AuthoriseCharge`, `RecordRefund`, `ChargeSettlement`, `ChargePlacedOrder`, `SettleCancelledOrder`, `RetryPendingCharges`, `GetPaymentAttempt`, `ListPaymentAttemptsForOrder`, `ListRefundsForOrder`, `GetRefund`, `GetSimulatorRules` |
-| `infrastructure` | coroutine routes under `/api/v1/payments` and `/internal`, R2DBC persistence (`V2__payment_schema.sql` to `V5__payment_cancelled_orders.sql`), `SimulatedPaymentProvider`, outbox publication, Kafka consumer of `order.order.v1` (group `payment`), the retry job of pending charges (`payment.retry.*`: delay 60 s, 3 attempts, `PAYMENT_RETRY_DELAY`, `PAYMENT_RETRY_MAX_ATTEMPTS`) |
+| `infrastructure` | coroutine routes under `/api/v1/payments` and `/internal`, R2DBC persistence (`V2__payment_schema.sql` to `V5__payment_cancelled_orders.sql`), `SimulatedPaymentProvider`, outbox publication, Kafka consumer of `order.order.v1` (group `payment`), the retry job of pending charges (`payment.retry.*`: delay 60 s, 3 attempts, `PAYMENT_RETRY_DELAY`, `PAYMENT_RETRY_MAX_ATTEMPTS`), the purge of remembered cancelled orders past the late-charge window (`payment.cancelled-orders-retention`, 33 min by default) |
 
 | Layer | Where | Run alone |
 |---|---|---|

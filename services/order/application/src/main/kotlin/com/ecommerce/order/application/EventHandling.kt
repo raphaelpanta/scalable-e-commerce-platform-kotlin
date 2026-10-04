@@ -58,8 +58,9 @@ class AnonymiseAccountOrders(
 }
 
 /**
- * The payment expiry job (FR-015): orders whose payment is still pending 30 minutes after placement are cancelled
- * with `PAYMENT_EXPIRED` (payment voided, `OrderCancelled`) and their stock is released. Returns how many expired.
+ * The payment expiry job (FR-015): orders whose payment is still pending when their payment window ends (30 minutes
+ * after placement by default, `order.payment-window`) are cancelled with `PAYMENT_EXPIRED` (payment voided,
+ * `OrderCancelled`) and their stock is released. Returns how many expired.
  */
 class ExpirePendingPayments(
     private val store: OrderStore,

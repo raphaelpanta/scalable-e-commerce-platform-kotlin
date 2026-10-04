@@ -13,7 +13,7 @@ class AccessorsSpec :
             val placement = OrderFixtures.placement()
             placement.number shouldBe OrderNumber.of(LocalDate.of(2026, 10, 2), 1)
             placement.paymentMethodRef shouldBe "tok_sim_approve_4242"
-            val order = checkNotNull(Order.place(placement).getOrNull()).order
+            val order = checkNotNull(Order.place(placement, Order.DEFAULT_PAYMENT_WINDOW).getOrNull()).order
             order.number.value shouldBe "ORD-20261002-0001"
             order.paymentMethodRef shouldBe "tok_sim_approve_4242"
             order.copy(version = 7).version shouldBe 7

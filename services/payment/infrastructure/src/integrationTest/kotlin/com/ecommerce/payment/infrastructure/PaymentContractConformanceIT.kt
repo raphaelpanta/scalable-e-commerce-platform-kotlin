@@ -1,8 +1,24 @@
 package com.ecommerce.payment.infrastructure
 
+import arrow.core.getOrElse
 import com.ecommerce.conformance.OpenApiContract
+import com.ecommerce.payment.application.PaymentLedger
+import com.ecommerce.payment.domain.AccountId
+import com.ecommerce.payment.domain.ChargeRequest
+import com.ecommerce.payment.domain.IdempotencyKey
+import com.ecommerce.payment.domain.Money
+import com.ecommerce.payment.domain.OrderId
+import com.ecommerce.payment.domain.PaymentAttempt
+import com.ecommerce.payment.domain.PaymentAttemptId
+import com.ecommerce.payment.domain.PaymentMethodRef
+import com.ecommerce.payment.domain.ProviderDecision
+import io.kotest.matchers.shouldBe
+import kotlinx.coroutines.reactor.mono
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.test.web.reactive.server.WebTestClient
+import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 
 private const val OK = 200
@@ -10,6 +26,7 @@ private const val BAD_REQUEST = 400
 private const val UNAUTHORIZED = 401
 private const val FORBIDDEN = 403
 private const val NOT_FOUND = 404
+private val STORE_TIMEOUT: Duration = Duration.ofSeconds(10)
 
 /**
  * Every public operation of `contracts/openapi/payment.yaml`, with its success and documented error statuses,
@@ -20,6 +37,9 @@ private const val NOT_FOUND = 404
 class PaymentContractConformanceIT : PaymentIntegrationTest() {
     private val contract = OpenApiContract.of("payment")
     private val operatorId: UUID = UUID.randomUUID()
+
+    @Autowired
+    lateinit var ledger: PaymentLedger
 
     @Test
     fun `the public operations conform to payment yaml`() {
@@ -65,7 +85,60 @@ class PaymentContractConformanceIT : PaymentIntegrationTest() {
         contract.check(anonymous(rules), UNAUTHORIZED)
         contract.check(read(rules, UUID.randomUUID()), FORBIDDEN)
 
+        unresolvedAttempts()
+
         contract.verify(DEFERRED)
+    }
+
+    /**
+     * `PaymentAttempt` while unresolved (data-model §3.5): a pending attempt (provider unreachable) and a voided one
+     * (superseded by its retry) carry no `providerReference`, and both conform. They are created now, so the retry job
+     * (60-second delay) leaves them as they are during the test.
+     */
+    private fun unresolvedAttempts() {
+        val pending = Charge(token = UNREACHABLE_FOREVER_TOKEN)
+        val pendingId = charged(pending)["attemptId"].toString()
+
+        val superseded = Charge(token = UNREACHABLE_FOREVER_TOKEN)
+        val first = firstAttempt(superseded)
+        val retry = first.retry(PaymentAttemptId(UUID.randomUUID()), ProviderDecision.Unreachable, Instant.now())
+        listOf(first.void(), retry).forEach(::store)
+
+        val pendingBody = attempt(pendingId, pending.owner)
+        pendingBody["outcome"] shouldBe "pending"
+        pendingBody.containsKey("providerReference") shouldBe false
+        val voidedBody = attempt(first.id.toString(), superseded.owner)
+        voidedBody["outcome"] shouldBe "voided"
+        voidedBody.containsKey("providerReference") shouldBe false
+        attempt(retry.id.toString(), superseded.owner)["retryOf"] shouldBe first.id.toString()
+
+        contract.check(read("$PAYMENTS/attempts/$pendingId", operatorId, OPERATOR), OK)
+        contract.check(read("$PAYMENTS/attempts?orderId=${superseded.orderId}", superseded.owner), OK)
+    }
+
+    /** `GET` attempt [id] as [owner], checked against the contract, and its body. */
+    private fun attempt(
+        id: String,
+        owner: UUID,
+    ): Map<String, Any?> = contract.check(read("$PAYMENTS/attempts/$id", owner), OK)
+
+    /** The first, pending attempt of [charge] as an unreachable provider leaves it (not stored). */
+    private fun firstAttempt(charge: Charge): PaymentAttempt =
+        PaymentAttempt.charge(
+            PaymentAttemptId(UUID.randomUUID()),
+            ChargeRequest(
+                OrderId(charge.orderId),
+                AccountId(charge.owner),
+                Money(charge.amountMinor, "BRL"),
+                PaymentMethodRef.of(charge.token).getOrElse { error(it) },
+                IdempotencyKey(charge.key),
+            ),
+            ProviderDecision.Unreachable,
+            Instant.now(),
+        )
+
+    private fun store(attempt: PaymentAttempt) {
+        check(mono { ledger.attempts.insert(attempt) }.block(STORE_TIMEOUT) == true) { "attempt not stored" }
     }
 
     private fun anonymous(path: String): WebTestClient.ResponseSpec = client.get().uri(path).exchange()

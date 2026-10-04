@@ -32,7 +32,7 @@ class OrderSpec :
         context("placement") {
             test("an order is placed with a pending payment, a 30-minute clock and frozen totals") {
                 checkAll(arbLines) { lines ->
-                    val change = checkNotNull(Order.place(placement(lines)).getOrNull())
+                    val change = checkNotNull(Order.place(placement(lines), Order.DEFAULT_PAYMENT_WINDOW).getOrNull())
                     val order = change.order
 
                     order.orderStatus shouldBe OrderStatus.PLACED
@@ -57,9 +57,30 @@ class OrderSpec :
             }
 
             test("an order without lines or with a zero total is refused") {
-                Order.place(placement(emptyList())).leftOrNull() shouldBe OrderError.EmptyCart
-                Order.place(placement(listOf(line(priceMinor = 0)))).leftOrNull() shouldBe
+                val window = Order.DEFAULT_PAYMENT_WINDOW
+                Order.place(placement(emptyList()), window).leftOrNull() shouldBe OrderError.EmptyCart
+                Order.place(placement(listOf(line(priceMinor = 0))), window).leftOrNull() shouldBe
                     OrderError.Invalid("cart", "the order total must be positive")
+            }
+
+            test("the payment window given to the placement sets when the pending payment expires") {
+                checkAll(Arb.long(1L..7_200L)) { seconds ->
+                    val window = Duration.ofSeconds(seconds)
+                    val order = checkNotNull(Order.place(placement(), window).getOrNull()).order
+
+                    order.paymentExpiresAt shouldBe NOW.plus(window)
+                    order.paymentExpired(NOW.plus(window).minusMillis(1)) shouldBe false
+                    order.expirePayment(NOW.plus(window).minusMillis(1)).events.shouldBeEmpty()
+                    order.paymentExpired(NOW.plus(window)) shouldBe true
+                    order.expirePayment(NOW.plus(window)).order.cancellation shouldBe
+                        Cancellation(CancellationReason.PAYMENT_EXPIRED, NOW.plus(window), "system")
+                }
+            }
+
+            test("the payment window must be positive") {
+                listOf(Duration.ZERO, Duration.ofSeconds(-1)).forEach { window ->
+                    shouldThrow<IllegalArgumentException> { Order.place(placement(), window) }
+                }
             }
 
             test("the aggregate rejects states outside the two-status model") {
@@ -155,7 +176,7 @@ class OrderSpec :
         context("expiry") {
             test("a payment pending for 30 minutes or more cancels the order with PAYMENT_EXPIRED") {
                 checkAll(Arb.long(0L..10_000L)) { seconds ->
-                    val now = NOW.plus(Order.PAYMENT_WINDOW).plusSeconds(seconds)
+                    val now = NOW.plus(Order.DEFAULT_PAYMENT_WINDOW).plusSeconds(seconds)
                     val order = placed()
                     order.paymentExpired(now) shouldBe true
                     val change = order.expirePayment(now)
@@ -172,7 +193,7 @@ class OrderSpec :
 
             test("before the window ends, or once the payment is resolved, nothing expires") {
                 checkAll(Arb.long(1L..1_799L)) { seconds ->
-                    val early = NOW.plusSeconds(Order.PAYMENT_WINDOW.seconds - seconds)
+                    val early = NOW.plusSeconds(Order.DEFAULT_PAYMENT_WINDOW.seconds - seconds)
                     placed().paymentExpired(early) shouldBe false
                     placed().expirePayment(early).events.shouldBeEmpty()
                     val approved = paid()

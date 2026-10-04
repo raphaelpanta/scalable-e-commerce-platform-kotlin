@@ -387,6 +387,7 @@ Checkout flow, for task derivation: Order checks the submitted cart revision (st
 | Anonymous cart | cart | 30 days idle (decided at planning) | scheduled purge |
 | Account PII (email, hash, profile, addresses) | identity | until deletion request, then anonymised immediately (FR-007) | AccountDeleted |
 | Order financial record | order, payment | Kept indefinitely (financial record); PII scrubbed per 3.4 | AccountDeleted handler |
+| Cancelled-order contact snapshot (`cancelled_orders`: email, phone, channels) | payment | Late-charge window from the cancellation: the 30-minute payment window plus the retry window (`payment.retry.delay` x `max-attempts`), 33 min by default, configurable as `payment.cancelled-orders-retention` | scheduled purge (`payment.cancelled-orders-purge-interval`, 5 min) |
 | Notification content | notification | 90 days (decided at planning); recipient address cleared on anonymisation | purge, AccountDeleted |
 | StockAdjustment, AuditEntry | catalog | Kept (attribution/audit, FR-002); operator id is pseudonymous | none |
 | Logs | platform | No PII or secrets in any log (Principle III); correlation id only | n/a |

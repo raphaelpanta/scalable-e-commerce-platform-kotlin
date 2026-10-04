@@ -106,13 +106,24 @@ class UseCaseConfiguration {
     fun checkoutResponseRenderer(json: JsonMapper): CheckoutResponseRenderer = CheckoutResponseRenderer(json)
 
     @Bean
+    @Suppress("LongParameterList") // the use case's own collaborators, injected one by one like every factory here
     fun placeOrder(
         ports: CheckoutPorts,
         store: OrderStore,
         idempotency: IdempotencyStore,
         responses: CheckoutResponseRenderer,
         clock: Clock,
-    ): PlaceOrder = PlaceOrder(ports, store, idempotency, responses, { OrderId(UUID.randomUUID()) }, clock)
+        properties: OrderProperties,
+    ): PlaceOrder =
+        PlaceOrder(
+            ports,
+            store,
+            idempotency,
+            responses,
+            { OrderId(UUID.randomUUID()) },
+            clock,
+            properties.paymentWindow,
+        )
 
     @Bean
     fun orderCommandHandlers(

@@ -88,3 +88,14 @@ Feature: Place an order and pay
     And the order has 2 payment attempts, the latest approved and the earlier ones voided
     And "Milk frother" has 4 units left in stock
     And the shopper has exactly 1 order
+
+  @slow
+  Scenario: A payment still pending when the payment window ends expires the order and releases the stock
+    Given a product "French press" priced at 32.00 with 3 units in stock
+    And the shopper has placed an order for "French press" while the payment provider is unreachable
+    And "French press" has 2 units left in stock
+    When the payment window of the order ends while its payment is still pending
+    Then the order is recorded as cancelled because the payment expired
+    And "French press" has 3 units left in stock
+    And every payment attempt of the order is voided
+    And the shopper has exactly 1 order
