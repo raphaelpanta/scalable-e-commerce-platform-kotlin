@@ -18,12 +18,12 @@ private const val MAX_GAP_SECONDS = 3600L
 
 /**
  * T122, T134 / FR-004: registering an email again while its account is unverified re-sends a fresh verification token
- * (only the newest one verifies) without touching the password; once verified, nothing is sent. Every answer is the
- * same success.
+ * (only the newest one verifies) and replaces the stored password hash with the latest registrant's (T173); once
+ * verified, nothing is sent and the password is kept. Every answer is the same success.
  */
 class RegistrationPropertySpec :
     FunSpec({
-        test("each registration of a still unverified email sends a fresh token, and only the newest verifies") {
+        test("each registration of a still unverified email sends a fresh token and takes the latest password") {
             checkAll(
                 PROPERTIES,
                 IdentityArbs.email,
@@ -43,7 +43,9 @@ class RegistrationPropertySpec :
                 val account =
                     harness.accounts.accounts.values
                         .single()
-                account.passwordHash?.value shouldBe "hash:${password}0"
+                val latest = "hash:$password${repeats - 1}"
+                account.passwordHash?.value shouldBe latest
+                account.version shouldBe repeats - 1L
                 account.status shouldBe AccountStatus.UNVERIFIED
                 val events = harness.events.registered
                 events shouldHaveSize repeats
@@ -62,6 +64,7 @@ class RegistrationPropertySpec :
                 register(Registration(address, password, null)).value()
                 harness.events.registered shouldHaveSize repeats
                 harness.accounts[account.id].status shouldBe AccountStatus.ACTIVE
+                harness.accounts[account.id].passwordHash?.value shouldBe latest
             }
         }
     })

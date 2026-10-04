@@ -7,6 +7,8 @@ import com.ecommerce.identity.domain.FieldError
 import com.ecommerce.identity.domain.IdentityError
 import com.ecommerce.identity.domain.NotificationChannel
 import com.ecommerce.identity.domain.NotificationPreference
+import com.ecommerce.identity.domain.PasswordHash
+import com.ecommerce.identity.domain.Pseudonym
 import com.ecommerce.identity.domain.Role
 import com.ecommerce.identity.domain.TokenPurpose
 import io.kotest.core.spec.style.FunSpec
@@ -17,6 +19,9 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotContain
 import java.time.Duration
+
+private const val LATEST = "Another-passphrase1"
+private const val SOURCE = "203.0.113.7"
 
 class RegistrationTest :
     FunSpec({
@@ -63,7 +68,7 @@ class RegistrationTest :
             harness.transactions.transactions shouldBe 0
         }
 
-        test("registering again while unverified re-sends a fresh token, keeps the password and answers the same") {
+        test("registering again while unverified re-sends a fresh token, takes the latest password, answers the same") {
             val harness = Harness()
             RegisterAccount(harness.store)(Registration(ADA, PASSWORD, "Ada")).value()
             val account =
@@ -71,10 +76,11 @@ class RegistrationTest :
                     .single()
             harness.clock.advance(Duration.ofHours(2))
 
-            RegisterAccount(harness.store)(Registration(" ADA@example.test", "Another-passphrase1", "Eve")).value()
+            RegisterAccount(harness.store)(Registration(" ADA@example.test", LATEST, "Eve")).value()
 
             harness.accounts.accounts.values
-                .single() shouldBe account
+                .single() shouldBe account.copy(passwordHash = PasswordHash("hash:$LATEST"), version = 1)
+            harness.accounts.lockedChanges shouldBe 1
             harness.events.registered shouldHaveSize 2
             val again = harness.events.registered.last()
             again.verificationToken shouldBe FakeSecrets.token(1)
@@ -89,6 +95,47 @@ class RegistrationTest :
             VerifyEmail(harness.store)(FakeSecrets.token(1).value).value()
             RegisterAccount(harness.store)(Registration(ADA, PASSWORD, null)).value()
             harness.events.registered shouldHaveSize 2
+        }
+
+        test("after registering twice, the verified account signs in with the latest password only") {
+            val harness = Harness()
+            RegisterAccount(harness.store)(Registration(ADA, PASSWORD, null)).value()
+            RegisterAccount(harness.store)(Registration(ADA, LATEST, null)).value()
+            VerifyEmail(harness.store)(FakeSecrets.token(1).value).value()
+            val signIn = SignIn(harness.store)
+
+            signIn(Credentials(ADA, PASSWORD, SOURCE)).error() shouldBe IdentityError.InvalidCredentials
+            signIn(Credentials(ADA, LATEST, SOURCE)).value()
+        }
+
+        test("a repeated registration whose account was verified, deleted or removed meanwhile changes nothing") {
+            val harness = Harness()
+            RegisterAccount(harness.store)(Registration(ADA, PASSWORD, null)).value()
+            val pending =
+                harness.accounts.accounts.values
+                    .single()
+            val stale =
+                object : AccountRepository by harness.accounts {
+                    override suspend fun findByEmail(email: Email): Account = pending
+                }
+            val store = harness.store.copy(accounts = stale)
+            val verified = pending.verify(NOW).value()
+            harness.accounts.store(verified)
+
+            RegisterAccount(store)(Registration(ADA, LATEST, null)).value()
+
+            harness.accounts[pending.id] shouldBe verified
+            val deleted = verified.anonymise(Pseudonym.of(pending.id), NOW).value()
+            harness.accounts.store(deleted)
+            RegisterAccount(store)(Registration(ADA, LATEST, null)).value()
+            harness.accounts[pending.id] shouldBe deleted
+            harness.accounts.accounts.remove(pending.id)
+            RegisterAccount(store)(Registration(ADA, LATEST, null)).value()
+            harness.accounts.accounts.values
+                .shouldBeEmpty()
+            harness.events.registered shouldHaveSize 1
+            harness.tokens.of(pending.id, TokenPurpose.EMAIL_VERIFICATION) shouldHaveSize 1
+            harness.transactions.transactions shouldBe 4
         }
 
         test("a registration that loses the race for its email creates nothing more") {

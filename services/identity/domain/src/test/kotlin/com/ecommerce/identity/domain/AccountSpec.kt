@@ -126,6 +126,23 @@ class AccountSpec :
             changed.rename(null).displayName.shouldBeNull()
         }
 
+        test("registering again replaces the hash only while unverified; verified and deleted accounts are kept") {
+            val pending = account(status = AccountStatus.UNVERIFIED).failedSignIn(NOW, ThrottlePolicy(1))
+
+            val replaced = pending.reregister(PasswordHash("latest"))
+
+            replaced shouldBe
+                pending.copy(
+                    passwordHash = PasswordHash("latest"),
+                    throttle = SignInThrottle.CLEAR,
+                    version = pending.version + 1,
+                )
+            val active = account()
+            active.reregister(PasswordHash("latest")) shouldBeSameInstanceAs active
+            val deleted = active.anonymise(Pseudonym.of(active.id), NOW).value()
+            deleted.reregister(PasswordHash("latest")) shouldBeSameInstanceAs deleted
+        }
+
         test("deletion anonymises: placeholder email, no hash, no name, roles and id kept, status deleted") {
             checkAll(arbAccountId, Arb.long(0L..1_000_000L)) { id, offset ->
                 val at = NOW.plusSeconds(offset)
