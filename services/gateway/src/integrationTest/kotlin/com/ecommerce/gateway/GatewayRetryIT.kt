@@ -140,6 +140,7 @@ class GatewayRetryIT(
         @Bean
         fun attemptCountingFilter(counter: AttemptCounter): GlobalFilter =
             object : GlobalFilter, Ordered {
+                @Suppress("ForbiddenVoid") // GlobalFilter's signature
                 override fun filter(
                     exchange: ServerWebExchange,
                     chain: GatewayFilterChain,
