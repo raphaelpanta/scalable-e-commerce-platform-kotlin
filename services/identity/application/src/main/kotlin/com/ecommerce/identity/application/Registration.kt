@@ -17,6 +17,7 @@ import com.ecommerce.identity.domain.NotificationPreference
 import com.ecommerce.identity.domain.OneTimeToken
 import com.ecommerce.identity.domain.OpaqueToken
 import com.ecommerce.identity.domain.Password
+import com.ecommerce.identity.domain.PasswordHash
 import com.ecommerce.identity.domain.RecipientSnapshot
 import com.ecommerce.identity.domain.TokenPurpose
 
@@ -39,9 +40,13 @@ private class ValidRegistration(
  * `registerAccount` (FR-004): creates an unverified shopper, its default preferences and a 24-hour verification
  * token, and publishes `AccountRegistered` with the token, in one transaction. An email whose account is still
  * unverified gets a fresh verification token (older ones stop working) and a new `AccountRegistered`, so a lost
- * message can be sent again; its password is not changed. An email of a verified account creates nothing. Every case
- * gets the same answer, so callers cannot tell them apart; the password is hashed in all of them so that the timing
- * does not tell either.
+ * message can be sent again, and its stored password hash is replaced with the latest registrant's
+ * ([Account.reregister], under the account's row lock): nobody can sign in to an unverified account, so whoever
+ * registered last and then verifies the email signs in with the password they chose, and an earlier registrant's
+ * password (possibly someone else's) never works. Other profile data (the display name) is kept. An email of a
+ * verified account creates and changes nothing, and neither does one whose account was verified or deleted while
+ * this request ran. Every case gets the same answer, so callers cannot tell them apart; the password is hashed in all
+ * of them so that the timing does not tell either.
  */
 class RegisterAccount(
     private val store: IdentityStore,
@@ -65,9 +70,22 @@ class RegisterAccount(
                 val account = Account.register(id, valid.email, hash, valid.displayName, store.clock.now())
                 store.transactions.inTransaction { create(account) }.bind()
             } else if (existing.status == AccountStatus.UNVERIFIED) {
-                store.transactions.inTransaction { announce(existing, store.preferenceOf(existing.id)) }.bind()
+                store.transactions.inTransaction { registerAgain(existing.id, hash) }.bind()
             }
         }
+
+    /** Replaces the password of the still unverified account [id] with [hash] and announces it again. */
+    private suspend fun registerAgain(
+        id: AccountId,
+        hash: PasswordHash,
+    ): Either<IdentityError, Unit> {
+        val account = store.accounts.changeLocked(id) { it.reregister(hash) } ?: return Unit.right()
+        return if (account.status == AccountStatus.UNVERIFIED) {
+            announce(account, store.preferenceOf(account.id))
+        } else {
+            Unit.right()
+        }
+    }
 
     private suspend fun create(account: Account): Either<IdentityError, Unit> {
         if (!store.accounts.insert(account)) return Unit.right()

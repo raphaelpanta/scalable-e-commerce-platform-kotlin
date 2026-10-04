@@ -102,6 +102,14 @@ data class Account(
     /** A new password: the old one stops working and the failure count is reset (FR-006). */
     fun changePassword(hash: PasswordHash): Account = next().copy(passwordHash = hash, throttle = SignInThrottle.CLEAR)
 
+    /**
+     * The email was registered again (FR-004): while the account is still `unverified` the latest registrant's
+     * password [hash] replaces the stored one and the failure count is reset, which is safe because nobody can sign
+     * in to an unverified account yet and only whoever verifies the email gets to use it. A verified or deleted
+     * account is returned unchanged, so a repeated registration never touches a credential that is in use.
+     */
+    fun reregister(hash: PasswordHash): Account = if (status == AccountStatus.UNVERIFIED) changePassword(hash) else this
+
     fun rename(displayName: DisplayName?): Account = next().copy(displayName = displayName)
 
     /** A failed sign-in at [now] under [policy]. */

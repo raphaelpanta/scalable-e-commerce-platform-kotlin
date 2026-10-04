@@ -368,7 +368,7 @@ class CartSpec :
                 }
             }
 
-            test("new products join with their anonymous snapshots under a fresh line id") {
+            test("new products join with their anonymous snapshots under a fresh line id, added at the merge") {
                 checkAll(arbCart, arbCart) { account, anonymous ->
                     val fresh = anonymous.lines.associate { it.productId to newLineId() }
                     val quotes =
@@ -381,8 +381,26 @@ class CartSpec :
 
                     merged.lines.take(account.lines.size) shouldBe account.lines
                     merged.lines.drop(account.lines.size) shouldBe
-                        anonymous.lines.map { it.copy(id = fresh.getValue(it.productId)) }
+                        anonymous.lines.map { it.copy(id = fresh.getValue(it.productId), addedAt = LATER) }
                 }
+            }
+
+            test("a late OrderPaid of an earlier order keeps merged-in lines and units (T183)") {
+                val paidAt = T0.plusSeconds(60)
+                val guestOnly = line(quantity = 2)
+                val held = line(quantity = 1)
+                val account = cartOf(listOf(held))
+                val anonymous = cartOf(listOf(guestOnly, line(held.productId, 2)))
+                val quotes = anonymous.productIds.associateWith { quote(it, available = Quantity.MAX) }
+
+                val merged = account.mergeFrom(anonymous, quotes, ::newLineId, LATER).cart
+
+                merged.lineFor(guestOnly.productId)?.addedAt shouldBe LATER
+                merged.lineFor(held.productId) shouldBe held.copy(quantity = quantity(3))
+                val ordered = listOf(OrderedItem(guestOnly.productId, 2), OrderedItem(held.productId, 1))
+                val after = merged.removeOrdered(ordered, LATER, paidAt)
+                after.lineFor(guestOnly.productId)?.quantity shouldBe quantity(2)
+                after.lineFor(held.productId)?.quantity shouldBe quantity(2)
             }
 
             test("withdrawn and unknown products are dropped and reported with 0 applied") {

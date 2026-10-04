@@ -133,10 +133,11 @@ class IdentityFlowsIT : IdentityIntegrationTest() {
     }
 
     @Test
-    fun `registering again while unverified re-sends a fresh verification token with the same answer (T134)`() {
+    fun `registering again while unverified re-sends a token and takes the latest password (T134, T173)`() {
         val email = freshEmail()
         post("$IDENTITY/accounts", mapOf("email" to email, "password" to PASSWORD)).json(ACCEPTED)
         val first = registeredEvent(email)
+        val firstHash = accountColumn(email, "password_hash").shouldNotBeNull()
 
         val again =
             post("$IDENTITY/accounts", mapOf("email" to email.uppercase(), "password" to NEW_PASSWORD)).json(ACCEPTED)
@@ -150,10 +151,12 @@ class IdentityFlowsIT : IdentityIntegrationTest() {
         val firstToken = first.payloadAs<Json>()["verificationToken"] as String
         val secondToken = second.payloadAs<Json>()["verificationToken"] as String
         secondToken shouldNotBe firstToken
+        accountColumn(email, "password_hash").shouldNotBeNull() shouldMatch ARGON2ID
+        accountColumn(email, "password_hash") shouldNotBe firstHash
         post("$IDENTITY/accounts/verify-email", mapOf("token" to firstToken)).expectProblem(ProblemType.VALIDATION)
         post("$IDENTITY/accounts/verify-email", mapOf("token" to secondToken)).expectStatus().isNoContent
-        signIn(email, NEW_PASSWORD).expectProblem(ProblemType.UNAUTHORIZED)
-        signIn(email, PASSWORD).expectStatus().isOk
+        signIn(email, PASSWORD).expectProblem(ProblemType.UNAUTHORIZED)
+        signIn(email, NEW_PASSWORD).expectStatus().isOk
     }
 
     @Test
