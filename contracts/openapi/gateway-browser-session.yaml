@@ -1,0 +1,479 @@
+openapi: 3.1.0
+info:
+  title: Gateway Browser Session
+  version: 1.0.0
+  summary: Cookie-based session and anonymous-cart behaviour the gateway adds for the browser storefront.
+  description: |
+    Contract of the gateway's browser-session capability (spec 005, FR-013, FR-014, FR-004; research
+    sections 2 and 3), consumed by the storefront. Everything here is ADDITIVE to the identity and
+    cart contracts of feature 004: without the request header `X-Browser-Session: cookie` (and
+    without a session cookie) every operation behaves exactly as in feature 004, so API clients that
+    use bearer tokens are unaffected.
+
+    Goal: no access or refresh token ever reaches page scripts. The gateway seals the tokens into
+    an HttpOnly cookie (AES-256-GCM, key `BROWSER_SESSION_KEY`, shared by all gateway replicas, so
+    the gateway stays stateless) and injects `Authorization: Bearer <access token>` on the way to
+    the services. The cookie value is opaque to every client and is never logged.
+
+    ## Cookie names (HTTPS and plain HTTP)
+
+    `__Host-` prefixed cookies require the `Secure` attribute and are only reliably accepted by
+    browsers over HTTPS. The gateway therefore chooses the cookie name per request:
+
+    | Request arrived over | Session cookie | Cart cookie | `Secure` |
+    | --- | --- | --- | --- |
+    | HTTPS (scheme `https` or `X-Forwarded-Proto: https`) | `__Host-session` | `__Host-cart` | yes |
+    | plain HTTP (local development on `http://localhost`) | `session` | `cart` | no |
+
+    All other attributes are identical for both names. The gateway accepts whichever of the two
+    names is present on a request and never sets both: when it sets one name it also deletes the
+    other. A request that carries both names is treated as an unsealable session (401
+    `unauthorized`, both cookies deleted). Everywhere below, "the session cookie" and "the cart
+    cookie" mean whichever name applies.
+
+    | Cookie | Attributes |
+    | --- | --- |
+    | session | `HttpOnly`; `Secure` (HTTPS only); `SameSite=Strict`; `Path=/`; no `Domain`; no `Max-Age` and no `Expires` (a browser-session cookie that ends with the browser) |
+    | cart | `HttpOnly`; `Secure` (HTTPS only); `SameSite=Lax`; `Path=/`; no `Domain`; `Max-Age=2592000` (30 days) |
+
+    A deleted cookie is sent as the same name with an empty value, `Max-Age=0` and the same
+    `Path`, `HttpOnly`, `SameSite` and `Secure` attributes.
+
+    ## Session rules
+
+    - Idle expiry: a session cookie whose `lastSeenAt` is older than 30 minutes is rejected with
+      401 `unauthorized` and deleted (FR-014). There is no "keep me signed in" option.
+    - Silent renewal: every response to a request that used a valid session cookie re-sets it with
+      a new `lastSeenAt` (any upstream status except where a rule below deletes it).
+    - Access token refresh: when the sealed access token has less than 60 seconds left the gateway
+      refreshes through identity before forwarding (the refresh token rotates there) and seals the
+      new pair into the response cookie. A refresh refused by identity ends the session: 401
+      `unauthorized` and cookie deletion.
+    - A 401 from the platform to a request that used the cookie (token rejected) also deletes it.
+      The deleting response makes an immediate retry anonymous, so the storefront treats 401 as
+      "signed out" and may retry public reads once.
+    - The cookie is not processed (not unsealed, not idle-checked, not injected, left untouched) on
+      the anonymous credential operations `registerAccount`, `verifyEmail`, `requestPasswordReset`
+      and `completePasswordReset`, on the storefront catch-all route and on the telemetry routes
+      (which strip `Cookie`). On `signIn` an existing cookie is ignored and replaced on success.
+    - Cross-site protection (FR-014): `SameSite=Strict` plus, for every non-GET/HEAD request that
+      carries a session cookie, `Sec-Fetch-Site` must be `same-origin` or `none` and `Origin`, when
+      present, must equal the scheme, host and port the request was addressed to; otherwise 403
+      `forbidden`. No CSRF token is needed.
+    - A request carrying both the session cookie and its own `Authorization` header is refused
+      with 400 `validation`; API clients keep using bearer tokens exactly as before.
+
+    Errors use RFC 9457 `application/problem+json` with the platform `Problem` shape, a `type` of
+    `https://ecommerce.example/problems/<slug>`, `X-Correlation-Id` echoed, and
+    `Cache-Control: no-store`.
+servers:
+  - url: http://localhost:8080
+    description: Local platform entry point (API gateway); the storefront is served from the same origin.
+tags:
+  - name: Browser session
+    description: Sign-in, renewal and sign-out in cookie mode.
+  - name: Cookie-authenticated requests
+    description: Behaviour of every other route when a session cookie is present.
+  - name: Anonymous cart
+    description: Cart token mirrored into a persistent HttpOnly cookie.
+security:
+  - sessionCookie: []
+paths:
+  /api/v1/identity/sessions:
+    post:
+      operationId: browserSignIn
+      tags: [Browser session]
+      summary: Sign in and receive a session cookie instead of tokens
+      description: |
+        Additive to identity `signIn`. Anonymous. With `X-Browser-Session: cookie` the gateway
+        forwards the request unchanged; on a 200 from identity it replaces the token body by the
+        session summary below and sets the session cookie (sealed access token, refresh token,
+        `lastSeenAt`, account id, roles). The tokens are never in the body. Without the header the
+        identity contract applies unchanged (token pair in the body, no cookie).
+
+        Every non-200 identity answer (401 invalid credentials, 403 unverified, 422, 429) is passed
+        through unchanged and sets no cookie. The request body is identity's `SignInRequest`.
+        Rate limit tier `auth`.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/BrowserSessionHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignInRequest' }
+            example: { email: ana@example.com, password: "S3cure-passphrase!" }
+      responses:
+        '200':
+          description: Signed in. The session cookie is set; the body carries no token.
+          headers:
+            X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+            Set-Cookie: { $ref: '#/components/headers/SetSessionCookie' }
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionSummary' }
+              example: { expiresAt: '2026-10-04T10:30:00Z', roles: [shopper] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/IdentityPassThrough' }
+        '403': { $ref: '#/components/responses/IdentityPassThrough' }
+        '422': { $ref: '#/components/responses/IdentityPassThrough' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/identity/sessions/refresh:
+    post:
+      operationId: browserRefreshSession
+      tags: [Browser session]
+      summary: Renew the session explicitly (cookie mode)
+      description: |
+        Additive to identity `refreshSession`. With `X-Browser-Session: cookie` the refresh token
+        comes from the sealed session cookie; the request needs no body and a body, if sent, is
+        ignored (the page never holds a refresh token). The gateway refreshes through identity (the
+        refresh token rotates), re-seals the cookie and answers with the session summary. The
+        storefront rarely needs this call because renewal is silent on every request; it exists
+        to extend a session without another API call. Without the header the identity contract
+        applies unchanged. Rate limit tier `auth`.
+
+        Missing, unsealable or idle-expired cookie: 401 `unauthorized` and cookie deletion.
+        A refresh refused by identity: 401 `unauthorized` and cookie deletion.
+      parameters:
+        - $ref: '#/components/parameters/BrowserSessionHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Session renewed; the cookie is re-set; the body carries no token.
+          headers:
+            X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+            Set-Cookie: { $ref: '#/components/headers/SetSessionCookie' }
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionSummary' }
+        '400': { $ref: '#/components/responses/ValidationBothCredentials' }
+        '401': { $ref: '#/components/responses/SessionUnauthorized' }
+        '403': { $ref: '#/components/responses/CrossSiteForbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/identity/sessions/current:
+    delete:
+      operationId: browserSignOut
+      tags: [Browser session]
+      summary: Sign out and delete the session cookie
+      description: |
+        Additive to identity `signOut`. With the session cookie the gateway forwards the
+        revocation of the sealed refresh token to identity and deletes the cookie, answering 204.
+        Sign-out is idempotent from the browser's point of view: an unsealable or idle-expired
+        cookie is deleted and answered 204 as well (the revocation to identity is then best
+        effort). Without a cookie the identity contract applies unchanged (bearer token required).
+        The cross-site check applies (DELETE is non-GET).
+      parameters:
+        - $ref: '#/components/parameters/BrowserSessionHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '204':
+          description: Session revoked; the cookie is deleted.
+          headers:
+            X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+            Set-Cookie: { $ref: '#/components/headers/DeleteSessionCookie' }
+            Cache-Control: { $ref: '#/components/headers/NoStore' }
+        '400': { $ref: '#/components/responses/ValidationBothCredentials' }
+        '403': { $ref: '#/components/responses/CrossSiteForbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/identity/accounts/me:
+    get:
+      operationId: browserCookieRequest
+      tags: [Cookie-authenticated requests]
+      summary: Representative cookie-authenticated request (the page-load session probe)
+      description: |
+        Representative of EVERY route that requires or accepts a bearer token (identity profile
+        and addresses, orders, payments, notifications, catalog operator calls, cart): when the
+        session cookie is present the gateway unseals it, enforces the idle and cross-site rules
+        above, injects `Authorization: Bearer <access token>` before authentication and role checks
+        run, forwards, and re-sets the cookie. The upstream response (status, body, problem types)
+        is the one documented by the owning contract of feature 004, unchanged.
+
+        This GET is also the storefront's source of truth on page load: 200 means signed in, 401
+        means anonymous. Any other route simply inherits the behaviour; the documented
+        `getOwnProfile` contract defines the 200 body.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The upstream response, with the cookie re-set (silent renewal).
+          headers:
+            X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+            Set-Cookie: { $ref: '#/components/headers/SetSessionCookie' }
+          content:
+            application/json:
+              schema:
+                description: Identity `Account` (feature 004 `getOwnProfile`); unchanged.
+                type: object
+        '400': { $ref: '#/components/responses/ValidationBothCredentials' }
+        '401': { $ref: '#/components/responses/SessionUnauthorized' }
+        '403': { $ref: '#/components/responses/CrossSiteForbidden' }
+  /api/v1/cart:
+    get:
+      operationId: browserGetCart
+      tags: [Anonymous cart]
+      summary: Read the cart with cookie injection (cart GET and DELETE)
+      description: |
+        Additive to cart `getCart` and `clearCart`. With `X-Browser-Session: cookie` and no explicit
+        `X-Cart-Token`, the gateway injects `X-Cart-Token` from the cart cookie when present. When
+        a session cookie is present the account cart is addressed (the bearer wins at the cart
+        service, which ignores the token). The cart cookie is re-set only when the upstream
+        response carries `X-Cart-Token`; the response header is removed from browser responses.
+        Responses are the cart contract's, unchanged.
+      parameters:
+        - $ref: '#/components/parameters/BrowserSessionHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The cart (cart contract `Cart`), without an `X-Cart-Token` response header.
+          headers:
+            X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+          content:
+            application/json:
+              schema:
+                $ref: '../../../004-ecommerce-platform-mvp/contracts/openapi/cart.yaml#/components/schemas/Cart'
+        '400': { $ref: '#/components/responses/ValidationBothCredentials' }
+        '401': { $ref: '#/components/responses/SessionUnauthorized' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/cart/lines:
+    post:
+      operationId: browserAddCartLine
+      tags: [Anonymous cart]
+      summary: Add a cart line; an anonymous cart is created and its token mirrored into the cart cookie
+      description: |
+        Additive to cart `addCartLine` (and, for the same cookie rules, `updateCartLineQuantity`
+        on `/api/v1/cart/lines/{lineId}` PUT and `removeCartLine` on the same path DELETE).
+        Anonymous with no cart yet: the cart service answers with an `X-Cart-Token` response header
+        on the first write; the gateway sets the cart cookie from it (value sealed with
+        `BROWSER_SESSION_KEY`, `Max-Age` 30 days) and removes the header from the response. Later
+        cart requests that carry `X-Browser-Session: cookie` and no `X-Cart-Token` get the header
+        injected from the cookie, so the cart survives reloads and browser restarts on the same
+        device (FR-004). The cross-site check applies (non-GET).
+      parameters:
+        - $ref: '#/components/parameters/BrowserSessionHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              description: Cart contract `AddLineRequest`; unchanged.
+              type: object
+      responses:
+        '201':
+          description: The cart; the cart cookie is set when this call created an anonymous cart.
+          headers:
+            X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+            Set-Cookie: { $ref: '#/components/headers/SetCartCookie' }
+          content:
+            application/json:
+              schema:
+                $ref: '../../../004-ecommerce-platform-mvp/contracts/openapi/cart.yaml#/components/schemas/Cart'
+        '400': { $ref: '#/components/responses/ValidationBothCredentials' }
+        '401': { $ref: '#/components/responses/SessionUnauthorized' }
+        '403': { $ref: '#/components/responses/CrossSiteForbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/v1/cart/merge:
+    post:
+      operationId: browserMergeCart
+      tags: [Anonymous cart]
+      summary: Merge the anonymous cart after sign-in; the cart cookie is deleted
+      description: |
+        Additive to cart `mergeCart`. The storefront calls this right after a cookie-mode sign-in
+        without any header or token of its own: the gateway injects the bearer from the session
+        cookie and `X-Cart-Token` from the cart cookie. On a 200 from the cart service the gateway
+        deletes the cart cookie (the anonymous cart and its token are consumed). On any other
+        status the cookie is kept (a 409 merge in progress or a failure can be retried; a 404
+        means the token was already consumed and the cookie is deleted as well). Without a cart
+        cookie and without `X-Cart-Token` the cart contract's 400 applies.
+      parameters:
+        - $ref: '#/components/parameters/BrowserSessionHeader'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The merge result (cart contract `MergeResult`); the cart cookie is deleted.
+          headers:
+            X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+            Set-Cookie: { $ref: '#/components/headers/DeleteCartCookie' }
+          content:
+            application/json:
+              schema:
+                $ref: '../../../004-ecommerce-platform-mvp/contracts/openapi/cart.yaml#/components/schemas/MergeResult'
+        '400': { $ref: '#/components/responses/ValidationBothCredentials' }
+        '401': { $ref: '#/components/responses/SessionUnauthorized' }
+        '403': { $ref: '#/components/responses/CrossSiteForbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-session
+      description: |
+        Sealed session cookie set by `browserSignIn`. The name is `__Host-session` over HTTPS and
+        `session` over plain HTTP (see the cookie table in the API description). Browsers send it
+        automatically; page scripts cannot read it (HttpOnly). Bearer tokens remain the credential
+        for API clients and cannot be combined with the cookie.
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: Optional correlation identifier; a malformed value is replaced by the gateway.
+      schema: { type: string, maxLength: 64 }
+    BrowserSessionHeader:
+      name: X-Browser-Session
+      in: header
+      required: false
+      description: |
+        `cookie` selects browser mode: sealed cookies instead of tokens in bodies, and the cart
+        cookie mirrors `X-Cart-Token`. Any other value is ignored (identity and cart contracts of
+        feature 004 apply). The storefront sends it on every request.
+      schema: { type: string, enum: [cookie] }
+  headers:
+    CorrelationId:
+      description: Correlation identifier echoed from the request, or generated when absent or malformed.
+      schema: { type: string }
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      schema: { type: integer, minimum: 0 }
+    NoStore:
+      description: Always `no-store` on responses that carry or delete a session cookie.
+      schema: { type: string, enum: [no-store] }
+    SetSessionCookie:
+      description: |
+        Sets (or renews) the sealed session cookie. HTTPS: `__Host-session=<sealed>; HttpOnly;
+        Secure; SameSite=Strict; Path=/`. Plain HTTP: `session=<sealed>; HttpOnly;
+        SameSite=Strict; Path=/`. No `Domain`, no `Max-Age`, no `Expires`. When one name is set
+        the other is deleted in the same response.
+      schema: { type: string }
+    DeleteSessionCookie:
+      description: |
+        Deletes the session cookie: `__Host-session=; Max-Age=0; HttpOnly; Secure; SameSite=Strict;
+        Path=/` over HTTPS, `session=; Max-Age=0; HttpOnly; SameSite=Strict; Path=/` over HTTP.
+      schema: { type: string }
+    SetCartCookie:
+      description: |
+        Sets the sealed cart cookie when the upstream response carried `X-Cart-Token`. HTTPS:
+        `__Host-cart=<sealed>; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000`. Plain
+        HTTP: `cart=<sealed>; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`. No `Domain`.
+      schema: { type: string }
+    DeleteCartCookie:
+      description: |
+        Deletes the cart cookie: `__Host-cart=; Max-Age=0; HttpOnly; Secure; SameSite=Lax; Path=/`
+        over HTTPS, `cart=; Max-Age=0; HttpOnly; SameSite=Lax; Path=/` over HTTP.
+      schema: { type: string }
+  responses:
+    BadRequest:
+      description: Malformed request (400).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ValidationBothCredentials:
+      description: |
+        400 `validation`: the request carries both a session cookie and its own `Authorization`
+        header. Nothing is forwarded and no cookie is changed.
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: https://ecommerce.example/problems/validation
+            title: Bad request
+            status: 400
+            detail: A request must carry either the session cookie or an Authorization header, not both.
+            instance: /api/v1/identity/accounts/me
+    SessionUnauthorized:
+      description: |
+        401 `unauthorized`: the session cookie is idle for more than 30 minutes, cannot be unsealed
+        (tampered, wrong key, both cookie names present) or its refresh was refused. The response
+        deletes the cookie; the next request is anonymous.
+      headers:
+        X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+        Set-Cookie: { $ref: '#/components/headers/DeleteSessionCookie' }
+        Cache-Control: { $ref: '#/components/headers/NoStore' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: https://ecommerce.example/problems/unauthorized
+            title: Unauthorized
+            status: 401
+            detail: The session has expired. Sign in again.
+            instance: /api/v1/identity/accounts/me
+    CrossSiteForbidden:
+      description: |
+        403 `forbidden`: a non-GET request carrying the session cookie whose `Sec-Fetch-Site` is not
+        `same-origin` or `none`, or whose `Origin` does not match the request's own origin. Nothing
+        is forwarded; the cookie is left unchanged.
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example:
+            type: https://ecommerce.example/problems/forbidden
+            title: Forbidden
+            status: 403
+            detail: Cross-site requests are not allowed.
+            instance: /api/v1/cart/lines
+    IdentityPassThrough:
+      description: Identity's own answer (401 invalid credentials, 403 unverified account, 422 validation) passed through unchanged; no cookie is set.
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    TooManyRequests:
+      description: Throttled (429) by the gateway tier or by identity; `Retry-After` in seconds.
+      headers:
+        X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'https://ecommerce.example/problems/throttled', title: Too many requests, status: 429, detail: Too many requests. Try again later., instance: /api/v1/identity/sessions }
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem details (same shape as every platform service).
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string }
+              message: { type: string }
+    SignInRequest:
+      type: object
+      description: Identity `SignInRequest`, unchanged.
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+    SessionSummary:
+      type: object
+      description: |
+        Tokenless summary of the browser session. It never contains an access token, a refresh
+        token, an account id or an email address.
+      required: [expiresAt, roles]
+      properties:
+        expiresAt:
+          type: string
+          format: date-time
+          description: |
+            UTC instant at which the session ends if no further request is made (`lastSeenAt` plus
+            30 minutes). Every later response renews the cookie and moves it forward.
+        roles:
+          type: array
+          items: { type: string, enum: [shopper, operator] }
+          description: Roles of the account, used by the storefront only to show or hide console entry points; services decide authorisation.

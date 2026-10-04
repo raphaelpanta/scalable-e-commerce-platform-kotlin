@@ -32,7 +32,7 @@ services/
     application/                # use cases and ports, unit tests only -> id("kotlin-application")
     infrastructure/             # Spring Boot WebFlux app, four test layers -> id("kotlin-service")
 platform/docker/Dockerfile      # shared multi-stage Dockerfile used by dockerImage
-frontend/                       # reserved for the web storefront (see "Verify command")
+frontend/                       # the web storefront npm package (see "Verify command" and frontend/README.md)
 docs/                           # this guide, ci-cd.md, harness.md
 .github/workflows/verify.yml    # runs ./gradlew -q verify on pushes to main and, via pr-gate.yml, on pull requests
 ```
@@ -99,6 +99,14 @@ Expected result: exit code 0 and no output. `verify` runs, in order of dependenc
 5. The frontend `lint` and `test` npm scripts (`frontendCheck`), once `frontend/package.json` exists. The npm
    executable defaults to `npm` and can be overridden with `-PnpmExecutable=/path/to/npm`.
 
+The storefront package (`frontend/`, Node 24, dependencies pinned in `package-lock.json`) needs `npm install`
+once per clone; `frontendLint` runs Prettier, ESLint (`--max-warnings 0`), `tsc --noEmit` and the freshness check
+of the generated API types, `frontendTest` the Vitest suite. Both scripts generate the ignored
+`frontend/src/api/generated/` directory when it is missing, so no manual step precedes `verify`. When `npm` is not
+on the Gradle daemon's PATH (a version manager such as nvm or fnm that only your interactive shell initialises),
+point the build at it: `./gradlew -q verify -PnpmExecutable=$(command -v npm)`. `./gradlew -q frontendCheck` runs
+just the two frontend tasks.
+
 Offline: after one online run, `./gradlew -q --offline verify` works from the local caches. With the build
 cache and configuration cache enabled (`gradle.properties`), an unchanged re-run finishes in well under two
 minutes.
@@ -143,6 +151,11 @@ the module directory (`../../../contracts/openapi/<ctx>.yaml`).
 
 Pact JVM consumer and provider tests share one source set, `src/contractTest/kotlin`, and two tasks of the `pact`
 convention (applied by `kotlin-boot-app`, hence by `kotlin-service`):
+
+The storefront is a JavaScript consumer: `npm --prefix frontend run pact` writes its pacts
+(`build/pacts/storefront-<provider>.json`, Pact JS) into the same root folder, so run it before `contractVerify`
+whenever the storefront's edges changed (`npm --prefix frontend run pact && ./gradlew -q contractVerify`). The
+providers verify it like every other pact; a missing storefront pact is ignored (`@IgnoreNoPactsToVerify`).
 
 1. `contractTest` runs every test except those tagged `provider`: the consumer tests. They write their pact files
    (`<consumer>-<provider>.json`) to the repository root `build/pacts`, one folder shared by every module (system

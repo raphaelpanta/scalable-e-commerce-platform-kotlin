@@ -1,0 +1,282 @@
+openapi: 3.1.0
+info:
+  title: Browser Telemetry Intake
+  version: 1.0.0
+  summary: Anonymous, throttled OTLP/HTTP JSON pass-through from the storefront to the OpenTelemetry Collector.
+  description: |
+    Gateway route contract for browser telemetry (spec 005, FR-031, FR-032; research section 4).
+    New in feature 005 and additive: nothing in feature 004 changes. The storefront's OpenTelemetry
+    web SDK exports traces and client-side error logs to the two operations below; the gateway
+    forwards them to the collector's OTLP/HTTP receiver, so browser spans, the gateway access line
+    and every service line join on `traceparent` and `correlation.id` (SC-011).
+
+    ## Gateway behaviour
+
+    | Aspect | Behaviour |
+    | --- | --- |
+    | Auth | Anonymous. No token or cookie is required or read |
+    | Methods | `POST` only. Any other method on these paths is "no route": 404 `not-found` (deny by default) |
+    | Rate limit | Tier `browse` (600 requests per minute), charged per source address; 429 `throttled` with `Retry-After` |
+    | Body limit | 256 KiB of request body as received (compressed bytes when `Content-Encoding: gzip`), stricter than the 1 MiB default: 413 `payload-too-large` before anything is forwarded |
+    | Headers stripped before forwarding | `Cookie`, `Authorization`, and the client-supplied identity headers the gateway strips on every route |
+    | Forwarded | `Content-Type`, `Content-Encoding`, `X-Correlation-Id`, `traceparent`, `tracestate` |
+    | Prefix rewrite | `/api/v1/telemetry/v1/traces` to the collector's `/v1/traces`; `/api/v1/telemetry/v1/logs` to `/v1/logs` (StripPrefix of `/api/v1/telemetry`) at `OTEL_COLLECTOR_URL` (Compose: `http://otel-collector:4318`) |
+    | Collector down | The collector belongs to the `observability` profile. When it is not running the route answers 503 `unavailable`; no retry by the gateway |
+    | Collector answers | 200 with the collector's body (`{}` or `{"partialSuccess": {...}}`) passed through; a collector 4xx (malformed OTLP) is passed through with the collector's own body |
+
+    ## Client obligations (storefront)
+
+    Telemetry is best effort: the storefront drops a batch silently on any non-2xx answer or network
+    failure, never retries in a loop, never blocks a page on it and never shows it to the shopper
+    (FR-032). It honours `Retry-After` by pausing its exporter.
+
+    ## Attribute allow-list and forbidden list (FR-032, research section 4)
+
+    The storefront `telemetry` module owns the only exporter and applies the allow-list before
+    export; the collector applies a second layer (an `attributes` processor deleting the forbidden
+    URL and user keys and a `redaction` processor on service `storefront`). A payload that carries
+    a forbidden attribute is a defect of the sender; the collector drops the attribute, the gateway
+    does not inspect the body.
+
+    Allowed attributes:
+
+    | Scope | Attribute | Content |
+    | --- | --- | --- |
+    | Resource | `service.name` | always `storefront` |
+    | Resource | `service.version` | build version |
+    | Resource | `session.id` | random UUID kept in `sessionStorage`, never a credential, never related to the session cookie |
+    | Resource | `correlation.id` | UUID of the page view, renewed per user action; equals the `X-Correlation-Id` sent on API requests |
+    | Span / log | `http.route` | route template only, for example `/products/:id`, never a concrete URL |
+    | Span / log | `http.request.method`, `http.response.status_code` | method and status of platform calls |
+    | Span / log | `page.route` | route template of the current page |
+    | Span / log | `interaction.kind` | `click`, `submit`, `navigate`, `keypress-enter` and similar kinds, never values |
+    | Span / log | `element.role`, `element.id` | ARIA role and the developer-assigned stable id of the element, never its text |
+    | Span / log | `error.type` | exception class or problem `type` slug, never the message |
+    | Log | `body` | a stable event name such as `client.error`, never an exception message or free text |
+    | Span | durations and timestamps | page-load, fetch and interaction timings (span start and end) |
+
+    Forbidden (must never be exported; also deleted or redacted by the collector where marked *):
+
+    | Forbidden | Examples |
+    | --- | --- |
+    | Concrete URLs and query strings | `http.url`*, `http.target`*, `url.full`*, `url.query`*, `url.path` with real ids, any query string |
+    | User and account identity | `user.*`*, `enduser.*`*, account id, email, display name, phone, address fields |
+    | Credentials | tokens, cookies, `Authorization`, cart token, idempotency key, password reset or verification tokens |
+    | Typed content | form values, search terms, free text, order or product names typed or shown, exception messages and stack traces |
+
+    OTLP encoding: OTLP/HTTP with JSON encoding as defined by the OpenTelemetry Protocol
+    specification ("OTLP/HTTP", JSON Protobuf encoding, `Content-Type: application/json`). The
+    schema is not repeated here; protobuf encoding is not accepted by this route.
+servers:
+  - url: http://localhost:8080
+    description: Local platform entry point (API gateway)
+tags:
+  - name: Telemetry
+security: []
+paths:
+  /api/v1/telemetry/v1/traces:
+    post:
+      operationId: exportBrowserTraces
+      tags: [Telemetry]
+      summary: Export a batch of browser spans (OTLP ExportTraceServiceRequest, JSON)
+      description: |
+        Anonymous. Forwarded to the collector's `/v1/traces`. Request body is an OTLP/HTTP JSON
+        `ExportTraceServiceRequest` obeying the attribute rules in the API description. Maximum
+        256 KiB. Rate limit tier `browse`.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/Traceparent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtlpExportRequest'
+            examples:
+              productPageView:
+                summary: One span for a product page view
+                value:
+                  resourceSpans:
+                    - resource:
+                        attributes:
+                          - { key: service.name, value: { stringValue: storefront } }
+                          - { key: service.version, value: { stringValue: 0.1.0 } }
+                          - { key: session.id, value: { stringValue: 7b8e1a54-2f0c-4d6a-9a3e-5c1f0d2b8e77 } }
+                          - { key: correlation.id, value: { stringValue: 3f1c9d52-8a14-4be0-b7f6-0e2d5a9c4c18 } }
+                      scopeSpans:
+                        - scope: { name: '@opentelemetry/instrumentation-document-load' }
+                          spans:
+                            - traceId: 5b8efff798038103d269b633813fc60c
+                              spanId: eee19b7ec3c1b174
+                              name: documentFetch
+                              kind: 1
+                              startTimeUnixNano: '1790000000000000000'
+                              endTimeUnixNano: '1790000000180000000'
+                              attributes:
+                                - { key: http.route, value: { stringValue: '/products/:id' } }
+                                - { key: page.route, value: { stringValue: '/products/:id' } }
+                                - { key: http.response.status_code, value: { intValue: '200' } }
+      responses:
+        '200': { $ref: '#/components/responses/Exported' }
+        '400': { $ref: '#/components/responses/CollectorRejected' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '429': { $ref: '#/components/responses/Throttled' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /api/v1/telemetry/v1/logs:
+    post:
+      operationId: exportBrowserLogs
+      tags: [Telemetry]
+      summary: Export a batch of browser log records, used for client-side errors (OTLP ExportLogsServiceRequest, JSON)
+      description: |
+        Anonymous. Forwarded to the collector's `/v1/logs`. Request body is an OTLP/HTTP JSON
+        `ExportLogsServiceRequest` obeying the attribute rules in the API description; the log
+        `body` is a stable event name, never a message typed or thrown with user content. Maximum
+        256 KiB. Rate limit tier `browse`.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/Traceparent'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtlpExportRequest'
+            examples:
+              clientError:
+                summary: One client-side error record
+                value:
+                  resourceLogs:
+                    - resource:
+                        attributes:
+                          - { key: service.name, value: { stringValue: storefront } }
+                          - { key: session.id, value: { stringValue: 7b8e1a54-2f0c-4d6a-9a3e-5c1f0d2b8e77 } }
+                          - { key: correlation.id, value: { stringValue: 3f1c9d52-8a14-4be0-b7f6-0e2d5a9c4c18 } }
+                      scopeLogs:
+                        - scope: { name: storefront.errors }
+                          logRecords:
+                            - timeUnixNano: '1790000001000000000'
+                              severityText: ERROR
+                              body: { stringValue: client.error }
+                              attributes:
+                                - { key: error.type, value: { stringValue: https://ecommerce.example/problems/insufficient-stock } }
+                                - { key: http.route, value: { stringValue: '/checkout' } }
+      responses:
+        '200': { $ref: '#/components/responses/Exported' }
+        '400': { $ref: '#/components/responses/CollectorRejected' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '429': { $ref: '#/components/responses/Throttled' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+components:
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: Optional correlation identifier; a malformed value is replaced by the gateway.
+      schema: { type: string, maxLength: 64 }
+    Traceparent:
+      name: traceparent
+      in: header
+      required: false
+      description: W3C trace context of the page view, forwarded to the collector.
+      schema: { type: string }
+  headers:
+    CorrelationId:
+      description: Correlation identifier echoed from the request, or generated when absent or malformed.
+      schema: { type: string }
+    RetryAfter:
+      description: Seconds to wait before retrying.
+      schema: { type: integer, minimum: 0 }
+  responses:
+    Exported:
+      description: |
+        Accepted by the collector. The body is the collector's OTLP response: `{}` when everything
+        was accepted, or `{"partialSuccess": {"rejectedSpans": n, "errorMessage": "..."}}`
+        (`rejectedLogRecords` for logs) when some items were rejected. Clients ignore it.
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OtlpExportResponse' }
+          examples:
+            empty: { value: {} }
+            partial: { value: { partialSuccess: { rejectedSpans: 2, errorMessage: attribute not allowed } } }
+    CollectorRejected:
+      description: The collector rejected a malformed OTLP document (400). The body is the collector's own, not problem+json. The storefront drops the batch.
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/json:
+          schema: { type: object }
+    NotFound:
+      description: Any method other than POST on these paths, or a path below `/api/v1/telemetry/` other than the two operations (404 `not-found`, deny by default).
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'https://ecommerce.example/problems/not-found', title: Not found, status: 404, instance: /api/v1/telemetry/v1/metrics }
+    PayloadTooLarge:
+      description: Body larger than 256 KiB (413 `payload-too-large`). Nothing is forwarded.
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'https://ecommerce.example/problems/payload-too-large', title: Payload too large, status: 413, detail: Telemetry batches are limited to 256 KiB., instance: /api/v1/telemetry/v1/traces }
+    Throttled:
+      description: Source address over the `browse` tier budget (429 `throttled`). The storefront pauses exporting for `Retry-After` seconds and drops the batch.
+      headers:
+        X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' }
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'https://ecommerce.example/problems/throttled', title: Too many requests, status: 429, detail: Too many requests. Try again later., instance: /api/v1/telemetry/v1/traces }
+    Unavailable:
+      description: The collector is not running (the `observability` profile is down) or does not answer in time (503 `unavailable`). The storefront drops the batch silently.
+      headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+          example: { type: 'https://ecommerce.example/problems/unavailable', title: Service unavailable, status: 503, detail: Telemetry intake is not available., instance: /api/v1/telemetry/v1/traces }
+  schemas:
+    Problem:
+      type: object
+      description: RFC 9457 problem details (same shape as every platform service).
+      required: [type, title, status]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        errors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string }
+              message: { type: string }
+    OtlpExportRequest:
+      type: object
+      description: |
+        OTLP/HTTP JSON `ExportTraceServiceRequest` (member `resourceSpans`) or
+        `ExportLogsServiceRequest` (member `resourceLogs`), exactly as defined by the OpenTelemetry
+        Protocol specification, JSON encoding. Not inlined here; the gateway does not validate the
+        document, the collector does. Attribute rules: see the API description.
+      additionalProperties: true
+      properties:
+        resourceSpans: { type: array, items: { type: object } }
+        resourceLogs: { type: array, items: { type: object } }
+    OtlpExportResponse:
+      type: object
+      description: OTLP `ExportTraceServiceResponse` / `ExportLogsServiceResponse` in JSON as returned by the collector; `{}` on full success.
+      additionalProperties: true
+      properties:
+        partialSuccess:
+          type: object
+          additionalProperties: true
+          properties:
+            rejectedSpans: { type: [string, integer] }
+            rejectedLogRecords: { type: [string, integer] }
+            errorMessage: { type: string }

@@ -1,0 +1,5 @@
+# Build outputs and generated code of the storefront package
+node_modules/
+dist/
+build/
+src/api/generated/

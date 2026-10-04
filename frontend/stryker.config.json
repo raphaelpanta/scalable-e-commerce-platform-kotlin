@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.config.ts"
+  },
+  "mutate": ["src/domain/**/*.ts", "src/app/**/*.ts", "src/telemetry/**/*.ts"],
+  "thresholds": { "high": 90, "low": 80, "break": 80 },
+  "incremental": true,
+  "incrementalFile": "build/stryker-incremental.json",
+  "reporters": ["clear-text"],
+  "clearTextReporter": {
+    "allowColor": false,
+    "allowEmojis": false,
+    "logTests": false,
+    "reportTests": false,
+    "reportMutants": true,
+    "reportScoreTable": false,
+    "skipFull": true
+  },
+  "logLevel": "warn",
+  "fileLogLevel": "off",
+  "tempDirName": "build/stryker-tmp",
+  "cleanTempDir": true,
+  "ignoreStatic": true,
+  "disableTypeChecks": true,
+  "allowConsoleColors": false
+}
