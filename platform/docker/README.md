@@ -70,11 +70,12 @@ Base images are pinned by digest; refresh them deliberately.
 
 ## Runtime settings
 
-- `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=50 -XX:MaxDirectMemorySize=128m -Dnetworkaddress.cache.ttl=5`: heap sized to
-  half the container memory limit (the other half is the JVM's off-heap memory: metaspace, code cache, thread stacks,
-  Netty buffers; 75 % of 640 MiB was OOM-killed by the kernel under load), Netty's pooled direct buffers capped at
-  128 MiB (they default to the heap size; uncapped, catalog and cart were OOM-killed at 768 MiB under 1,000 browsing
-  users) and a 5 s JVM DNS cache so that DNS-based discovery notices added and removed replicas quickly.
+- `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=40 -XX:MaxDirectMemorySize=128m -Dnetworkaddress.cache.ttl=5` and
+  `MALLOC_ARENA_MAX=2`: heap sized to 40 % of the container memory limit (307 MiB of Compose's 768m), Netty's pooled
+  direct buffers capped at 128 MiB (they default to the heap size) and two glibc malloc arenas, because a service needs
+  300 to 400 MB besides its heap (metaspace and code cache about 160 MB, malloc'ed Netty buffers, arenas, threads). With
+  a 75 % heap of 640 MiB, then a 50 % heap of 768 MiB, the kernel OOM-killed identity, catalog and cart under the
+  acceptance and performance suites (2026-10-03). Plus a 5 s JVM DNS cache so that DNS-based discovery notices added and removed replicas quickly.
 - `HEALTHCHECK` probes `GET /actuator/health/readiness` on port 8081 (bash `/dev/tcp`, the JRE image has no curl) and
   expects `"status":"UP"`. Compose declares the same check (`x-app` in `platform/compose/docker-compose.yml`) and uses it for
   `depends_on: condition: service_healthy` and `docker compose ps`; the CI start-and-health step

@@ -136,26 +136,27 @@ verification mail within seconds.
 ## Recorded results
 
 Machine for every row: macOS host, Podman 6.0.2 machine (libkrun, 8 CPUs, 11.6 GiB) running the whole `core` +
-`observability` stack (each service `cpus: 1.0`, `mem_limit: 768m`) **and** the k6 container; gateway on port 18080 with
-`compose.perf.yml`; 10,000 products (`seed-10k.sql`); default `RAMP_UP` 2m, `DURATION` 3m, `THINK_TIME` 1 s,
-`CHECKOUT_PACE` 5 s. Throttled answers (429) were 0 in every run.
+`observability` stack (each service `cpus: 1.0`, `mem_limit: 768m`, heap 40 %; Tempo 2g) **and** the k6 container;
+gateway on port 18080 with `compose.perf.yml`; 10,000 products (`seed-10k.sql`); default `RAMP_UP` 2m, `DURATION` 3m,
+`THINK_TIME` 1 s, `CHECKOUT_PACE` 5 s. Throttled answers (429) were 0 and no container restarted in these runs.
 
-| Date | VUs (browse/checkout) | Browse p95 all / list / search / detail | Browse failed | Orders placed | Checkout error rate | Stock refusals | Verdict |
-|---|---|---|---|---|---|---|---|
-| 2026-10-03 | 1,000 / 100 | 5,746 / 5,870 / 5,707 / 5,614 ms | 46.6 % (gateway 504 after 5 s) | 137 | 41.0 % (503 behind the catalogue) | 0 | **FAIL** (every threshold) |
-| 2026-10-03 | 400 / 40 | 2,340 / 2,487 / 2,412 / 2,089 ms | 0 % | 1,249 | 0 % | 0 | **FAIL** (SC-002 latency only) |
-| 2026-10-03 | 200 / 20 | 552 / 591 / 599 / 477 ms | 0 % | 956 | 0 % | 0 | **PASS** (every threshold) |
+| Date | VUs (browse/checkout) | Browse p95 all / list / search / detail | Browse failed | Orders placed | Checkout error rate | Stock refusals | Requests/s | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| 2026-10-03 | 1,000 / 100 | 7,687 / 7,659 / 7,739 / 7,647 ms | 42.4 % (gateway 504 after 5 s) | 187 | 53.4 % (503 behind the catalogue) | 0 | 163 | **FAIL** (every threshold) |
+| 2026-10-03 | 400 / 40 | 2,854 / 2,449 / 3,155 / 2,734 ms | 0 % | 1,074 | 0 % | 0 | 153 | **FAIL** (SC-002 latency only) |
+| 2026-10-03 | 200 / 20 | 457 / 377 / 550 / 437 ms | 0 % | 956 | 0 % | 0 | 152 | **PASS** (every threshold) |
 
-Reading: the stack serves about 150 requests per second through the gateway on this machine whatever the load; the
-catalog service sits at its 1-CPU quota (100 %) and its database at about 2 CPUs from 200 browsing users on, so latency
-grows with the number of users (400 users: no errors, p95 2.3 s) until the gateway's 5 s upstream timeout turns waits
-into 504 and the cart and order calls into the catalogue into 503 (1,000 users). SC-002 and SC-003 are therefore met at
-200/20 and not at the specified 1,000/100 on a single laptop that also runs the load generator; a scaled catalog
-(`--scale catalog=N`, more CPUs per service) or a separate load machine is needed for the full profile. The first
-1,000/100 attempt (before the fixes below) also had catalog, cart and Tempo OOM-killed.
+Reading: the stack serves about 150 to 160 requests per second through the gateway on this machine. 200 users with a
+1 s think time ask for about that much, so they are served within SC-002; from 400 users on the catalog service sits at
+its 1-CPU quota (100 %) and its database at about 2 CPUs, latency grows (400 users: no errors, p95 2.9 s) until the
+gateway's 5 s upstream timeout turns waits into 504 and the cart and order calls into the catalogue into 503 (1,000
+users). SC-002 and SC-003 are therefore met at 200/20 and not at the specified 1,000/100 on a single laptop that also
+runs the load generator; the full profile needs a scaled catalogue (`--scale catalog=N`, more CPUs per service) or a
+separate, larger machine.
 
-Fixes made while recording these runs: the JVM heap is 50 % of a 768 MiB limit with direct memory capped at 128 MiB
-(catalog and cart were OOM-killed at 640/768 MiB, platform/docker/README.md), Tempo has its own 1 GiB limit
-(`TEMPO_MEM_LIMIT`; at 512 MiB it crashed in a loop; at 400 users and above it still restarted at 1 GiB, every request
-being traced), and `seed-10k.sql` prices are multiples of 10 (the payment simulator declines totals ending in 13 or
-14, which showed up as `payment-declined` checkout failures).
+Fixes made while recording these runs (the first 1,000-user attempts had catalog, cart and Tempo OOM-killed): the JVM
+heap is 40 % of the 768 MiB limit, Netty's direct buffers are capped at 128 MiB and glibc keeps two malloc arenas
+(platform/docker/README.md, "Runtime settings"); Tempo has its own limit, `TEMPO_MEM_LIMIT` (2g: at 512m and 1g it was
+OOM-killed in a loop, every request being traced, and its restarts starved the services of CPU); `seed-10k.sql` prices
+are multiples of 10 (the payment simulator declines totals ending in 13 or 14, which showed up as `payment-declined`
+checkout failures).

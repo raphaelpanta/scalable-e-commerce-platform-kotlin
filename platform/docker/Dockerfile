@@ -63,16 +63,16 @@ COPY --from=layers /layers/extracted/dependencies/ ./
 COPY --from=layers /layers/extracted/spring-boot-loader/ ./
 COPY --from=layers /layers/extracted/snapshot-dependencies/ ./
 COPY --from=layers /layers/extracted/application/ ./
-# MaxRAMPercentage sizes the heap from the container limit, leaving the other half for what a Spring Boot service needs
-# besides the heap (metaspace, code cache, thread stacks, Netty direct buffers, about 250 to 300 MB measured): at 75 % of
-# a 640 MiB limit the kernel OOM-killed identity under the acceptance suite (2026-10-03). MaxDirectMemorySize caps Netty's
-# pooled direct buffers, which otherwise default to the heap size: at 768 MiB catalog and cart reached 790 MB resident
-# (heap 370 MB, metaspace and code 160 MB, the rest direct buffers) under 1,000 browsing users and were OOM-killed;
-# with the cap an overloaded service refuses work instead of being killed. networkaddress.cache.ttl=5
-# keeps JVM DNS lookups short-lived
-# so that platform DNS discovery (Compose service names, later Kubernetes Services) drops removed replicas within
-# 5 seconds (research.md section 2, FR-024, SC-008).
-ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=50 -XX:MaxDirectMemorySize=128m -Dnetworkaddress.cache.ttl=5"
+# Memory (measured 2026-10-03 under the acceptance and performance suites, platform/docker/README.md "Runtime settings"):
+# a Spring Boot service needs 300 to 400 MB besides its heap (metaspace and code cache about 160 MB, Netty's pooled
+# buffers allocated with malloc, glibc arenas, thread stacks). A heap at 75 % of 640 MiB, then 50 % of 768 MiB, left too
+# little of it and the kernel OOM-killed identity, catalog and cart. So the heap is 40 % of the limit, Netty's direct
+# buffers are capped (they default to the heap size) and glibc keeps two malloc arenas instead of eight per CPU, which
+# bounds the resident memory that malloc never returns; an overloaded service now refuses work instead of being killed.
+# networkaddress.cache.ttl=5 keeps JVM DNS lookups short-lived so that platform DNS discovery (Compose service names,
+# later Kubernetes Services) drops removed replicas within 5 seconds (research.md section 2, FR-024, SC-008).
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=40 -XX:MaxDirectMemorySize=128m -Dnetworkaddress.cache.ttl=5" \
+    MALLOC_ARENA_MAX=2
 EXPOSE 8080 8081
 # The JRE image ships neither curl nor wget; bash's /dev/tcp is enough for the actuator probe. Every service and the
 # gateway expose the readiness health group on the management port 8081 (docs/service-conventions.md section 2): the

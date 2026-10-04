@@ -37,9 +37,9 @@ x-app: &app
   restart: unless-stopped
   stop_grace_period: 30s
   profiles: [core]
-  # Bound every service so the JVM (MaxRAMPercentage=50) sizes itself to the container, not to the whole engine VM;
-  # seven unbounded JVMs exhausted an 8 GiB Podman machine. 768m = a 384 MiB heap plus the JVM's off-heap memory; at
-  # 640m with a 75 % heap the kernel OOM-killed identity under the acceptance suite.
+  # Bound every service so the JVM (MaxRAMPercentage=40) sizes itself to the container, not to the whole engine VM;
+  # seven unbounded JVMs exhausted an 8 GiB Podman machine. 768m = a 307 MiB heap plus the JVM's off-heap memory; at
+  # 640m with a 75 % heap the kernel OOM-killed identity under the acceptance suite (platform/docker/README.md).
   mem_limit: ${SERVICE_MEM_LIMIT:-768m}
   cpus: ${SERVICE_CPUS:-1.0}
   # Probe the readiness health group on the management port (the JRE image has no curl; bash's /dev/tcp is enough), the
@@ -332,8 +332,9 @@ services:
 
   tempo:
     image: grafana/tempo:3.1.0
-    # Every request is traced: under the performance suite 512m OOM-killed Tempo in a loop (WAL replay included).
-    mem_limit: ${TEMPO_MEM_LIMIT:-1g}
+    # Every request is traced: under the performance suite 512m and then 1g OOM-killed Tempo in a loop (its WAL replay
+    # after a restart needs as much again), which also starved the services of CPU.
+    mem_limit: ${TEMPO_MEM_LIMIT:-2g}
     restart: unless-stopped
     profiles: [observability]
     networks: [internal]

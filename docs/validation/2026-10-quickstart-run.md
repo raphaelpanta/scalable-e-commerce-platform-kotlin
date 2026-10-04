@@ -179,12 +179,16 @@ How it got there:
 
 | Run | Result | Cause and fix |
 |---|---|---|
-| fast, 1st | 55 passed, 30 failed | identity was OOM-killed by the kernel (640m limit, heap at 75 %): 503 on every registration afterwards. The image now sizes the heap at 50 % and Compose bounds services at 768m (`platform/docker/Dockerfile`, `platform/compose/docker-compose.yml`). |
+| fast, 1st | 55 passed, 30 failed | identity was OOM-killed by the kernel (640m limit, heap at 75 %): 503 on every registration afterwards. Compose now bounds services at 768m and the image sizes the heap at 40 % with capped direct memory and malloc arenas (final settings after section 11; `platform/docker/Dockerfile`, `platform/compose/docker-compose.yml`). |
 | fast, 2nd | 83 passed, 2 failed | (1) "Retrying a checkout with the same idempotency key" never recorded its order, so "the order has exactly 1 payment charge" had none to look up: step defect, fixed in `CheckoutSteps` (the same-order step records it). (2) "The history shows the shopper's own orders" failed its 2nd checkout with 422 "cart is empty": a genuine cart defect. Order clears the cart synchronously and the late `OrderPaid` of the 1st order then took the same product, put back by the shopper for the 2nd order, out of the cart again. The `OrderPaid` consumer now leaves lines added after `paidAt` alone (`services/cart`, domain, application and integration tests; module checks green). |
 | fast, 3rd | 85 passed | |
 | slow, 1st | 9 passed, 2 failed | both `@sms` scenarios: phone verification answered 503 "The SMS channel is unavailable" because identity's SMS simulator sends through SMTP and Compose gave `SMTP_HOST` only to notification. Identity now gets `SMTP_HOST=mailpit` and waits for Mailpit. |
 | slow, 2nd | 11 passed | |
 | chaos | 1 passed | Mailpit refused every recipient until the confirmation used up its retries (about 7.5 minutes). |
+
+Confirmation run on the final images (after section 11's memory settings and the performance runs): fast 85/0 (280 s,
+of which about 200 s was one sweep row waiting for its verification e-mail while notification drained the e-mails of the
+preceding k6 runs), slow 11/0 (154 s), chaos 1/0 (464 s); no container restarted.
 
 Also added for the new `withdrawCategory` operation (T136): `Paths.categoryWithdrawal` and a "withdraw a category" row in
 both outlines of the authorisation sweep (47 sweep scenarios, all refused as expected). No scenario had to be declared
@@ -193,25 +197,27 @@ impossible by contract.
 ## 11. Performance suite (2026-10-03, T151, SC-002, SC-003)
 
 `platform/perf/seed-10k-apply.sh` then `platform/perf/run.sh --no-seed` (k6 `grafana/k6:1.7.0` in the Podman machine,
-reaching the gateway through `host.containers.internal:18080`), the stack of section 10 with the rate-limit override.
-The k6 container shares the 8-CPU engine VM with the 20 containers of the stack.
+reaching the gateway through `host.containers.internal:18080`), the stack of section 10 with the rate-limit override and
+the final memory settings below. The k6 container shares the 8-CPU engine VM with the 20 containers of the stack. The
+full 1,000/100 profile is too heavy for this machine, so it was also run at 400/40 and 200/20:
 
 | VUs (browse/checkout) | Browse p95 all / list / search / detail | Browse failed | Orders | Checkout error rate | Stock refusals | Thresholds |
 |---|---|---|---|---|---|---|
-| 1,000 / 100 (specified) | 5,746 / 5,870 / 5,707 / 5,614 ms | 46.6 % (504) | 137 | 41.0 % (503) | 0 | all 6 FAIL |
-| 400 / 40 | 2,340 / 2,487 / 2,412 / 2,089 ms | 0 % | 1,249 | 0 % | 0 | 4 latency FAIL, 2 error PASS |
-| 200 / 20 | 552 / 591 / 599 / 477 ms | 0 % | 956 | 0 % | 0 | all 6 PASS |
+| 1,000 / 100 (specified) | 7,687 / 7,659 / 7,739 / 7,647 ms | 42.4 % (504) | 187 | 53.4 % (503) | 0 | all 6 FAIL |
+| 400 / 40 | 2,854 / 2,449 / 3,155 / 2,734 ms | 0 % | 1,074 | 0 % | 0 | 4 latency FAIL, 2 error PASS |
+| 200 / 20 | 457 / 377 / 550 / 437 ms | 0 % | 956 | 0 % | 0 | all 6 PASS |
 
-The gateway serves about 150 requests per second on this machine at every load level: the catalog service is pinned
+The gateway serves about 150 to 160 requests per second on this machine: from 400 users the catalog service is pinned
 at its 1-CPU quota and its database at about 2 CPUs. **SC-002/SC-003 are met at 200 browsing + 20 checkout users and
 not at the specified 1,000 + 100** on this single machine; the full profile needs a scaled catalogue or more CPU than a
-laptop VM shared with the load generator. Details and the reading of the numbers: `platform/perf/README.md`,
-"Recorded results".
+laptop VM shared with the load generator. No 429 answers and no container restarts in these three runs. Details:
+`platform/perf/README.md`, "Recorded results".
 
-Defects found and fixed on the way: catalog, cart and Tempo were OOM-killed during the first 1,000-user run (the JVM's
-direct buffers defaulted to the heap size; Tempo had 512 MiB): `-XX:MaxDirectMemorySize=128m` in the image and
-`TEMPO_MEM_LIMIT` (1g) in Compose; no service restarted in the later runs, Tempo still restarted at 400 users (every
-request is traced). The 10k dataset's prices are now multiples of 10, so no order total ends in 13 or 14 (the
-simulator's decline rule), which had produced `payment-declined` checkout failures. The dataset was removed again
-afterwards (`seed-10k-apply.sh --remove`); the catalogue holds the 20 seed products plus the products the acceptance
-scenarios created.
+Defects found and fixed on the way (earlier attempts, not in the table): during the first 1,000-user runs catalog, cart
+and Tempo were OOM-killed, and the acceptance suite later had cart OOM-killed too. The image now gives the heap 40 % of
+the 768m limit, caps Netty's direct buffers at 128 MiB and sets `MALLOC_ARENA_MAX=2` (services peak at about 610 MB
+under 1,000 users); Tempo has `TEMPO_MEM_LIMIT` 2g (at 512m and 1g it crashed in a loop under load, its WAL replay
+included, and the restarts starved the services of CPU). The 10k dataset's prices are now multiples of 10, so no order
+total ends in 13 or 14 (the simulator's decline rule), which had produced `payment-declined` checkout failures. The
+dataset was removed again afterwards (`seed-10k-apply.sh --remove`); the catalogue holds the 20 seed products plus the
+products the acceptance scenarios created.
