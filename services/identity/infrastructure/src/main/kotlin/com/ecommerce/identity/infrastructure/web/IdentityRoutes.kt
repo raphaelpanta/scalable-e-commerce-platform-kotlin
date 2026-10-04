@@ -1,10 +1,10 @@
 package com.ecommerce.identity.infrastructure.web
 
+import com.ecommerce.platform.observability.observedCoRouter
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.web.reactive.function.server.RouterFunction
 import org.springframework.web.reactive.function.server.ServerResponse
-import org.springframework.web.reactive.function.server.coRouter
 
 private const val IDENTITY = "/api/v1/identity"
 private const val ME = "$IDENTITY/accounts/me"
@@ -27,7 +27,7 @@ class IdentityRoutes {
         internal: InternalHandlers,
         jwks: JwksHandler,
     ): RouterFunction<ServerResponse> =
-        coRouter {
+        observedCoRouter {
             POST("$IDENTITY/accounts", registration::register)
             POST("$IDENTITY/accounts/verify-email", registration::verifyEmail)
             POST("$IDENTITY/sessions", sessions::signIn)

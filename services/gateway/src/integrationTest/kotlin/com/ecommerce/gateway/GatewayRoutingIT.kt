@@ -10,6 +10,7 @@ import com.github.tomakehurst.wiremock.client.WireMock.get
 import com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor
 import com.github.tomakehurst.wiremock.client.WireMock.okJson
 import com.github.tomakehurst.wiremock.client.WireMock.post
+import com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor
 import com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig
 import io.kotest.matchers.collections.shouldHaveSize
@@ -46,6 +47,7 @@ private const val UPSTREAM_DELAY_MS = 6000
 private const val SECONDS_PER_MINUTE = 60L
 private const val ORDER_ID = "0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10"
 private const val TRACEPARENT = "traceparent"
+private const val ADDRESSES = "/api/v1/identity/accounts/me/addresses"
 
 /**
  * The gateway in front of WireMock upstreams (identity, catalog, cart, order and notification share one WireMock;
@@ -453,6 +455,19 @@ class GatewayRoutingIT(
             .expectStatus()
             .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR)
         upstream.findAll(getRequestedFor(urlPathEqualTo("/api/v1/catalog/categories"))) shouldHaveSize 1
+
+        // An identity POST is retried only when no connection could be opened (GatewayRetryIT), never on an answer;
+        // a standard-tier route, so that the auth tier's budget stays whole for its own test.
+        upstream.stubFor(post(ADDRESSES).willReturn(aResponse().withStatus(HttpStatus.SERVICE_UNAVAILABLE.value())))
+        client
+            .post()
+            .uri(ADDRESSES)
+            .header(HttpHeaders.AUTHORIZATION, BEARER + signingKey.token())
+            .bodyValue(mapOf("label" to "Home"))
+            .exchange()
+            .expectStatus()
+            .isEqualTo(HttpStatus.SERVICE_UNAVAILABLE)
+        upstream.findAll(postRequestedFor(urlPathEqualTo(ADDRESSES))) shouldHaveSize 1
 
         client
             .get()

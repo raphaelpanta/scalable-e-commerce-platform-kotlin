@@ -83,10 +83,15 @@ services' internal clients (`WebClientDefaults.httpClient` in platform-core). Th
 ### Timeouts and retries
 
 Connect timeout 2 s. Upstream response timeout per tier (route metadata `response-timeout`): auth 5 s, browse
-5 s, standard 10 s, operator 15 s, checkout 30 s; a slower upstream answers 504. The default `Retry` filter retries
-GET and HEAD only, at most twice with a 50-500 ms back-off, and only on `java.net.ConnectException` (no connection
-could be opened); a retry opens a new connection, which may go to another of the resolved instances.
-Upstream statuses are never retried, and no other method is, so `POST /api/v1/orders` is never retried.
+5 s, standard 10 s, operator 15 s, checkout 30 s; a slower upstream answers 504. Retries happen only when no
+connection could be opened (`java.net.ConnectException`, which includes the connect timeout, or
+`java.net.NoRouteToHostException`): nothing was sent, so the request cannot have been applied. A retry opens a new
+connection, which may go to another of the resolved instances; there are at most two, with a 50-500 ms back-off. The
+default `Retry` filter covers GET and HEAD on every route; the identity routes that take POST (`identity-credentials`,
+`identity-registration`, `identity-addresses`, `identity-phone-verification`) add a route `Retry` filter for POST with
+the same exceptions (T180), so sign-ins and registrations survive the stop of one identity instance. Upstream
+statuses, and failures after the connection was open, are never retried, and no other POST is retried: in particular
+`POST /api/v1/orders` never is, it relies on the client's `Idempotency-Key`.
 
 ## Authentication
 

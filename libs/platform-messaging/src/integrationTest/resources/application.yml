@@ -19,6 +19,13 @@ platform:
       max-interval: 200ms
 
 management:
+  tracing:
+    export:
+      # Spans are created (Micrometer Tracing over OpenTelemetry) so that the trace propagation through the outbox can
+      # be asserted (TraceparentIntegrationTest); nothing is exported, no collector runs in tests.
+      enabled: true
+      otlp:
+        enabled: false
   otlp:
     metrics:
       export:

@@ -1,10 +1,10 @@
 package com.ecommerce.catalog.infrastructure.web
 
+import com.ecommerce.platform.observability.observedCoRouter
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.web.reactive.function.server.RouterFunction
 import org.springframework.web.reactive.function.server.ServerResponse
-import org.springframework.web.reactive.function.server.coRouter
 
 /** The HTTP surface: catalog.yaml (public, through the gateway) and catalog-internal.yaml (cart and order only). */
 @Configuration(proxyBeanMethods = false)
@@ -16,7 +16,7 @@ class CatalogRoutes {
         reservations: ReservationHandlers,
         pricing: PricingHandlers,
     ): RouterFunction<ServerResponse> =
-        coRouter {
+        observedCoRouter {
             GET(PRODUCTS, queries::listProducts)
             POST(PRODUCTS, admin::createProduct)
             GET(PRODUCT, queries::getProduct)

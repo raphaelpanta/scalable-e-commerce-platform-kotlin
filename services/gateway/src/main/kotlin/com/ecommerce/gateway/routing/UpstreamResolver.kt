@@ -11,7 +11,8 @@ import java.time.Duration
  * that the platform DNS resolves to every healthy instance; the upstream client resolves it with Reactor Netty's
  * DNS resolver, keeps an answer for at most [MAX_TIME_TO_LIVE] (a removed instance drops out within seconds, an added
  * one starts receiving traffic as soon) and selects the returned addresses round-robin, so the load spreads over the
- * instances. Retries stay where application.yml declares them: GET and HEAD only, on `ConnectException` only.
+ * instances. Retries stay where application.yml declares them: only when no connection could be opened, for GET and
+ * HEAD on every route and for POST on the identity routes (never `POST /api/v1/orders`).
  * The same settings as the services' internal clients (platform-core `WebClientDefaults.httpClient`); the gateway
  * does not depend on platform-core.
  */

@@ -7,10 +7,11 @@
 # network with `docker exec`, the management port is not published) must grow while the browse loop keeps running, and
 # the scale-up itself must not cause more than the grace of non-2xx. Phase 2 repeats the stop against a POST-heavy
 # service: identity with two replicas, sign-in with a wrong password (cheap and safe, expects 401: never a 5xx, never
-# a 200) from fresh, unknown e-mail addresses so that no account is ever locked; the gateway does not retry POST
-# requests (only idempotent reads), so the few requests of the DNS cache window after the stop that reach the stopped
-# instance are tolerated up to RESILIENCE_POST_GRACE and reported, the steady state before the stop and the end of the
-# run must be clean. Exit status 1 when any phase fails.
+# a 200) from fresh, unknown e-mail addresses so that no account is ever locked; the gateway retries the identity POSTs
+# only when no connection could be opened (nothing was sent; never POST /api/v1/orders), so the few requests of the
+# DNS cache window after the stop that were already sent to the stopped instance are tolerated up to
+# RESILIENCE_POST_GRACE and reported, the steady state before the stop and the end of the run must be clean. Exit
+# status 1 when any phase fails.
 #
 # Usage: scripts/resilience.sh [--no-build] [--keep] [--verbose] [-h]
 #   --no-build  start without --build (images must already exist)
@@ -318,7 +319,7 @@ if [[ "$post_bad" -gt "$POST_GRACE" || "$tail_bad" -gt 0 ]]; then
   sort "$POST_AFTER" | uniq -c | sort -rn >&2
   failed=true
 else
-  echo "PASS: $post_bad non-401 of $POST_ATTEMPTS sign-ins after stopping one identity replica (grace $POST_GRACE; POST is never retried by the gateway)"
+  echo "PASS: $post_bad non-401 of $POST_ATTEMPTS sign-ins after stopping one identity replica (grace $POST_GRACE; the gateway retries POST only when no connection could be opened)"
 fi
 rm -f "$POST_BEFORE" "$POST_AFTER"
 

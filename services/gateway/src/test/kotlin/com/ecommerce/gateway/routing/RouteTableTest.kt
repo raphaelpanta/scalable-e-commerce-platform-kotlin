@@ -241,11 +241,32 @@ class RouteTableTest :
                 }.shouldBe(listOf("catalog-image-registration" to DataSize.ofMegabytes(5)))
         }
 
-        test("POST /api/v1/orders is outside the retried methods") {
-            val retry = table.properties.defaultFilters.single { it.name == "Retry" }
-            retry.args["methods"] shouldBe "GET,HEAD"
-            retry.args["series"] shouldBe ""
-            retry.args["statuses"] shouldBe ""
-            retry.args["exceptions"] shouldBe "java.net.ConnectException"
+        test("only connection errors are retried: reads everywhere, POST on the identity routes, never checkout") {
+            val connectErrors = "java.net.ConnectException,java.net.NoRouteToHostException"
+            val reads = table.properties.defaultFilters.single { it.name == "Retry" }
+            reads.args["methods"] shouldBe "GET,HEAD"
+            reads.args["series"] shouldBe ""
+            reads.args["statuses"] shouldBe ""
+            reads.args["exceptions"] shouldBe connectErrors
+
+            val postRetried = table.routes.filter { route -> route.filters.any { it.name == "Retry" } }
+            postRetried.map { it.id } shouldBe
+                listOf(
+                    "identity-credentials",
+                    "identity-registration",
+                    "identity-addresses",
+                    "identity-phone-verification",
+                )
+            postRetried.forEach { route ->
+                withClue(route.id) {
+                    val retry = route.filters.single { it.name == "Retry" }
+                    retry.args["methods"] shouldBe "POST"
+                    retry.args["series"] shouldBe ""
+                    retry.args["statuses"] shouldBe ""
+                    retry.args["exceptions"] shouldBe connectErrors
+                }
+            }
+            val checkout = table.match("POST", "/api/v1/orders").shouldNotBeNull()
+            checkout.filters.shouldBeEmpty()
         }
     })

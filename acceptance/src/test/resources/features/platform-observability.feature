@@ -21,6 +21,7 @@ Feature: Run and observe the whole platform
     And the shopper has 1 "Desk lamp" in the cart
     When the shopper checks out paying with a card the simulator approves
     Then the central log holds entries with the checkout's correlation identifier from at least 3 services
+    And the central log holds entries with the checkout's correlation identifier from the order, payment and notification services
 
   @observability @slow
   Scenario: Every service reports that it is up, with request, error and latency metrics

@@ -1,10 +1,10 @@
 package com.ecommerce.payment.infrastructure.web
 
+import com.ecommerce.platform.observability.observedCoRouter
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.web.reactive.function.server.RouterFunction
 import org.springframework.web.reactive.function.server.ServerResponse
-import org.springframework.web.reactive.function.server.coRouter
 
 /**
  * The HTTP surface (coroutine handlers, no blocking): payment.yaml under `/api/v1/payments` (public, through the
@@ -17,7 +17,7 @@ class PaymentRouter {
         queries: PaymentQueryHandlers,
         internal: InternalPaymentHandlers,
     ): RouterFunction<ServerResponse> =
-        coRouter {
+        observedCoRouter {
             "/api/v1/payments".nest {
                 GET("/attempts/{attemptId}", queries::getPaymentAttempt)
                 GET("/attempts", queries::listPaymentAttemptsForOrder)

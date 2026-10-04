@@ -283,7 +283,10 @@ Per-service threat model: [plan.md](../specs/004-ecommerce-platform-mvp/plan.md)
 
 - **Correlation id.** `X-Correlation-Id` is accepted (UUID or 16-64 chars of `[A-Za-z0-9-]`), generated when missing,
   replaced when malformed (original kept in `originalCorrelationId`), forwarded to every service and event, logged
-  and echoed on every response, errors included. W3C `traceparent` carries traces.
+  and echoed on every response, errors included. W3C `traceparent` carries traces, across events too: the outbox
+  stores the writer's `traceparent` with each event, the relay sends it as a Kafka header and the consumer's listener
+  span continues it. Every service routes with `observedCoRouter` (platform-core), so handler and use-case log lines
+  keep `correlationId` and `traceId` after a Reactor hop.
 - **Pipeline.** Services emit ECS JSON logs (`service`, `traceId`, `spanId`, `correlationId`) and OTLP/HTTP to the
   OpenTelemetry Collector, which writes logs to Loki and traces to Tempo; Prometheus scrapes
   `/actuator/prometheus` on port 8081 of every replica (DNS service discovery) and receives span metrics from Tempo.

@@ -24,16 +24,18 @@ spring:
             connect-timeout: 2000
             response-timeout: 10s
           default-filters:
-            # Only idempotent reads are retried, and only when no connection could be opened (DNS lists every
-            # instance; a refused connection moves on to another one). POST /api/v1/orders is never retried: it
-            # relies on the client's Idempotency-Key.
+            # Idempotent reads are retried, and only when no connection could be opened (DNS lists every instance; a
+            # refused connection moves on to another one). Upstream statuses are never retried. POSTs are retried on
+            # the same connection errors only on the identity routes that declare the `post-retry-on-connect` filter
+            # below (nothing was sent, so the request cannot have been applied); POST /api/v1/orders is never
+            # retried: it relies on the client's Idempotency-Key.
             - name: Retry
               args:
                 retries: 2
                 methods: GET,HEAD
                 series: ""
                 statuses: ""
-                exceptions: java.net.ConnectException
+                exceptions: java.net.ConnectException,java.net.NoRouteToHostException
                 backoff:
                   first-backoff: 50ms
                   max-backoff: 500ms
@@ -46,6 +48,22 @@ spring:
               predicates:
                 - Path=/api/v1/identity/sessions,/api/v1/identity/sessions/refresh,/api/v1/identity/password-resets,/api/v1/identity/password-resets/complete
                 - Method=POST
+              # POSTs retried only when no connection could be opened (refused, unreachable or connect timeout):
+              # nothing reached identity, and the next attempt may resolve to another instance (T180, SC-008). Any
+              # answer, and any failure after the connection was open, is passed through unretried.
+              filters: &post-retry-on-connect
+                - name: Retry
+                  args:
+                    retries: 2
+                    methods: POST
+                    series: ""
+                    statuses: ""
+                    exceptions: java.net.ConnectException,java.net.NoRouteToHostException
+                    backoff:
+                      first-backoff: 50ms
+                      max-backoff: 500ms
+                      factor: 2
+                      based-on-previous-value: false
               metadata: { auth: anonymous, tier: auth, response-timeout: 5000 }
             # Registration and e-mail verification are credential-adjacent: each registration sends a verification
             # e-mail, so they share the per-source-address `auth` budget with sign-in and password resets (T169).
@@ -54,6 +72,7 @@ spring:
               predicates:
                 - Path=/api/v1/identity/accounts,/api/v1/identity/accounts/verify-email
                 - Method=POST
+              filters: *post-retry-on-connect
               metadata: { auth: anonymous, tier: auth, response-timeout: 5000 }
             - id: identity-sign-out
               uri: ${IDENTITY_URL:http://localhost:8080}
@@ -78,6 +97,7 @@ spring:
               predicates:
                 - Path=/api/v1/identity/accounts/me/addresses
                 - Method=GET,POST
+              filters: *post-retry-on-connect
               metadata: { auth: authenticated, tier: standard, response-timeout: 10000 }
             - id: identity-address
               uri: ${IDENTITY_URL:http://localhost:8080}
@@ -90,6 +110,7 @@ spring:
               predicates:
                 - Path=/api/v1/identity/accounts/me/phone-verifications,/api/v1/identity/accounts/me/phone-verifications/confirm
                 - Method=POST
+              filters: *post-retry-on-connect
               metadata: { auth: authenticated, tier: standard, response-timeout: 10000 }
             # --- catalog -----------------------------------------------------------------------------------------
             - id: catalog-reads

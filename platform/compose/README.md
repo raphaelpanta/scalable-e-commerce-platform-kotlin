@@ -102,8 +102,16 @@ dashboard needs the Micrometer histogram buckets: services enable
 
 ```bash
 scripts/smoke.sh [--no-build] [--keep]       # start, wait for health (max 5 min), gateway 200, ports not published
-scripts/resilience.sh [--no-build] [--keep]  # catalog=2, stop one replica, expect no more than 2 non-2xx
+scripts/resilience.sh [--no-build] [--keep]  # catalog=2 stop + scale-up proof, then identity=2 stop under sign-ins
 ```
+
+`resilience.sh` runs three phases (SC-008, FR-024): catalog with two replicas, one stopped while the catalogue is
+browsed every 200 ms (at most `RESILIENCE_GRACE`, default 2, non-2xx after the stop); catalog scaled back to two, where
+the new replica must show catalogue requests in its own `http_server_requests_seconds_count` within
+`RESILIENCE_PROOF_SECONDS` without more than the grace of non-2xx; then identity with two replicas under wrong-password
+sign-ins (401 expected, never a 5xx), one replica stopped, at most `RESILIENCE_POST_GRACE` (default 5) other answers
+after the stop and none among the last three. The gateway retries the identity POSTs only when no connection could be
+opened, so the tolerated answers come from requests already sent to the stopped replica.
 
 Both are quiet (one PASS/FAIL line per check), create `.env` from the example when it is missing, tear the stack down
 (`down -v`) unless `--keep` is given, and exit non-zero on failure.
