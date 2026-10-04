@@ -65,7 +65,11 @@ class CatalogContractConformanceIT : CatalogIntegrationTest() {
             call(PUT, "$CATEGORIES/$root", operator(), mapOf("name" to name, "parentId" to child)),
             UNPROCESSABLE,
         )
+        categoryWithdrawal(sibling)
+    }
 
+    /** Every status of `withdrawCategory` and `reinstateCategory`, in the order that produces them on one category. */
+    private fun categoryWithdrawal(sibling: String) {
         contract.check(call(POST, "$CATEGORIES/$sibling/withdrawal"), UNAUTHORIZED)
         contract.check(call(POST, "$CATEGORIES/$sibling/withdrawal", shopper()), FORBIDDEN)
         contract.check(call(POST, "$CATEGORIES/not-a-uuid/withdrawal", operator()), BAD_REQUEST)
