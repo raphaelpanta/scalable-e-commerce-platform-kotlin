@@ -54,8 +54,9 @@ hand-written, constitution VII).
 ### 2.2 Route templates (closed list, shared with `contracts/storefront-routes.md`)
 
 `/`, `/categories/:id`, `/search`, `/products/:id`, `/cart`, `/sign-in`, `/register`, `/verify-email`, `/reset-password`,
-`/forgot-password`, `/checkout`, `/orders`, `/orders/:id`, `/account`, `/console/orders`, `/console/orders/:id`,
-`/console/stock`, `/unknown`. Query strings (page, search term, token) are never part of a template.
+`/forgot-password`, `/checkout`, `/orders`, `/orders/:id`, `/orders/:id/confirmation`, `/account`, `/account/addresses`,
+`/account/notifications`, `/console/orders`, `/console/orders/:id`, `/console/stock`, `/unknown` (the same list as
+`frontend/src/domain/routeTemplate.ts` `ROUTE_TEMPLATES`). Query strings (page, search term, token) are never part of a template.
 
 ## 3. Application models (`frontend/src/app/`)
 
