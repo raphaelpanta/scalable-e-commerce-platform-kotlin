@@ -67,7 +67,7 @@ echo "::add-mask::$internal_token"
 
 # Same shape as the Compose environment (platform/compose/docker-compose.yml): memory bound, credentials from the
 # environment only, seed data off.
-run_args=(-d --name "$app" --memory 640m
+run_args=(-d --name "$app" --memory 768m
   -e "INTERNAL_API_TOKEN=$internal_token" -e SEED=false
   -e SPRING_KAFKA_ADMIN_AUTO_CREATE=false -e SPRING_KAFKA_ADMIN_OPERATION_TIMEOUT=5s)
 
