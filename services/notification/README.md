@@ -9,7 +9,7 @@ Package root: `com.ecommerce.notification`.
 | Module | Contents |
 |---|---|
 | `domain` | `Notification` and its delivery state machine, `DeliveryAttempt`, `RetryPolicy`, `ChannelSelection`, `NotificationPlanner`, `Recipient` read model, value objects, `Templates` (pure functions) |
-| `application` | ports (`NotificationRepository`, `RecipientReadModel`, `RecipientLookupPort`, `EmailSenderPort`, `SmsSenderPort`, `DeliveryOutcomePublisher`, `Transactions`, `Clock`), the `Caller` of the operator use cases and use cases `ProduceNotificationFromEvent`, `AttemptDelivery`, `RetryFailed`, `ListOwn`, `ListFailed`, `PurgeExpiredNotifications` |
+| `application` | ports (`NotificationRepository`, `RecipientReadModel`, `RecipientLookupPort`, `EmailSenderPort`, `SmsSenderPort`, `DeliveryOutcomePublisher`, `Transactions`, `Clock`), the `Caller` that the shopper and operator use cases authorise themselves (shopper for `ListOwn`, operator for `ListFailed` and `RetryFailed`) and use cases `ProduceNotificationFromEvent`, `AttemptDelivery`, `RetryFailed`, `ListOwn`, `ListFailed`, `PurgeExpiredNotifications` |
 | `infrastructure` | R2DBC repositories (`V2__notification_schema.sql`, `V3__deferred_recipient_and_retention.sql`), Kafka listener (group `notification`, idempotent by `eventId`), identity contact client, SMTP and simulated SMS senders, outbox publisher of `NotificationSent`/`NotificationFailed`, delivery scheduler, retention purge job, public API |
 
 ## Behaviour

@@ -223,12 +223,16 @@ components:
       type: string
       description: |
         registration_verification and password_reset come from identity events; order_confirmation,
-        order_shipped and order_delivered from order events; payment_failure from payment events.
-      enum: [registration_verification, password_reset, order_confirmation, payment_failure, order_shipped, order_delivered]
+        order_shipped, order_delivered and order_cancelled from order events; payment_failure and
+        refund_confirmation from payment events.
+      enum: [registration_verification, password_reset, order_confirmation, payment_failure, order_shipped, order_delivered, order_cancelled, refund_confirmation]
     DeliveryStatus:
       type: string
-      description: queued is waiting for (re)delivery, sent is final, failed means the retry limit was reached.
-      enum: [queued, sent, failed]
+      description: |
+        queued is waiting for (re)delivery, sent is final, failed means the retry limit was reached, suppressed
+        means the recipient may not be messaged on that channel (opted out, or the account was deleted) and the
+        message was never sent.
+      enum: [queued, sent, failed, suppressed]
     Notification:
       type: object
       required: [id, channel, type, status, attempts, createdAt]

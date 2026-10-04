@@ -65,6 +65,17 @@ internal fun source(account: AccountId = AccountId(UUID.randomUUID())) =
 internal val OPERATOR =
     Caller(AccountId(UUID.fromString("7d1f9a40-5c2e-4b8a-9e63-0f4d2c8b1a57")), setOf(CallerRole.OPERATOR))
 
+/** The shopper owning [account], the only caller of the own history. */
+internal fun shopper(account: AccountId): Caller = Caller(account, setOf(CallerRole.SHOPPER))
+
+/** The caller's own history, failing the test when the use case refuses it. */
+internal suspend fun ListOwn.page(
+    caller: Caller,
+    page: PageRequest,
+    channel: NotificationChannel? = null,
+    kind: NotificationKind? = null,
+): Page<Notification> = this(caller, page, channel, kind).getOrNull() ?: error("forbidden")
+
 internal fun shipped(
     source: EventSource,
     snapshot: RecipientContact? = null,
@@ -429,7 +440,7 @@ class RetryAndQueriesSpec :
                     world.produce(shipped(source(account)))
                     world.clock.advance(Duration.ofSeconds(1))
                 }
-                val own = ListOwn(world.notifications)(OwnFilter(account), PageRequest(0, 2))
+                val own = ListOwn(world.notifications).page(shopper(account), PageRequest(0, 2))
                 own.totalItems shouldBe count.toLong()
                 own.items shouldHaveSize minOf(2, count)
                 own.items.first().createdAt shouldBe world.clock.now.minusSeconds(1)
@@ -516,7 +527,7 @@ class PortFailureSpec :
                 world.retry(OPERATOR, world.only().id).isRight() shouldBe true
                 world.retry(OPERATOR, NotificationId(UUID.randomUUID())).leftOrNull() shouldBe RetryRefusal.NotFound
                 val page = PageRequest(0, 20)
-                ListOwn(world.notifications)(OwnFilter(world.only().accountId), page).totalItems shouldBe 1L
+                ListOwn(world.notifications).page(shopper(world.only().accountId), page).totalItems shouldBe 1L
                 ListFailed(world.notifications)(OPERATOR, FailedFilter(), page).getOrNull()?.totalItems shouldBe 0L
             }
         }
@@ -531,10 +542,10 @@ class PortFailureSpec :
             world.deliver.deliverDue(10) shouldBe 3
             val failedAt = world.only { it.accountId == account }.failedAt
             val all = PageRequest(0, 20)
-            ListOwn(world.notifications)(OwnFilter(account, NotificationChannel.SMS), all).totalItems shouldBe 0L
-            val byKind = OwnFilter(account, kind = NotificationKind.ORDER_DELIVERED)
-            ListOwn(world.notifications)(byKind, all).totalItems shouldBe 0L
-            val second = ListOwn(world.notifications)(OwnFilter(account), PageRequest(1, 2))
+            ListOwn(world.notifications).page(shopper(account), all, NotificationChannel.SMS).totalItems shouldBe 0L
+            val delivered = NotificationKind.ORDER_DELIVERED
+            ListOwn(world.notifications).page(shopper(account), all, kind = delivered).totalItems shouldBe 0L
+            val second = ListOwn(world.notifications).page(shopper(account), PageRequest(1, 2))
             second.page shouldBe 1
             second.items shouldHaveSize 1
             val listFailed = ListFailed(world.notifications)

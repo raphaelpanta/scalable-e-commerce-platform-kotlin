@@ -8,7 +8,9 @@ import arrow.core.right
 import com.ecommerce.notification.domain.AccountId
 import com.ecommerce.notification.domain.DeliveryStatus
 import com.ecommerce.notification.domain.Notification
+import com.ecommerce.notification.domain.NotificationChannel
 import com.ecommerce.notification.domain.NotificationId
+import com.ecommerce.notification.domain.NotificationKind
 
 /** The roles of an authenticated caller that the notification use cases distinguish. */
 enum class CallerRole {
@@ -17,13 +19,14 @@ enum class CallerRole {
 }
 
 /**
- * Who calls a use case: the authenticated account and its roles. The operator use cases authorise it themselves
- * (Constitution III: authorisation in the application layer, not only at the edge).
+ * Who calls a use case: the authenticated account and its roles. The shopper and operator use cases authorise it
+ * themselves (Constitution III: authorisation in the application layer, not only at the edge).
  */
 data class Caller(
     val accountId: AccountId,
     val roles: Set<CallerRole>,
 ) {
+    val isShopper: Boolean get() = CallerRole.SHOPPER in roles
     val isOperator: Boolean get() = CallerRole.OPERATOR in roles
 }
 
@@ -38,12 +41,19 @@ sealed interface RetryRefusal {
     ) : RetryRefusal
 }
 
-/** The caller does not hold the operator role: an operator use case refuses it before reading anything (403). */
+/**
+ * The caller does not hold the role a use case requires (operator for the failed view and retries, shopper for the
+ * own history): the use case refuses it before reading anything (403).
+ */
 data object Forbidden : RetryRefusal
 
 /** [caller] when it is an operator, [Forbidden] otherwise (deny by default). */
 internal fun operatorOnly(caller: Caller): Either<Forbidden, Caller> =
     if (caller.isOperator) caller.right() else Forbidden.left()
+
+/** [caller] when it is a shopper, [Forbidden] otherwise (deny by default). */
+internal fun shopperOnly(caller: Caller): Either<Forbidden, Caller> =
+    if (caller.isShopper) caller.right() else Forbidden.left()
 
 /**
  * `retryFailedNotification` (operator): moves a `failed` notification back to `queued` with a fresh retry budget;
@@ -69,14 +79,21 @@ class RetryFailed(
         }
 }
 
-/** `listOwnNotifications` (shopper): the caller's notifications, newest first. */
+/**
+ * `listOwnNotifications` (shopper): the caller's notifications, newest first, optionally narrowed to one [channel]
+ * and one [kind]. The account filter is the caller's own account, never a value supplied by the request. A caller
+ * that is not a shopper (an operator, or one holding no role) is [Forbidden] and nothing is read.
+ */
 class ListOwn(
     private val notifications: NotificationRepository,
 ) {
     suspend operator fun invoke(
-        filter: OwnFilter,
+        caller: Caller,
         page: PageRequest,
-    ): Page<Notification> = notifications.listOwn(filter, page)
+        channel: NotificationChannel? = null,
+        kind: NotificationKind? = null,
+    ): Either<Forbidden, Page<Notification>> =
+        shopperOnly(caller).map { notifications.listOwn(OwnFilter(it.accountId, channel, kind), page) }
 }
 
 /**
