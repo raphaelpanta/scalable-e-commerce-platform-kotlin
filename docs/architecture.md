@@ -271,7 +271,7 @@ authenticated; 429 with `Retry-After`):
 
 | Tier | Default | Applies to |
 |---|---|---|
-| `auth` | 10/min per address | credential endpoints (sign in, reset) |
+| `auth` | 10/min per address | credential endpoints: sign in, token refresh, password reset (request and complete), registration and e-mail verification (all `POST`) |
 | `browse` | 600/min per client | catalogue reads |
 | `standard` | 120/min per client | everything else for shoppers |
 | `checkout` | 20/min per account | `POST /api/v1/orders` |

@@ -77,7 +77,9 @@ The suite never logs credentials or tokens. Response bodies in assertion message
   the "email and SMS sink"). SMS deliveries themselves are checked in the notification history (`GET
   /api/v1/notifications`).
 - **`@observability`** needs the `observability` profile. Logs are found by correlation id with
-  `{service=~".+"} | json | correlationId="<id>"`, the query the Grafana dashboards use. Metrics come from
+  `{service=~".+"} | correlationId="<id>"`, the query the Grafana dashboards use: logs reach Loki as OpenTelemetry log
+  records and `correlationId` is structured metadata (`platform/observability/loki.yaml`), so no `| json` parser stage is
+  needed (`support/Telemetry.kt` still adds one before the filter). Metrics come from
   Prometheus (`up{job="services"}` and the Micrometer `http_server_requests_seconds_*` series).
 
 ## Coverage

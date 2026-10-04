@@ -23,7 +23,7 @@ development machine the full 1,000/100 profile overloads the single-CPU catalog 
    seed categories and the checkout shoppers need identity, cart, order, payment, notification and Mailpit.
 2. **Gateway rate limits lifted.** The load generator reaches the gateway from one source address, and the gateway
    limits anonymous callers per source address (`docs/gateway.md`, "Rate limiting"): browse 600 requests/min, standard
-   (registration, verification) 120/min, auth (sign-in) 10/min. With the defaults 1,000 browsing VUs get 429 almost
+   120/min, auth (sign-in, registration, e-mail verification: all credential endpoints) 10/min. With the defaults 1,000 browsing VUs get 429 almost
    at once and 100 shoppers need 10 minutes just to sign in. Start (or restart) the stack with the override, which sets
    `GATEWAY_RATELIMIT_REQUESTSPERMINUTE_AUTH`, `..._BROWSE` and `..._STANDARD`:
 
@@ -129,8 +129,8 @@ verification mail within seconds.
   the catalogue: that is what SC-002 is meant to catch at 10,000 products.
 - 1,000 VUs with a 1 s think time generate roughly 1,000 requests per second, more than the 1,000 *shoppers* a human
   think time would produce; it is a deliberately conservative reading of SC-003. Raise `THINK_TIME` for a softer one.
-- The quickstart describes registration as `201`; the implemented contract (`identity.yaml`) answers `202`. The script
-  accepts both.
+- Registration answers `202` (`identity.yaml`, `registerAccount`; the same generic body for an existing email). The script
+  also accepts `201`.
 - Payments use the simulator, so payment latency is not representative of a real provider.
 
 ## Recorded results

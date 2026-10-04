@@ -147,8 +147,8 @@ check that does not need the platform:
   the container ends the wait early. A shell `trap` always removes the containers, their volumes and the network.
 
 Rehearse it locally against an image you built: `.github/scripts/image-health.sh cart ecommerce-platform/cart:local`
-(`HEALTH_TIMEOUT=30` shortens the wait). It was run that way against the Compose images of the gateway, catalog and cart
-(UP after 5 to 7 seconds). The service images are pinned by the registry digest only for the base images in the
+(`HEALTH_TIMEOUT=30` shortens the wait). The `image` job of every service pipeline runs it, so it covers all seven services (identity also gets a
+random, masked `IDENTITY_SIGNING_KEY`, which it requires outside the `dev`/`test` profiles). The service images are pinned by the registry digest only for the base images in the
 Dockerfile; `postgres:18-alpine` is a tag, like in Compose (override with `POSTGRES_IMAGE`).
 
 #### Measuring the end-to-end time (T150, SC-009, FR-028)

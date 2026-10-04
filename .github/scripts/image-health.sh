@@ -13,7 +13,8 @@
 #     PostgreSQL with a two-second timeout; Kafka, the identity JWKS and the observability stack are not part of it), so
 #     the script starts ONE throw-away postgres:18-alpine sidecar on a private network, with random credentials, and
 #     points the service at it through <CTX>_DB_HOST/_DB_USER/_DB_PASSWORD; Flyway migrates the empty database
-#     (SEED=false). INTERNAL_API_TOKEN is random. Kafka and the OTLP collector stay on their localhost defaults
+#     (SEED=false). INTERNAL_API_TOKEN is random; identity also gets a random Ed25519 IDENTITY_SIGNING_KEY (required
+#     outside the dev/test profiles, same format as platform/compose/scripts/lib.sh ensure_env). Kafka and the OTLP collector stay on their localhost defaults
 #     (unreachable: the producer and the topic admin only log warnings; SPRING_KAFKA_ADMIN_* below shortens that wait);
 #   - the gateway has no database and needs nothing: it starts alone with its localhost defaults;
 #   - the probe runs INSIDE the container (bash /dev/tcp to 127.0.0.1:8081, the same check as the image HEALTHCHECK),
@@ -85,6 +86,14 @@ if [ "$service" != gateway ]; then
   done
   docker exec "$db" pg_isready -q -U app -d "$service" || { echo "::error::the postgres sidecar did not become ready"; exit 1; }
   run_args+=(--network "$net" -e "${ctx_upper}_DB_HOST=$db" -e "${ctx_upper}_DB_USER=app" -e "${ctx_upper}_DB_PASSWORD=$db_password")
+fi
+
+# identity refuses to start without a signing key (PKCS#8 DER, Base64, one line: what lib.sh ensure_env generates).
+if [ "$service" = identity ]; then
+  signing_key="$(openssl genpkey -algorithm ed25519 -outform DER | base64 | tr -d '\n')"
+  # The mask is a GitHub Actions workflow command: keep local runs quiet.
+  [ -z "${GITHUB_ACTIONS:-}" ] || echo "::add-mask::$signing_key"
+  run_args+=(-e "IDENTITY_SIGNING_KEY=$signing_key")
 fi
 
 docker run "${run_args[@]}" "$image" >/dev/null

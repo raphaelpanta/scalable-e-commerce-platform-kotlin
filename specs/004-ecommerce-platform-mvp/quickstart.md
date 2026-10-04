@@ -14,7 +14,7 @@ the public gateway and maps what you should observe to the success criteria in
   and `jq`.
 - JDK (current LTS) for the quality gate; the Gradle wrapper is bundled (`./gradlew -q`).
 - About 10 GiB of memory for the container engine itself (the Docker Desktop or Podman machine VM, not only the host):
-  seven JVMs bounded at 640 MB, Kafka and the observability profile did not fit an 8 GiB machine. Allow a few GiB of
+  seven JVMs bounded at 768m (`SERVICE_MEM_LIMIT`), Kafka and the observability profile did not fit an 8 GiB machine. Allow a few GiB of
   free disk for the images.
 
 ## 2. Start
@@ -22,6 +22,8 @@ the public gateway and maps what you should observe to the success criteria in
 ```bash
 cd platform/compose
 cp .env.example .env     # first time only; set INTERNAL_API_TOKEN to your own value for anything shared
+# first time only: the Ed25519 key that signs access tokens (IDENTITY_SIGNING_KEY, required: identity does not start without it)
+sed -i.bak "s|^IDENTITY_SIGNING_KEY=.*|IDENTITY_SIGNING_KEY=$(openssl genpkey -algorithm ed25519 -outform DER | base64 | tr -d '\n')|" .env
 export BUILDAH_FORMAT=docker   # Podman only: otherwise the image HEALTHCHECK is dropped and nothing becomes "healthy"
 docker compose --profile core --profile observability up -d --build
 docker compose ps        # wait until every service reports "healthy" (first build: several minutes)
@@ -35,7 +37,11 @@ docker compose ps        # wait until every service reports "healthy" (first bui
 
 Images are built from the single parameterised `platform/docker/Dockerfile` (one build argument, `SERVICE_MODULE`).
 Service ports are not published to the host: any direct call to a service must fail, only the gateway answers (FR-023).
-`platform/compose/scripts/smoke.sh` automates this section and checks the result.
+`platform/compose/scripts/smoke.sh` automates this section and checks the result; it also creates `.env` and generates
+`IDENTITY_SIGNING_KEY` (`ensure_env` in `platform/compose/scripts/lib.sh`) when they are missing, so the `cp` and `sed` lines
+above are only needed when you run `docker compose` by hand. `.env.example` sets `COMPOSE_PARALLEL_LIMIT=1` (Compose reads
+`COMPOSE_*` variables from `.env`; images build one at a time on the shared Gradle cache mount): the cold-start
+measurement of 3 min 58 s (SC-006) assumes it.
 
 The gateway limits sign-in, registration and browsing per source address (`docs/gateway.md`, "Rate limiting"; sign-in 10 per
 minute, answered 429 `throttled`). A hand-driven walk-through stays below the limits; for repeated runs or load, start with
@@ -148,8 +154,9 @@ slug named below.
    expect one trace spanning the gateway and the downstream services.
 3. In Prometheus (or the **Service RED** dashboard) confirm request, error and latency series for every
    service. Health is on the management port 8081, reachable only from inside the network, for example
-   `docker compose exec catalog bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081 && printf "GET /actuator/health HTTP/1.0\r\n\r\n" >&3 && cat <&3'`;
-   expect `{"status":"UP"}` (the gateway also serves `/actuator/health/readiness` and `/liveness`).
+   `docker compose exec catalog bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081 && printf "GET /actuator/health/readiness HTTP/1.0\r\n\r\n" >&3 && cat <&3'`;
+   expect `{"status":"UP"}`. Every service and the gateway serve `/actuator/health/readiness` and `/actuator/health/liveness`
+   (both answer exactly `{"status":"UP"}`); `/actuator/health` itself answers `{"status":"UP","groups":["liveness","readiness"]}`.
 4. Send a request with a malformed `X-Correlation-Id`; expect a replacement id in the response and
    the original value recorded in the gateway log.
 
