@@ -84,6 +84,54 @@ class CategorySpec :
                 CategoryStatus.WITHDRAWN
         }
 
+        test("reinstating a withdrawn category makes it active again; reinstating an active one is refused") {
+            val created = Category.create(categoryId(), CategoryDetails.of("Outdoor", null, null).value(), NOW)
+            created.reinstate(LATER).error() shouldBe CatalogError.CategoryNotWithdrawn(created.id)
+            val withdrawn = created.withdraw(NOW).value()
+            val reinstated = withdrawn.reinstate(LATER).value()
+            reinstated.status shouldBe CategoryStatus.ACTIVE
+            reinstated.isActive shouldBe true
+            reinstated.updatedAt shouldBe LATER
+            reinstated.createdAt shouldBe NOW
+            reinstated.version shouldBe withdrawn.version + 1
+            reinstated.details shouldBe created.details
+            reinstated.reinstate(LATER).error() shouldBe CatalogError.CategoryNotWithdrawn(created.id)
+        }
+
+        test("reinstating shows a category again unless an ancestor is still withdrawn; a round trip is lossless") {
+            checkAll(forests) { forest ->
+                val before = CategoryTree.hidden(forest.withdrawn, forest.parentOf)
+                forest.parentOf.keys.forEach { id ->
+                    val category =
+                        Category(
+                            id,
+                            CategoryDetails.of("C", null, forest.parentOf[id]).value(),
+                            NOW,
+                            NOW,
+                            0,
+                            if (id in forest.withdrawn) CategoryStatus.WITHDRAWN else CategoryStatus.ACTIVE,
+                        )
+                    if (category.isActive) {
+                        val back =
+                            category
+                                .withdraw(LATER)
+                                .value()
+                                .reinstate(LATER)
+                                .value()
+                        back.status shouldBe CategoryStatus.ACTIVE
+                        back shouldBe category.copy(updatedAt = LATER, version = category.version + 2)
+                    } else {
+                        category.reinstate(LATER).value().isActive shouldBe true
+                        val after = CategoryTree.hidden(forest.withdrawn - id, forest.parentOf)
+                        // Reinstating shows the category again unless an ancestor is still withdrawn.
+                        (id in after) shouldBe
+                            CategoryTree.ancestry(id, forest.parentOf).drop(1).any { it in forest.withdrawn }
+                        after.all { it in before } shouldBe true
+                    }
+                }
+            }
+        }
+
         test("hidden categories are exactly the withdrawn ones and everything beneath them") {
             checkAll(forests) { forest ->
                 val hidden = CategoryTree.hidden(forest.withdrawn, forest.parentOf)

@@ -107,7 +107,7 @@ spring:
             - id: catalog-creations
               uri: ${CATALOG_URL:http://localhost:8080}
               predicates:
-                - Path=/api/v1/catalog/products,/api/v1/catalog/products/*/withdrawal,/api/v1/catalog/products/*/stock-adjustments,/api/v1/catalog/categories,/api/v1/catalog/categories/*/withdrawal
+                - Path=/api/v1/catalog/products,/api/v1/catalog/products/*/withdrawal,/api/v1/catalog/products/*/reinstatement,/api/v1/catalog/products/*/stock-adjustments,/api/v1/catalog/categories,/api/v1/catalog/categories/*/withdrawal,/api/v1/catalog/categories/*/reinstatement
                 - Method=POST
               metadata: { auth: operator, tier: operator, response-timeout: 15000 }
             - id: catalog-updates

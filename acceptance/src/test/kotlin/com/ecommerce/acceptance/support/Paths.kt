@@ -32,6 +32,8 @@ object Paths {
 
     fun withdrawal(id: String) = "$PRODUCTS/$id/withdrawal" // withdrawProduct
 
+    fun reinstatement(id: String) = "$PRODUCTS/$id/reinstatement" // reinstateProduct
+
     fun stockAdjustments(id: String) = "$PRODUCTS/$id/stock-adjustments" // adjustStock
 
     fun images(id: String) = "$PRODUCTS/$id/images" // addProductImage
@@ -39,6 +41,8 @@ object Paths {
     fun category(id: String) = "$CATEGORIES/$id" // getCategory, updateCategory
 
     fun categoryWithdrawal(id: String) = "$CATEGORIES/$id/withdrawal" // withdrawCategory
+
+    fun categoryReinstatement(id: String) = "$CATEGORIES/$id/reinstatement" // reinstateCategory
 
     // cart.yaml
     const val CART = "/api/v1/cart" // getCart, clearCart

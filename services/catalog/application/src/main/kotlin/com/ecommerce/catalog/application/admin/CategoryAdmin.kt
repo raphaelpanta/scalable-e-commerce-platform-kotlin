@@ -117,3 +117,32 @@ class WithdrawCategory(
         val ACTION = OperatorAction.WITHDRAW_CATEGORY
     }
 }
+
+/**
+ * `reinstateCategory` (operator only): a withdrawn category is offered to shoppers again, with the products and
+ * categories beneath it that are not withdrawn themselves (data-model section 3.2, withdrawing is reversible). A
+ * category beneath another withdrawn one stays hidden until that one is reinstated. Reinstating an active category
+ * is a conflict.
+ */
+class ReinstateCategory(
+    private val catalog: Catalog,
+) {
+    suspend operator fun invoke(
+        caller: Caller,
+        categoryId: CategoryId,
+    ): Either<CatalogError, Category> =
+        either {
+            val actor = catalog.authorize(caller, ACTION, categoryId.value).bind()
+            val category = existing(catalog, categoryId)
+            val reinstated = category.reinstate(catalog.now()).bind()
+            catalog
+                .auditedChange(actor, ACTION, categoryId.value) {
+                    written(catalog.categories.update(reinstated, category.version), reinstated.details)
+                }.bind()
+            reinstated
+        }
+
+    private companion object {
+        val ACTION = OperatorAction.REINSTATE_CATEGORY
+    }
+}

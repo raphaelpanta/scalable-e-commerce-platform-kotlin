@@ -118,6 +118,49 @@ class CatalogOperationsSpec :
                 product().visibleTo(operator = false) shouldBe true
             }
 
+            test("a withdrawn product is reinstated once, only while its category is shown to shoppers") {
+                checkAll(Arb.boolean(), Arb.boolean()) { active, hiddenCategory ->
+                    val stored = product(saleState = if (active) SaleState.ACTIVE else SaleState.WITHDRAWN)
+                    val other = categoryId()
+                    val hidden = if (hiddenCategory) setOf(other, stored.details.categoryId) else setOf(other)
+                    val outcome = stored.reinstate(LATER, hidden)
+                    when {
+                        active -> {
+                            outcome.error() shouldBe CatalogError.NotWithdrawn(stored.id)
+                        }
+
+                        hiddenCategory -> {
+                            outcome.error() shouldBe
+                                CatalogError.CategoryWithdrawn(stored.id, stored.details.categoryId)
+                        }
+
+                        else -> {
+                            val reinstated = outcome.value()
+                            reinstated.saleState shouldBe SaleState.ACTIVE
+                            reinstated.onSale(hidden) shouldBe true
+                            reinstated.visibleTo(operator = false, hidden) shouldBe true
+                            reinstated.updatedAt shouldBe LATER
+                            reinstated.createdAt shouldBe stored.createdAt
+                            reinstated.version shouldBe stored.version + 1
+                            reinstated.details shouldBe stored.details
+                            reinstated.images shouldBe stored.images
+                            reinstated.reinstate(LATER, hidden).error() shouldBe CatalogError.NotWithdrawn(stored.id)
+                        }
+                    }
+                }
+            }
+
+            test("withdrawing then reinstating restores the product as it was, one version per change") {
+                val active = product()
+                val back =
+                    active
+                        .withdraw(NOW)
+                        .value()
+                        .reinstate(LATER, emptySet())
+                        .value()
+                back shouldBe active.copy(updatedAt = LATER, version = active.version + 2)
+            }
+
             test("withdrawing leaves stock and open reservations untouched (existing orders are unaffected)") {
                 val product = product()
                 val level = InventoryLevel(product.id, onHand = 5, reserved = 2)

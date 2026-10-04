@@ -13,11 +13,13 @@ Feature: Authorisation sweep
       | create a product                 |
       | update a product                 |
       | withdraw a product               |
+      | reinstate a product              |
       | adjust stock                     |
       | add a product image              |
       | create a category                |
       | update a category                |
       | withdraw a category              |
+      | reinstate a category             |
       | change an order status           |
       | list failed notifications        |
       | retry a failed notification      |
@@ -43,15 +45,17 @@ Feature: Authorisation sweep
       | confirm a phone verification    |
 
     Examples: Catalogue changes
-      | capability          |
-      | create a product    |
-      | update a product    |
-      | withdraw a product  |
-      | adjust stock        |
-      | add a product image |
-      | create a category   |
-      | update a category   |
-      | withdraw a category |
+      | capability           |
+      | create a product     |
+      | update a product     |
+      | withdraw a product   |
+      | reinstate a product  |
+      | adjust stock         |
+      | add a product image  |
+      | create a category    |
+      | update a category    |
+      | withdraw a category  |
+      | reinstate a category |
 
     Examples: Cart, orders and payments
       | capability                       |

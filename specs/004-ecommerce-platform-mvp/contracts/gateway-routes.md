@@ -13,7 +13,7 @@ instances can be added or removed without changing gateway configuration (FR-024
 | --- | --- | --- | --- |
 | `/api/v1/identity/` (register, verify, sign in, reset, profile, addresses) | `identity` | anonymous for register, sign in, verify, reset; authenticated (shopper or operator) for profile, addresses, notification preferences and sign-out; shopper for account deletion | `auth` for the anonymous credential endpoints (register, verify e-mail, sign in, refresh, password reset), `standard` otherwise |
 | `/api/v1/catalog/` (GET products, categories, search) | `catalog` | anonymous | `browse` |
-| `/api/v1/catalog/` (POST and PUT: create and update products and categories, `POST .../stock-adjustments`, `POST .../images`, `POST .../withdrawal` for products and categories; the gateway routes no PATCH and no catalog DELETE) | `catalog` | operator | `operator` |
+| `/api/v1/catalog/` (POST and PUT: create and update products and categories, `POST .../stock-adjustments`, `POST .../images`, `POST .../withdrawal` and `POST .../reinstatement` for products and categories; the gateway routes no PATCH and no catalog DELETE) | `catalog` | operator | `operator` |
 | `/api/v1/cart` | `cart` | anonymous (identified by `X-Cart-Token`) or authenticated (shopper or operator) for the account cart; `POST /api/v1/cart/merge` requires an authenticated caller (shopper or operator) | `standard` |
 | `/api/v1/orders/` | `order` | shopper (place, list, get, cancel); operator for `POST /{id}/status` and reading any order | `checkout` for `POST /api/v1/orders`, `standard` otherwise, `operator` for operator calls |
 | `/api/v1/payments/` | `payment` | operator or owning shopper (attempts, refunds); operator only for `/simulator/rules` | `standard` |

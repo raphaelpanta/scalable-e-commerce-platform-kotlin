@@ -167,6 +167,31 @@ class WithdrawProduct(
     }
 }
 
+/**
+ * `reinstateProduct` (operator only): a withdrawn product goes back on sale with the stock it kept (data-model section
+ * 3.2, withdrawing is reversible). Refused while its category is withdrawn or beneath a withdrawn one (409), and for a
+ * product on sale already (409).
+ */
+class ReinstateProduct(
+    private val catalog: Catalog,
+) {
+    suspend operator fun invoke(
+        caller: Caller,
+        productId: ProductId,
+    ): Either<CatalogError, ProductView> =
+        either {
+            val actor = catalog.authorize(caller, ACTION, productId.value).bind()
+            val product = existing(catalog, productId)
+            val reinstated = product.reinstate(catalog.now(), catalog.hiddenCategories()).bind()
+            catalog.auditedChange(actor, ACTION, productId.value) { save(catalog, product, reinstated) }.bind()
+            catalog.operatorView(reinstated)
+        }
+
+    private companion object {
+        val ACTION = OperatorAction.REINSTATE_PRODUCT
+    }
+}
+
 /** `addProductImage` (operator only): registers an image URL; a primary image demotes the previous one. */
 class AddProductImage(
     private val catalog: Catalog,

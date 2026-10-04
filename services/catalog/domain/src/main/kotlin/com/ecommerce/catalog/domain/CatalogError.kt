@@ -40,6 +40,22 @@ sealed interface CatalogError {
         val categoryId: CategoryId,
     ) : CatalogError
 
+    /** The product is on sale already, so there is nothing to reinstate. */
+    data class NotWithdrawn(
+        val productId: ProductId,
+    ) : CatalogError
+
+    /** The category is active already, so there is nothing to reinstate. */
+    data class CategoryNotWithdrawn(
+        val categoryId: CategoryId,
+    ) : CatalogError
+
+    /** The product cannot be reinstated while its category is withdrawn (or beneath a withdrawn one). */
+    data class CategoryWithdrawn(
+        val productId: ProductId,
+        val categoryId: CategoryId,
+    ) : CatalogError
+
     /** Another product carries the same SKU. */
     data class DuplicateSku(
         val sku: Sku,

@@ -25,6 +25,8 @@ import com.ecommerce.catalog.application.admin.AdjustStock
 import com.ecommerce.catalog.application.admin.AuthorizeOperator
 import com.ecommerce.catalog.application.admin.CreateCategory
 import com.ecommerce.catalog.application.admin.CreateProduct
+import com.ecommerce.catalog.application.admin.ReinstateCategory
+import com.ecommerce.catalog.application.admin.ReinstateProduct
 import com.ecommerce.catalog.application.admin.UpdateCategory
 import com.ecommerce.catalog.application.admin.UpdateProduct
 import com.ecommerce.catalog.application.admin.WithdrawCategory
@@ -114,11 +116,13 @@ class AdapterConfiguration {
         createProduct: CreateProduct,
         updateProduct: UpdateProduct,
         withdrawProduct: WithdrawProduct,
+        reinstateProduct: ReinstateProduct,
         adjustStock: AdjustStock,
         addProductImage: AddProductImage,
         createCategory: CreateCategory,
         updateCategory: UpdateCategory,
         withdrawCategory: WithdrawCategory,
+        reinstateCategory: ReinstateCategory,
     ): CatalogAdminHandlers =
         CatalogAdminHandlers(
             CatalogAdminUseCases(
@@ -126,11 +130,13 @@ class AdapterConfiguration {
                 createProduct,
                 updateProduct,
                 withdrawProduct,
+                reinstateProduct,
                 adjustStock,
                 addProductImage,
                 createCategory,
                 updateCategory,
                 withdrawCategory,
+                reinstateCategory,
             ),
         )
 

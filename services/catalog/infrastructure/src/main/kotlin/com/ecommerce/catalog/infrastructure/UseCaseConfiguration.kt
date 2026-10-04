@@ -29,6 +29,8 @@ import com.ecommerce.catalog.application.admin.AdjustStock
 import com.ecommerce.catalog.application.admin.AuthorizeOperator
 import com.ecommerce.catalog.application.admin.CreateCategory
 import com.ecommerce.catalog.application.admin.CreateProduct
+import com.ecommerce.catalog.application.admin.ReinstateCategory
+import com.ecommerce.catalog.application.admin.ReinstateProduct
 import com.ecommerce.catalog.application.admin.UpdateCategory
 import com.ecommerce.catalog.application.admin.UpdateProduct
 import com.ecommerce.catalog.application.admin.WithdrawCategory
@@ -134,6 +136,9 @@ class UseCaseConfiguration {
     fun withdrawProduct(catalog: Catalog): WithdrawProduct = WithdrawProduct(catalog)
 
     @Bean
+    fun reinstateProduct(catalog: Catalog): ReinstateProduct = ReinstateProduct(catalog)
+
+    @Bean
     fun adjustStock(catalog: Catalog): AdjustStock = AdjustStock(catalog)
 
     @Bean
@@ -147,6 +152,9 @@ class UseCaseConfiguration {
 
     @Bean
     fun withdrawCategory(catalog: Catalog): WithdrawCategory = WithdrawCategory(catalog)
+
+    @Bean
+    fun reinstateCategory(catalog: Catalog): ReinstateCategory = ReinstateCategory(catalog)
 
     @Bean
     fun authorizeOperator(catalog: Catalog): AuthorizeOperator = AuthorizeOperator(catalog)
