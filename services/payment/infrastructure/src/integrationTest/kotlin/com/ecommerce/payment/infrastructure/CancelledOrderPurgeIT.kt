@@ -11,6 +11,9 @@ import java.util.UUID
 
 private val PURGE_TIMEOUT: Duration = Duration.ofSeconds(10)
 
+/** 30-minute order window plus three retries one minute apart. */
+private val DEFAULT_RETENTION: Duration = Duration.ofMinutes(33)
+
 /**
  * The bounded retention of the cancelled orders payment remembers (data-model section 5, FR-007): the purge job
  * forgets the rows, contact snapshot included, recorded longer ago than the late-charge window (33 minutes by
@@ -43,7 +46,7 @@ class CancelledOrderPurgeIT : PaymentIntegrationTest() {
 
     @Test
     fun `the default retention is the late-charge window`() {
-        properties.retentionOfCancelledOrders() shouldBe Duration.ofMinutes(33)
+        properties.retentionOfCancelledOrders() shouldBe DEFAULT_RETENTION
     }
 
     @Test
