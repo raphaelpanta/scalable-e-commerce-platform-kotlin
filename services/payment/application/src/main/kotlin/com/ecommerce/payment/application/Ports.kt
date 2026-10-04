@@ -83,6 +83,9 @@ interface CancelledOrderRepository {
     suspend fun remember(order: CancelledOrderRecord): Boolean
 
     suspend fun find(orderId: OrderId): CancelledOrderRecord?
+
+    /** Forgets the cancelled orders recorded before [cutoff], contact snapshot included; returns how many. */
+    suspend fun forgetRecordedBefore(cutoff: Instant): Long
 }
 
 /** Persistence of refunds: unique per idempotency key and per refunded charge. */

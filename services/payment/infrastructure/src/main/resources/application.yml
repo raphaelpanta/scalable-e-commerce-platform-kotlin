@@ -26,6 +26,11 @@ payment:
     max-attempts: ${PAYMENT_RETRY_MAX_ATTEMPTS:3}
     interval: 10s
     batch-size: 100
+  # A cancelled order is remembered, with the owner's contact snapshot, so that a charge approved after the
+  # cancellation is refunded and announced; it is forgotten once it is this old (data-model section 5). Unset, it is
+  # the late-charge window: the order's 30-minute payment window plus retry.delay times retry.max-attempts (33m).
+  # cancelled-orders-retention: 33m
+  cancelled-orders-purge-interval: 5m
 
 # platform.security.* (JWKS_URI, JWT_ISSUER, JWT_AUDIENCE, INTERNAL_API_TOKEN) and the Kafka connection
 # (KAFKA_BOOTSTRAP_SERVERS, consumer group `payment`) come from the platform defaults. Every public path requires a

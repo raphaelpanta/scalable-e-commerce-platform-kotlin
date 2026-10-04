@@ -11,7 +11,7 @@ Package root: `com.ecommerce.order`.
 |---|---|
 | `domain` | `Order` aggregate (two statuses, ADR 0001), lifecycle and payment rules, checkout decisions, idempotency record |
 | `application` | ports and use cases: `PlaceOrder`, `ListOwnOrders`, `GetOwnOrder`, `CancelOwnOrder`, `TransitionOrderStatus`, `ApplyPaymentOutcome`, `RecordRefund`, `AnonymiseAccountOrders`, `ExpirePendingPayments`, `PurgeExpiredIdempotencyRecords` |
-| `infrastructure` | coroutine routes under `/api/v1/orders`, R2DBC persistence (`V2__order_schema.sql`), internal WebClients (cart, catalog, payment, identity), outbox publication, Kafka consumers, expiry and idempotency purge jobs |
+| `infrastructure` | coroutine routes under `/api/v1/orders`, R2DBC persistence (`V2__order_schema.sql`), internal WebClients (cart, catalog, payment, identity), outbox publication, Kafka consumers, expiry and idempotency purge jobs; the payment window is `order.payment-window` (`ORDER_PAYMENT_WINDOW`, 30m) and the expiry job runs every `order.payment-expiry.interval` (`ORDER_PAYMENT_EXPIRY_INTERVAL`, 1m) |
 
 | Layer | Where | Run alone |
 |---|---|---|

@@ -50,7 +50,7 @@ object OrderFixtures {
         )
 
     fun placed(lines: List<OrderLine> = listOf(line())): Order =
-        checkNotNull(Order.place(placement(lines)).getOrNull()).order
+        checkNotNull(Order.place(placement(lines), Order.DEFAULT_PAYMENT_WINDOW).getOrNull()).order
 
     fun paid(): Order = placed().applyPayment(PaymentOutcome.Approved(ATTEMPT), NOW).order
 
@@ -73,7 +73,7 @@ object OrderFixtures {
             paidThen(OrderStatus.CANCELLED),
             paidThen(OrderStatus.PREPARING, OrderStatus.CANCELLED),
             checkNotNull(placed().cancelByShopper(NOW).getOrNull()).order,
-            placed().expirePayment(NOW.plus(Order.PAYMENT_WINDOW)).order,
+            placed().expirePayment(NOW.plus(Order.DEFAULT_PAYMENT_WINDOW)).order,
         )
 
     val arbLine: Arb<OrderLine> =

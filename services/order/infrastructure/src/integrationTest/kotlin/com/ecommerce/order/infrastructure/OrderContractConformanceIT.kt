@@ -1,12 +1,17 @@
 package com.ecommerce.order.infrastructure
 
 import com.ecommerce.conformance.OpenApiContract
+import io.kotest.matchers.shouldBe
+import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpMethod.GET
 import org.springframework.http.HttpMethod.POST
 import org.springframework.test.web.reactive.server.WebTestClient
+import java.time.Duration
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 private const val OK = 200
 private const val CREATED = 201
@@ -19,12 +24,15 @@ private const val CONFLICT = 409
 private const val UNPROCESSABLE = 422
 private const val UNAVAILABLE = 503
 private const val CHANGED_PRICE = 15_900L
+private const val CHECKOUT_TIMEOUT_SECONDS = 30L
+private val ORDER_WAIT: Duration = Duration.ofSeconds(30)
 
 /**
  * Every public operation of `contracts/openapi/order.yaml`, with its success and documented error statuses,
  * exercised against the running service (cart, catalog, payment and identity stubbed) and validated request by
- * request (pact-matrix rule 3, constitution Principle V). Statuses the service cannot produce on its own are deferred
- * with the reason.
+ * request (pact-matrix rule 3, constitution Principle V). The 409 of a checkout covers its three problems, the
+ * `order-cancelled` one included (a cancellation winning the race against the charge). Statuses the service cannot
+ * produce on its own are deferred with the reason.
  */
 class OrderContractConformanceIT : OrderIntegrationTest() {
     private val contract = OpenApiContract.of("order")
@@ -34,6 +42,7 @@ class OrderContractConformanceIT : OrderIntegrationTest() {
     fun `the public operations conform to order yaml`() {
         val shopper = stubs.checkoutOf(Shopper())
         val (paid, pending) = checkout(shopper)
+        cancelledDuringCharge()
         reads(shopper, paid)
         cancellation(shopper, pending)
         transitions(shopper, paid)
@@ -63,6 +72,36 @@ class OrderContractConformanceIT : OrderIntegrationTest() {
         contract.check(request(POST, ORDERS, null, body, UUID.randomUUID()), UNAUTHORIZED)
         contract.check(request(POST, ORDERS, bearer(operatorId, OPERATOR), body, UUID.randomUUID()), FORBIDDEN)
         return paid to pending
+    }
+
+    /**
+     * The 409 `order-cancelled` answer (`OrderCancelledProblem`): the cancel-versus-charge race of `CheckoutClaimIT`,
+     * made deterministic by the slow charge stub. The checkout runs on another thread; once its order exists, the
+     * shopper cancels it, so the charge returns to a cancelled order. The replay of the same request answers the same
+     * stored problem.
+     */
+    private fun cancelledDuringCharge() {
+        val shopper = stubs.checkoutOf(Shopper())
+        val key = UUID.randomUUID()
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val checkout =
+                executor.submit<Map<String, Any?>> { contract.check(placeOrder(shopper, SLOW_TOKEN, key), CONFLICT) }
+            await().atMost(ORDER_WAIT).until {
+                column("SELECT count(*) FROM orders WHERE account_id = :a", "a" to shopper.accountId) == listOf(1L)
+            }
+            val orderId = column("SELECT id FROM orders WHERE account_id = :a", "a" to shopper.accountId).single()
+            // Not routed through the contract while the checkout's check may run on the other thread.
+            request(POST, "$ORDERS/$orderId/cancellation", bearer(shopper.accountId, SHOPPER)).expectStatus().isOk
+
+            val problem = checkout.get(CHECKOUT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            problem["type"].toString().endsWith("/problems/order-cancelled") shouldBe true
+            problem["orderId"] shouldBe orderId.toString()
+            problem["cancellationReason"] shouldBe "SHOPPER_REQUEST"
+            contract.check(placeOrder(shopper, SLOW_TOKEN, key), CONFLICT)["orderId"] shouldBe orderId.toString()
+        } finally {
+            executor.shutdownNow()
+        }
     }
 
     private fun reads(

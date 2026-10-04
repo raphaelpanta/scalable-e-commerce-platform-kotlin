@@ -8,6 +8,7 @@ import com.ecommerce.order.domain.DeclineCategory
 import com.ecommerce.order.domain.IdempotencyKey
 import com.ecommerce.order.domain.IdempotencyRecord
 import com.ecommerce.order.domain.Money
+import com.ecommerce.order.domain.Order
 import com.ecommerce.order.domain.OrderError
 import com.ecommerce.order.domain.OrderEvent
 import com.ecommerce.order.domain.OrderId
@@ -32,6 +33,7 @@ import io.kotest.property.Arb
 import io.kotest.property.arbitrary.list
 import io.kotest.property.arbitrary.long
 import io.kotest.property.checkAll
+import java.time.Duration
 import java.time.LocalDate
 import java.util.UUID
 
@@ -108,6 +110,21 @@ class PlaceOrderTest :
             world.idempotency.records.values
                 .single()
                 .response shouldBe StoredResponse(422, world.orderId.toString())
+        }
+
+        test("the pending payment of a placed order expires after the configured payment window") {
+            listOf(Duration.ofSeconds(20), Order.DEFAULT_PAYMENT_WINDOW, Duration.ofHours(2)).forEach { window ->
+                val world = World(outcome = PaymentOutcome.Pending(null), paymentWindow = window)
+
+                val result = world.place().getOrNull().shouldBeInstanceOf<CheckoutResult.Completed>()
+
+                val order = result.outcome.order
+                order.placedAt shouldBe NOW
+                order.paymentExpiresAt shouldBe NOW.plus(window)
+                world.orders.stored
+                    .getValue(order.id)
+                    .paymentExpiresAt shouldBe NOW.plus(window)
+            }
         }
 
         test("an unreachable provider leaves the order placed with a pending payment and the stock reserved") {

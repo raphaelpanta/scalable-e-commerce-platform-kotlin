@@ -27,9 +27,14 @@ order:
     catalog-url: ${CATALOG_URL:http://localhost:8080}
     payment-url: ${PAYMENT_URL:http://localhost:8080}
     identity-url: ${IDENTITY_URL:http://localhost:8080}
+  # How long a payment may stay pending before the order is cancelled with PAYMENT_EXPIRED (FR-015), stock released
+  # and the pending payment attempt voided. 30 minutes in production; acceptance runs shorten it (ORDER_PAYMENT_WINDOW
+  # in platform/perf/compose.perf.yml).
+  payment-window: ${ORDER_PAYMENT_WINDOW:30m}
   payment-expiry:
-    # How often the job looks for payments still pending 30 minutes after placement, and how many per pass.
-    interval: 1m
+    # How often the job looks for payments whose window has ended, and how many per pass; an order expires at most
+    # one interval after its window, so a short window needs a short interval.
+    interval: ${ORDER_PAYMENT_EXPIRY_INTERVAL:1m}
     batch-size: 100
   idempotency-purge:
     # Checkout idempotency records are kept 24 hours (data-model section 5); expired ones are deleted this often.

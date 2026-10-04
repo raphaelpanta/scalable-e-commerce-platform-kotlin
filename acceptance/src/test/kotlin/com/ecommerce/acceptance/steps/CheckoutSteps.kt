@@ -23,6 +23,7 @@ import io.cucumber.java.en.When
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import tools.jackson.databind.JsonNode
@@ -260,6 +261,38 @@ class CheckoutSteps(
                 order.body.string("paymentStatus") shouldBe "approved"
             }
             world.order = order.body
+        }
+    }
+
+    @When("the payment window of the order ends while its payment is still pending")
+    fun thePaymentWindowEnds() {
+        val shopper = world.theShopper()
+        eventually(within = Environment.paymentExpiryBudget, every = Duration.ofSeconds(RETRY_POLL_SECONDS)) {
+            val order = world.orders.get(shopper.bearer, world.orderId())
+            order shouldHaveStatus Status.OK
+            withClue(order.describe()) { order.body.string("orderStatus") shouldBe "cancelled" }
+            world.order = order.body
+        }
+    }
+
+    @Then("the order is recorded as cancelled because the payment expired")
+    fun recordedAsPaymentExpired() {
+        val order = currentOrder()
+        order.string("orderStatus") shouldBe "cancelled"
+        order.string("paymentStatus") shouldBe "failed"
+        order.string("cancellationReason") shouldBe "PAYMENT_EXPIRED"
+    }
+
+    @Then("every payment attempt of the order is voided")
+    fun everyAttemptIsVoided() {
+        eventually {
+            val attempts = world.orders.paymentAttempts(world.theShopper().bearer, world.orderId())
+            attempts shouldHaveStatus Status.OK
+            val outcomes = attempts.body.items().map { it.string("outcome") }
+            withClue(attempts.describe()) {
+                outcomes.shouldNotBeEmpty()
+                outcomes.distinct() shouldBe listOf("voided")
+            }
         }
     }
 

@@ -46,6 +46,15 @@ object Environment {
     val paymentRetryBudget: Duration =
         Duration.ofSeconds(variable("PAYMENT_RETRY_TIMEOUT_SECONDS", "150").toLong())
 
+    /**
+     * How long an order whose payment stays pending may take to expire: the order service's payment window
+     * (`ORDER_PAYMENT_WINDOW`, 2 minutes in the acceptance override `platform/perf/compose.perf.yml`, 30 minutes
+     * otherwise) plus its expiry job's interval (`ORDER_PAYMENT_EXPIRY_INTERVAL`, 5 seconds there) and the event
+     * delivery.
+     */
+    val paymentExpiryBudget: Duration =
+        Duration.ofSeconds(variable("PAYMENT_EXPIRY_TIMEOUT_SECONDS", "210").toLong())
+
     private fun variable(
         name: String,
         default: String,

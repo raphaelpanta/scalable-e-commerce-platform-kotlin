@@ -10,7 +10,8 @@ import java.util.UUID
 
 /**
  * The payment expiry job (FR-015): every `order.payment-expiry.interval` it cancels orders whose payment is still
- * pending 30 minutes after placement (`PAYMENT_EXPIRED`, `OrderCancelled`, stock released). It runs on the coroutine
+ * pending when their payment window ends (`order.payment-window`, 30 minutes after placement by default;
+ * `PAYMENT_EXPIRED`, `OrderCancelled`, stock released). It runs on the coroutine
  * loop of platform-messaging's [PeriodicJob] (no scheduler thread, nothing blocking); a full batch runs again at once.
  * Several instances are safe: each change is an optimistic update, so an order expires once.
  */

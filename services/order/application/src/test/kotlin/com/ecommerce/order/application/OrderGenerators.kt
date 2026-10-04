@@ -72,7 +72,7 @@ fun arbPlaced(
                 RESERVATION,
                 NOW.minus(Duration.ofMinutes(minutesAgo.bind())),
             )
-        checkNotNull(Order.place(placement).getOrNull()).order
+        checkNotNull(Order.place(placement, Order.DEFAULT_PAYMENT_WINDOW).getOrNull()).order
     }
 
 /** One lifecycle step an order may go through; refused steps leave it as it was. */

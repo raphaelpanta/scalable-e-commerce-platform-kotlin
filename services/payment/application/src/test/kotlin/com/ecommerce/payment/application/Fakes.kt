@@ -234,6 +234,13 @@ class InMemoryCancellations : CancelledOrderRepository {
         yield()
         return stored[orderId]
     }
+
+    override suspend fun forgetRecordedBefore(cutoff: Instant): Long {
+        yield()
+        val expired = stored.values.filter { it.recordedAt.isBefore(cutoff) }.map { it.orderId }
+        expired.forEach(stored::remove)
+        return expired.size.toLong()
+    }
 }
 
 class FakeProvider(

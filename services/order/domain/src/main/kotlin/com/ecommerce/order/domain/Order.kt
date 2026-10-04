@@ -58,16 +58,24 @@ data class Order(
     fun unchanged(): OrderChange = OrderChange(this, emptyList())
 
     companion object {
-        /** How long a payment may stay `pending` before the order is cancelled with `PAYMENT_EXPIRED`. */
-        val PAYMENT_WINDOW: Duration = Duration.ofMinutes(30)
+        /**
+         * The default payment window (FR-015): how long a payment may stay `pending` before the order is cancelled
+         * with `PAYMENT_EXPIRED`. The service passes its configured window (`order.payment-window`) to [place].
+         */
+        val DEFAULT_PAYMENT_WINDOW: Duration = Duration.ofMinutes(30)
 
         private val FULFILMENT = setOf(OrderStatus.PREPARING, OrderStatus.SHIPPED, OrderStatus.DELIVERED)
 
         /**
-         * Places an order: `placed` with a `pending` payment whose 30-minute clock starts now, two history entries
-         * and an `OrderPlaced` event. Refused when the total is not positive (a charge needs a positive amount).
+         * Places an order: `placed` with a `pending` payment that expires [paymentWindow] after placement, two history
+         * entries and an `OrderPlaced` event. Refused when the total is not positive (a charge needs a positive
+         * amount). The window must be positive.
          */
-        fun place(placement: Placement): Either<OrderError, OrderChange> {
+        fun place(
+            placement: Placement,
+            paymentWindow: Duration,
+        ): Either<OrderError, OrderChange> {
+            require(!paymentWindow.isNegative && !paymentWindow.isZero) { "the payment window is positive" }
             if (placement.lines.isEmpty()) return OrderError.EmptyCart.left()
             val at = placement.placedAt
             val order =
@@ -88,7 +96,7 @@ data class Order(
                     declineCategory = null,
                     paymentAttemptId = null,
                     paidAt = null,
-                    paymentExpiresAt = at.plus(PAYMENT_WINDOW),
+                    paymentExpiresAt = at.plus(paymentWindow),
                     refund = null,
                     placedAt = at,
                     history =

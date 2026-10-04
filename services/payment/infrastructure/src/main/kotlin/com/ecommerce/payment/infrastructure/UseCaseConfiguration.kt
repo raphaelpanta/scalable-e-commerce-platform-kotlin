@@ -10,12 +10,14 @@ import com.ecommerce.payment.application.ListPaymentAttemptsForOrder
 import com.ecommerce.payment.application.ListRefundsForOrder
 import com.ecommerce.payment.application.PaymentIds
 import com.ecommerce.payment.application.PaymentLedger
+import com.ecommerce.payment.application.PurgeCancelledOrders
 import com.ecommerce.payment.application.RecordRefund
 import com.ecommerce.payment.application.RetryPendingCharges
 import com.ecommerce.payment.application.SettleCancelledOrder
 import com.ecommerce.payment.domain.PaymentProviderPort
 import com.ecommerce.payment.domain.SimulatedPaymentRules
 import com.ecommerce.payment.domain.SimulatorRules
+import com.ecommerce.payment.infrastructure.jobs.CancelledOrderPurgeJob
 import com.ecommerce.payment.infrastructure.messaging.OutboxPaymentEventPublisher
 import com.ecommerce.payment.infrastructure.messaging.PaymentEventHandlers
 import com.ecommerce.payment.infrastructure.messaging.PaymentEventListeners
@@ -106,6 +108,17 @@ class UseCaseConfiguration {
         properties: PaymentProperties,
         settlement: ChargeSettlement,
     ): RetryPendingCharges = RetryPendingCharges(ledger, provider, ids, clock, properties.retry.policy, settlement)
+
+    @Bean
+    fun cancelledOrderPurgeJob(
+        ledger: PaymentLedger,
+        clock: Clock,
+        properties: PaymentProperties,
+    ): CancelledOrderPurgeJob =
+        CancelledOrderPurgeJob(
+            PurgeCancelledOrders(ledger.cancellations, clock, properties.retentionOfCancelledOrders()),
+            properties.cancelledOrdersPurgeInterval,
+        )
 
     @Bean
     fun internalPaymentHandlers(

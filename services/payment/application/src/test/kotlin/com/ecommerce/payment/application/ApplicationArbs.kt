@@ -20,6 +20,8 @@ import io.kotest.property.arbitrary.list
 import io.kotest.property.arbitrary.long
 import io.kotest.property.arbitrary.map
 import io.kotest.property.arbitrary.uuid
+import io.kotest.property.arbitrary.withEdgecases
+import java.util.UUID
 
 /**
  * Iterations of each application property: each runs the use cases against fresh in-memory fakes, and the mutation
@@ -31,10 +33,16 @@ const val PROPERTIES = 200
 object ApplicationArbs {
     private val tokenChars = ('a'..'z') + ('0'..'9') + '_'
 
-    val orderId: Arb<OrderId> = Arb.uuid().map(::OrderId)
-    val accountId: Arb<AccountId> = Arb.uuid().map(::AccountId)
-    val attemptId: Arb<PaymentAttemptId> = Arb.uuid().map(::PaymentAttemptId)
-    val key: Arb<IdempotencyKey> = Arb.uuid().map(::IdempotencyKey)
+    /**
+     * Random identifiers without the nil-UUID edge case: two draws of it would make "another order" or a drifted body
+     * the same as the original, which the properties assume never happens.
+     */
+    private val uuid: Arb<UUID> = Arb.uuid().withEdgecases(emptyList())
+
+    val orderId: Arb<OrderId> = uuid.map(::OrderId)
+    val accountId: Arb<AccountId> = uuid.map(::AccountId)
+    val attemptId: Arb<PaymentAttemptId> = uuid.map(::PaymentAttemptId)
+    val key: Arb<IdempotencyKey> = uuid.map(::IdempotencyKey)
     val amount: Arb<Money> = Arb.long(1L..10_000_000L).map(::brl)
     val paymentMethod: Arb<PaymentMethodRef> =
         Arb.list(Arb.element(tokenChars), 1..40).map { token("tok_" + it.joinToString("")) }

@@ -5,11 +5,13 @@ import com.ecommerce.order.domain.Cart
 import com.ecommerce.order.domain.CartLine
 import com.ecommerce.order.domain.CheckoutRequest
 import com.ecommerce.order.domain.IdempotencyKey
+import com.ecommerce.order.domain.Order
 import com.ecommerce.order.domain.OrderId
 import com.ecommerce.order.domain.PaymentAttemptId
 import com.ecommerce.order.domain.PaymentOutcome
 import com.ecommerce.order.domain.Role
 import java.time.Clock
+import java.time.Duration
 import java.util.UUID
 
 val CHECKOUT_ATTEMPT = PaymentAttemptId(UUID.fromString("c2f1d0a9-5b3e-4e7a-9a60-8d1b2c3e4f50"))
@@ -21,6 +23,7 @@ class CheckoutWorld(
     lines: List<CartLine> = listOf(cartLine(14900), cartLine(2450, quantity = 2)),
     outcome: PaymentOutcome = PaymentOutcome.Approved(CHECKOUT_ATTEMPT),
     clock: Clock = fixedClock(),
+    paymentWindow: Duration = Order.DEFAULT_PAYMENT_WINDOW,
 ) {
     val cart = FakeCart(Cart("rev-1", lines))
     val catalog = FakeCatalog(prices = lines.map { priceOf(it) })
@@ -39,6 +42,7 @@ class CheckoutWorld(
             TEST_RESPONSES,
             { orderId },
             clock,
+            paymentWindow,
         )
 
     /** Makes every port call of [steps] throw, as a dependency answering 503 or a failing database would. */
