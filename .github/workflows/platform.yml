@@ -213,6 +213,9 @@ jobs:
           token="$(openssl rand -hex 24)"
           echo "::add-mask::$token"
           sed -i "s|^INTERNAL_API_TOKEN=.*|INTERNAL_API_TOKEN=$token|" platform/compose/.env
+          key="$(openssl genpkey -algorithm ed25519 -outform DER | base64 -w0)"
+          echo "::add-mask::$key"
+          sed -i "s|^IDENTITY_SIGNING_KEY=.*|IDENTITY_SIGNING_KEY=$key|" platform/compose/.env
 
       # Layers are cached on the runner host after the `platform` job; a cold host rebuilds the seven images.
       - name: Build and start the core stack (rate-limit override)

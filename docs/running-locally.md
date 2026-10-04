@@ -5,7 +5,7 @@ Everything is in `platform/compose`. Prerequisites: Docker (Compose v2) or a com
 
 **Memory.** Give the container engine itself, not only the host, about **10 GiB**: the Docker Desktop VM or the Podman
 machine (`podman machine set --cpus 6 --memory 10240`). The `core` and `observability` profiles together run 20
-containers: seven JVMs bounded at 640 MB each (`SERVICE_MEM_LIMIT`), Kafka at 1 GiB (`KAFKA_MEM_LIMIT`), six PostgreSQL
+containers: seven JVMs bounded at 768 MB each (`SERVICE_MEM_LIMIT`), Kafka at 1 GiB (`KAFKA_MEM_LIMIT`), six PostgreSQL
 databases at 256 MB (`DB_MEM_LIMIT`) and the observability tools at 512 MB each (`OBS_MEM_LIMIT`). An 8 GiB engine ran out
 of memory; the limits can be lowered in `.env`. Rootless Podman also caps the number of concurrent containers through the
 kernel keyring quota (`kernel.keys.maxkeys`): raise it in the machine, or stop unrelated containers, when the 20th
@@ -27,7 +27,12 @@ docker compose --profile core --profile observability up -d --build
 docker compose ps        # every service must become "healthy" (first build: a few minutes)
 ```
 
-`platform/compose/scripts/smoke.sh` runs the same start-up and checks the result automatically (health, gateway,
+`.env.example` sets `COMPOSE_PARALLEL_LIMIT=1` (Compose reads `COMPOSE_*` variables from `.env`): the images are built one
+at a time because they share one Gradle cache mount, and the cold-start measurement of 3 min 58 s (`platform/docker/README.md`)
+assumes it.
+
+`platform/compose/scripts/smoke.sh` creates `.env` from `.env.example` when it is missing, generates the
+`IDENTITY_SIGNING_KEY` the same way when it is empty, and runs the same start-up and checks the result automatically (health, gateway,
 unpublished ports) and tears the stack down again.
 
 ## Profiles

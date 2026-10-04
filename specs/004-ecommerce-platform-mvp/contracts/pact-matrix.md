@@ -32,7 +32,8 @@ contracts (the event payload shapes are defined in `contracts/asyncapi/`).
 | order | identity | read the recipient contact for order events (email only) at checkout, so order events carry the `recipient` snapshot (added 2026-10-02 during implementation; same shape as the notification lookup) | identity |
 | notification | identity | read recipient contact details and notification preferences for an account (email only, SMS opted in with verified number, anonymised account) | identity |
 | cart | catalog | read price and availability for a product (in stock, out of stock, withdrawn, unknown product) and for several products in one call | catalog |
-| gateway | all services | health endpoints are internal only and checked by integration tests, not pacts | not applicable |
+| platform-probe (image `HEALTHCHECK`, Compose health check, CI start-and-health) | identity, catalog, cart, order, payment, notification (each its own pact, `platform-probe-<service>.json`) | `GET /actuator/health/readiness` on the management port answers 200 with `"status":"UP"` (provider state `the <identity, catalogue, cart, order, payment or notification> service is running`; other body members are allowed); readiness path per T129 | the provider of each pact |
+| gateway | all services | the gateway has no health pact; its own health endpoints are checked by integration tests (`ManagementPortIT`), not by a pact | not applicable |
 
 ## Message (event) interactions
 

@@ -7,6 +7,8 @@ containers. Everything below was executed by the implementation harness; numbers
 
 ## 1. Build and start (quickstart §2, SC-006)
 
+> Superseded by §9 (cold start, T132: 3 min 58 s, SC-006 met), §8 (fresh machine) and §10 (final 768m memory limits); the health check now probes `/actuator/health/readiness` (T129).
+
 | Step | Result |
 |---|---|
 | `docker compose --profile core --profile observability up -d --build` | Seven images built from `platform/docker/Dockerfile` in 24 min with `COMPOSE_PARALLEL_LIMIT=1` (sequential builds sharing one Gradle cache mount). The first attempt with parallel builds failed on Gradle lock contention inside the shared cache; fixed with `sharing=locked` and the sequential default (`platform/compose/scripts/smoke.sh`). |
@@ -56,6 +58,8 @@ the quickstart wording should be aligned.
 
 ## 4. Observability and resilience (quickstart §5-§6, T102)
 
+> Superseded by §10 (acceptance run on the final stack, including the `@observability` scenarios; T131) and §11 (performance run); the gateway access line now carries the trace id (T164), and the health probes are the readiness/liveness groups (T129). The resilience check itself is not repeated in §7-§11.
+
 - **Resilience (SC-008, T102)**: with `catalog` scaled to two replicas, a browse loop every 200 ms kept returning 200
   while one replica was stopped: 60 of 60 requests after the stop succeeded (DNS round-robin with a 5 s TTL plus
   connection-error retry; no Spring Cloud LoadBalancer). To fit the keyring quota, the other services were stopped for
@@ -89,6 +93,8 @@ floor): platform-core 85 %; cart 97.7/95.8; order 98/86; notification 86/88; pay
 catalog 88.2/92.0 (domain/application).
 
 ## 6. Follow-ups recorded
+
+> Superseded by §11 (performance suite run and recorded, T151); the in-memory rate limiter and DNS discovery items remain open.
 
 - Register a self-hosted runner and the private registry (`platform/ci-runner`) so the per-service pipelines run.
 - Run the performance suite (`platform/perf`) on a machine with headroom; no numbers recorded yet (SC-002, SC-003).
