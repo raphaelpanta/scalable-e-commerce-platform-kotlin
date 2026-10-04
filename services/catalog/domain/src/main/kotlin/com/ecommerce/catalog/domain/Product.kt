@@ -94,6 +94,21 @@ data class Product(
         }
 
     /**
+     * Puts a withdrawn product back on sale (data-model section 3.2: withdrawing is reversible by operator). Refused
+     * when the product is on sale already, and while its category is among the [hiddenCategories] (withdrawn or
+     * beneath a withdrawn one): the category must be reinstated first.
+     */
+    fun reinstate(
+        at: Instant,
+        hiddenCategories: Set<CategoryId>,
+    ): Either<CatalogError, Product> =
+        when {
+            isActive -> CatalogError.NotWithdrawn(id).left()
+            details.categoryId in hiddenCategories -> CatalogError.CategoryWithdrawn(id, details.categoryId).left()
+            else -> copy(saleState = SaleState.ACTIVE, updatedAt = at, version = version + 1).right()
+        }
+
+    /**
      * Adds an image; the first image, or one marked [ProductImage.primary], becomes the primary image and demotes the
      * previous one. Refused beyond [MAX_IMAGES].
      */

@@ -17,7 +17,8 @@ info:
     trail. Reads accept an optional bearer token: when it carries the `operator` role,
     `availability.availableQuantity`, withdrawn categories and withdrawn products are included; for
     everyone else they are never exposed. A withdrawn category hides itself, the categories beneath
-    it and their products from shoppers.
+    it and their products from shoppers. Withdrawing is reversible: an operator reinstates a
+    withdrawn product or category; nothing is deleted.
 servers:
   - url: http://localhost:8080
     description: Local platform entry point (API gateway)
@@ -183,6 +184,31 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Product' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/catalog/products/{productId}/reinstatement:
+    post:
+      operationId: reinstateProduct
+      tags: [Products]
+      summary: Put a withdrawn product back on sale
+      description: |
+        Requires role operator. Withdrawing is reversible: the product reappears in browsing and
+        search with the stock it kept and can be added to carts again. Reinstating a product that is
+        on sale answers 409, and so does reinstating one whose category is withdrawn (or beneath a
+        withdrawn one) until that category is reinstated.
+      parameters:
+        - $ref: '#/components/parameters/ProductId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The product, on sale again.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Product' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -375,6 +401,33 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/catalog/categories/{categoryId}/reinstatement:
+    post:
+      operationId: reinstateCategory
+      tags: [Categories]
+      summary: Offer a withdrawn category to shoppers again
+      description: |
+        Requires role operator. Withdrawing is reversible: the category, the categories beneath it
+        and their products that are not withdrawn themselves reappear in browsing and search and
+        accept products again. A category beneath another withdrawn category stays hidden until
+        that one is reinstated too. Reinstating an active category answers 409.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CategoryId'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: The category, active again.
+          headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+              example: { id: 5c2f9a7e-1b34-4d68-8a0e-3f6c1d9b2e45, name: Footwear, description: Shoes and boots, status: active }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 components:
   securitySchemes:
     bearerAuth:
@@ -443,7 +496,7 @@ components:
           schema: { $ref: '#/components/schemas/Problem' }
           example: { type: 'https://ecommerce.example/problems/not-found', title: Not found, status: 404, detail: Product not found., instance: /api/v1/catalog/products/0b4e6d1c-2a57-4c83-9f10-6d8a3e5b7c21 }
     Conflict:
-      description: State conflict, such as a duplicate name or an already withdrawn product or category (409).
+      description: State conflict, such as a duplicate name, an already withdrawn product or category, a reinstatement of one that is not withdrawn, or of a product whose category is withdrawn (409).
       headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
       content:
         application/problem+json:

@@ -37,7 +37,7 @@ A route without `auth`/`tier`, with an unknown value or with another timeout sto
 | `identity-phone-verification` | POST `identity/accounts/me/phone-verifications`, `.../confirm` | authenticated | standard |
 | `catalog-reads` | GET `catalog/products`, `catalog/products/{id}`, `catalog/categories`, `catalog/categories/{id}` | anonymous | browse |
 | `catalog-image-registration` | POST `catalog/products/{id}/images` (body up to 5 MiB) | operator | operator |
-| `catalog-creations` | POST `catalog/products`, `catalog/products/{id}/withdrawal`, `catalog/products/{id}/stock-adjustments`, `catalog/categories`, `catalog/categories/{id}/withdrawal` | operator | operator |
+| `catalog-creations` | POST `catalog/products`, `catalog/products/{id}/withdrawal`, `catalog/products/{id}/reinstatement`, `catalog/products/{id}/stock-adjustments`, `catalog/categories`, `catalog/categories/{id}/withdrawal`, `catalog/categories/{id}/reinstatement` | operator | operator |
 | `catalog-updates` | PUT `catalog/products/{id}`, `catalog/categories/{id}` | operator | operator |
 | `cart-merge` | POST `cart/merge` | authenticated | standard |
 | `cart` | GET, DELETE `cart` | anonymous | standard |

@@ -12,6 +12,8 @@ import com.ecommerce.catalog.application.admin.CategoryInput
 import com.ecommerce.catalog.application.admin.CreateCategory
 import com.ecommerce.catalog.application.admin.CreateProduct
 import com.ecommerce.catalog.application.admin.ProductInput
+import com.ecommerce.catalog.application.admin.ReinstateCategory
+import com.ecommerce.catalog.application.admin.ReinstateProduct
 import com.ecommerce.catalog.application.admin.UpdateCategory
 import com.ecommerce.catalog.application.admin.UpdateProduct
 import com.ecommerce.catalog.application.admin.WithdrawCategory
@@ -35,11 +37,13 @@ class CatalogAdminUseCases(
     val createProduct: CreateProduct,
     val updateProduct: UpdateProduct,
     val withdrawProduct: WithdrawProduct,
+    val reinstateProduct: ReinstateProduct,
     val adjustStock: AdjustStock,
     val addProductImage: AddProductImage,
     val createCategory: CreateCategory,
     val updateCategory: UpdateCategory,
     val withdrawCategory: WithdrawCategory,
+    val reinstateCategory: ReinstateCategory,
 )
 
 /**
@@ -85,6 +89,13 @@ class CatalogAdminHandlers(
             val caller = operator(request, OperatorAction.WITHDRAW_PRODUCT, PRODUCT_ID)
             val productId = ProductId(request.uuidPath(PRODUCT_ID).bind())
             useCases.withdrawProduct(caller, productId).mapLeft { it.toProblem() }.bind()
+        }.toServerResponse(request) { ok(it.toJson()) }
+
+    suspend fun reinstateProduct(request: ServerRequest): ServerResponse =
+        either {
+            val caller = operator(request, OperatorAction.REINSTATE_PRODUCT, PRODUCT_ID)
+            val productId = ProductId(request.uuidPath(PRODUCT_ID).bind())
+            useCases.reinstateProduct(caller, productId).mapLeft { it.toProblem() }.bind()
         }.toServerResponse(request) { ok(it.toJson()) }
 
     suspend fun adjustStock(request: ServerRequest): ServerResponse =
@@ -143,6 +154,13 @@ class CatalogAdminHandlers(
             val caller = operator(request, OperatorAction.WITHDRAW_CATEGORY, CATEGORY_ID)
             val categoryId = CategoryId(request.uuidPath(CATEGORY_ID).bind())
             useCases.withdrawCategory(caller, categoryId).mapLeft { it.toProblem() }.bind()
+        }.toServerResponse(request) { ok(it.toJson()) }
+
+    suspend fun reinstateCategory(request: ServerRequest): ServerResponse =
+        either {
+            val caller = operator(request, OperatorAction.REINSTATE_CATEGORY, CATEGORY_ID)
+            val categoryId = CategoryId(request.uuidPath(CATEGORY_ID).bind())
+            useCases.reinstateCategory(caller, categoryId).mapLeft { it.toProblem() }.bind()
         }.toServerResponse(request) { ok(it.toJson()) }
 
     /**

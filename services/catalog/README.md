@@ -26,6 +26,7 @@ Package root: `com.ecommerce.catalog`.
 | createProduct | `POST /api/v1/catalog/products` | `CreateProduct` | operator |
 | updateProduct | `PUT /api/v1/catalog/products/{productId}` | `UpdateProduct` | operator |
 | withdrawProduct | `POST /api/v1/catalog/products/{productId}/withdrawal` | `WithdrawProduct` | operator |
+| reinstateProduct | `POST /api/v1/catalog/products/{productId}/reinstatement` | `ReinstateProduct` | operator |
 | adjustStock | `POST /api/v1/catalog/products/{productId}/stock-adjustments` | `AdjustStock` | operator |
 | addProductImage | `POST /api/v1/catalog/products/{productId}/images` | `AddProductImage` | operator |
 | listCategories | `GET /api/v1/catalog/categories` (`parentId`, `page`, `size`) | `ListCategories` | anyone |
@@ -33,6 +34,7 @@ Package root: `com.ecommerce.catalog`.
 | createCategory | `POST /api/v1/catalog/categories` | `CreateCategory` | operator |
 | updateCategory | `PUT /api/v1/catalog/categories/{categoryId}` | `UpdateCategory` | operator |
 | withdrawCategory | `POST /api/v1/catalog/categories/{categoryId}/withdrawal` | `WithdrawCategory` | operator |
+| reinstateCategory | `POST /api/v1/catalog/categories/{categoryId}/reinstatement` | `ReinstateCategory` | operator |
 | reserveStock | `POST /internal/reservations` | `ReserveStock` | `X-Internal-Token` |
 | commitReservation | `POST /internal/reservations/{reservationId}/commit` | `CommitReservation` | `X-Internal-Token` |
 | releaseReservation | `POST /internal/reservations/{reservationId}/release` | `ReleaseReservation` | `X-Internal-Token` |
@@ -50,8 +52,16 @@ withdrawn products and withdrawn categories are shown to operators only.
 Withdrawing a category (`V5__category_status.sql`) hides it, every category beneath it and their products from
 shoppers: listings, search, `getProduct`, `listCategories` and `getCategory` leave them out (404 on direct reads),
 pricing reports their products `withdrawn`, reservations count them as unavailable, and creating or moving a product
-into the subtree answers 422 (`categoryId` must be an active category). Withdrawing again answers 409. Search is case-insensitive over name and description, ranked: whole name, name prefix,
-name, description. Validation problems are 422 on the public API (400 for malformed requests and query parameters)
+into the subtree answers 422 (`categoryId` must be an active category). Withdrawing again answers 409.
+
+Withdrawing is reversible, nothing is deleted (data-model section 3.2): `reinstateCategory` makes a withdrawn category
+active again (its subtree reappears unless another withdrawn category sits above it) and `reinstateProduct` puts a
+withdrawn product back on sale with the stock it kept. Reinstating what is not withdrawn answers 409, and so does
+reinstating a product while its category is withdrawn or beneath a withdrawn one. Both are audited like every change.
+
+Search is case-insensitive over name and description, ranked: whole name, name prefix, name, description. The
+`'%term%'` filter on `lower(name)` and `lower(coalesce(description, ''))` is served by the `pg_trgm` GIN indexes of
+`V7__product_search_trigram.sql`. Validation problems are 422 on the public API (400 for malformed requests and query parameters)
 and 400 on the internal API.
 
 Reservations: all or nothing, one per order (a replay answers 200 with the stored reservation), unknown and withdrawn

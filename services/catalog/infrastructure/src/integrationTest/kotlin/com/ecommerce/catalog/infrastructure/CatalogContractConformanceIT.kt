@@ -72,6 +72,13 @@ class CatalogContractConformanceIT : CatalogIntegrationTest() {
         contract.check(call(POST, "$CATEGORIES/${UUID.randomUUID()}/withdrawal", operator()), NOT_FOUND)
         contract.check(call(POST, "$CATEGORIES/$sibling/withdrawal", operator()), OK)
         contract.check(call(POST, "$CATEGORIES/$sibling/withdrawal", operator()), CONFLICT)
+
+        contract.check(call(POST, "$CATEGORIES/$sibling/reinstatement"), UNAUTHORIZED)
+        contract.check(call(POST, "$CATEGORIES/$sibling/reinstatement", shopper()), FORBIDDEN)
+        contract.check(call(POST, "$CATEGORIES/not-a-uuid/reinstatement", operator()), BAD_REQUEST)
+        contract.check(call(POST, "$CATEGORIES/${UUID.randomUUID()}/reinstatement", operator()), NOT_FOUND)
+        contract.check(call(POST, "$CATEGORIES/$sibling/reinstatement", operator()), OK)
+        contract.check(call(POST, "$CATEGORIES/$sibling/reinstatement", operator()), CONFLICT)
     }
 
     private fun products(marker: String) {
@@ -110,6 +117,25 @@ class CatalogContractConformanceIT : CatalogIntegrationTest() {
         contract.check(call(POST, "$PRODUCTS/${UUID.randomUUID()}/withdrawal", operator()), NOT_FOUND)
         contract.check(call(POST, withdrawal, operator()), OK)
         contract.check(call(POST, withdrawal, operator()), CONFLICT)
+
+        reinstatement(item, categoryId)
+    }
+
+    /** Reinstating the withdrawn product at [item]: refused while its category is withdrawn, then once only. */
+    private fun reinstatement(
+        item: String,
+        categoryId: String,
+    ) {
+        val reinstatement = "$item/reinstatement"
+        contract.check(call(POST, reinstatement), UNAUTHORIZED)
+        contract.check(call(POST, reinstatement, shopper()), FORBIDDEN)
+        contract.check(call(POST, "$PRODUCTS/not-a-uuid/reinstatement", operator()), BAD_REQUEST)
+        contract.check(call(POST, "$PRODUCTS/${UUID.randomUUID()}/reinstatement", operator()), NOT_FOUND)
+        contract.check(call(POST, "$CATEGORIES/$categoryId/withdrawal", operator()), OK)
+        contract.check(call(POST, reinstatement, operator()), CONFLICT)
+        contract.check(call(POST, "$CATEGORIES/$categoryId/reinstatement", operator()), OK)
+        contract.check(call(POST, reinstatement, operator()), OK)
+        contract.check(call(POST, reinstatement, operator()), CONFLICT)
     }
 
     private fun inventoryAndImages(

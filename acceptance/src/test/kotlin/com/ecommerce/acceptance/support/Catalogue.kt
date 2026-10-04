@@ -91,11 +91,36 @@ class Catalogue(
 
     fun withdraw(productId: String): ApiResponse = api.post(Paths.withdrawal(productId), null, operator())
 
-    /** Anonymous listing of one category. */
+    fun reinstate(productId: String): ApiResponse = api.post(Paths.reinstatement(productId), null, operator())
+
+    fun withdrawCategory(categoryId: String): ApiResponse =
+        api.post(Paths.categoryWithdrawal(categoryId), null, operator())
+
+    fun reinstateCategory(categoryId: String): ApiResponse =
+        api.post(Paths.categoryReinstatement(categoryId), null, operator())
+
+    /** The operator's attempt to create a product in [categoryId], without asserting the outcome. */
+    fun attemptProduct(
+        name: String,
+        priceMinor: Long,
+        categoryId: String,
+    ): ApiResponse {
+        val body = productBody("$name ${suffix()}", "Must not be created.", priceMinor, categoryId, 1)
+        return api.post(Paths.PRODUCTS, body, operator())
+    }
+
+    /** Anonymous listing of one category, or the operator's (withdrawn products included) when [asOperator]. */
     fun listCategory(
         categoryId: String,
         size: Int = MAX_PAGE,
-    ): ApiResponse = api.get(Paths.query(Paths.PRODUCTS, "categoryId" to categoryId, "page" to 0, "size" to size))
+        asOperator: Boolean = false,
+    ): ApiResponse {
+        val parameters = listOf("categoryId" to categoryId, "page" to 0, "size" to size)
+        val withdrawn = if (asOperator) listOf("includeWithdrawn" to true) else emptyList()
+        return api.get(Paths.query(Paths.PRODUCTS, *(parameters + withdrawn).toTypedArray()), operatorIf(asOperator))
+    }
+
+    private fun operatorIf(asOperator: Boolean): String? = if (asOperator) operator() else null
 
     /** Anonymous free-text search. */
     fun search(term: String): ApiResponse = api.get(Paths.query(Paths.PRODUCTS, "q" to term, "size" to MAX_PAGE))

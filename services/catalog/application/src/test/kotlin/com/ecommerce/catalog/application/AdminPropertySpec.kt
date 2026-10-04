@@ -8,6 +8,8 @@ import com.ecommerce.catalog.application.admin.CategoryInput
 import com.ecommerce.catalog.application.admin.CreateCategory
 import com.ecommerce.catalog.application.admin.CreateProduct
 import com.ecommerce.catalog.application.admin.ProductInput
+import com.ecommerce.catalog.application.admin.ReinstateCategory
+import com.ecommerce.catalog.application.admin.ReinstateProduct
 import com.ecommerce.catalog.application.admin.UpdateCategory
 import com.ecommerce.catalog.application.admin.UpdateProduct
 import com.ecommerce.catalog.application.admin.WithdrawCategory
@@ -34,17 +36,26 @@ import java.util.UUID
 
 private const val ALL: Int = 100
 
+/** One operator use case: its action, the audited target and the attempt by a caller (its error, if any). */
+private typealias Attempt = Triple<OperatorAction, UUID?, suspend (Caller) -> CatalogError?>
+
 /** Every operator use case, invoked with arbitrary (possibly invalid) input on the shelf's first records. */
 private fun attempts(
     harness: Harness,
     shelf: Shelf,
     text: String,
     number: Int,
-): List<Triple<OperatorAction, UUID?, suspend (Caller) -> CatalogError?>> {
+): List<Attempt> = productAttempts(harness, shelf, text, number) + categoryAttempts(harness, shelf, text)
+
+private fun productAttempts(
+    harness: Harness,
+    shelf: Shelf,
+    text: String,
+    number: Int,
+): List<Attempt> {
     val catalog = harness.catalog
-    val category = shelf.categories.first().id
     val product = shelf.products.firstOrNull()?.id ?: ProductId(UUID.randomUUID())
-    val input = ProductInput(text, text, number.toLong(), text, category)
+    val input = ProductInput(text, text, number.toLong(), text, shelf.categories.first().id)
     return listOf(
         Triple(OperatorAction.CREATE_PRODUCT, null, { CreateProduct(catalog)(it, input, number, text).leftOrNull() }),
         Triple(
@@ -53,6 +64,11 @@ private fun attempts(
             { UpdateProduct(catalog)(it, product, input).leftOrNull() },
         ),
         Triple(OperatorAction.WITHDRAW_PRODUCT, product.value, { WithdrawProduct(catalog)(it, product).leftOrNull() }),
+        Triple(
+            OperatorAction.REINSTATE_PRODUCT,
+            product.value,
+            { ReinstateProduct(catalog)(it, product).leftOrNull() },
+        ),
         Triple(
             OperatorAction.ADJUST_STOCK,
             product.value,
@@ -63,6 +79,17 @@ private fun attempts(
             product.value,
             { AddProductImage(catalog)(it, product, text, text, true).leftOrNull() },
         ),
+    )
+}
+
+private fun categoryAttempts(
+    harness: Harness,
+    shelf: Shelf,
+    text: String,
+): List<Attempt> {
+    val catalog = harness.catalog
+    val category = shelf.categories.first().id
+    return listOf(
         Triple(
             OperatorAction.CREATE_CATEGORY,
             null,
@@ -77,6 +104,11 @@ private fun attempts(
             OperatorAction.WITHDRAW_CATEGORY,
             category.value,
             { WithdrawCategory(catalog)(it, category).leftOrNull() },
+        ),
+        Triple(
+            OperatorAction.REINSTATE_CATEGORY,
+            category.value,
+            { ReinstateCategory(catalog)(it, category).leftOrNull() },
         ),
     )
 }
@@ -229,6 +261,65 @@ class AdminPropertySpec :
                     GetProduct(harness.catalog)(SHOPPER, product.id).isRight() shouldBe visible
                     GetProduct(harness.catalog)(OPERATOR, product.id).value().onSale shouldBe visible
                 }
+            }
+        }
+
+        test("reinstating a category shows exactly what withdrawing it hid, unless an ancestor is still withdrawn") {
+            checkAll(CatalogArbs.shelf, Arb.int(0..Int.MAX_VALUE)) { spec, pick ->
+                val harness = Harness()
+                val shelf = harness.shelve(spec)
+                val index = pick % shelf.categories.size
+                val target = shelf.categories[index]
+
+                val outcome = ReinstateCategory(harness.catalog)(OPERATOR, target.id)
+
+                val after = spec.copy(withdrawnCategories = spec.withdrawnCategories - index)
+                if (target.isActive) {
+                    outcome.error() shouldBe CatalogError.CategoryNotWithdrawn(target.id)
+                    harness.audit.entries.shouldBeEmpty()
+                } else {
+                    outcome.value().status shouldBe CategoryStatus.ACTIVE
+                    harness.audit.lines shouldContainExactly
+                        listOf("changed:${OPERATOR_ID.value}:reinstateCategory:${target.id.value}")
+                }
+                harness.catalog.hiddenCategories() shouldBe shelf.hidden(after)
+                val everything = PageRequest.of(0, ALL).valid()
+                ListProducts(harness.catalog)(SHOPPER, null, true, everything).items.map {
+                    it.product.id
+                } shouldContainExactlyInAnyOrder
+                    shelf.onSale(after).map { it.id }
+            }
+        }
+
+        test("a withdrawn product is reinstated exactly when its category is shown to shoppers") {
+            checkAll(CatalogArbs.shelf) { spec ->
+                val harness = Harness()
+                val shelf = harness.shelve(spec)
+                val hidden = shelf.hidden(spec)
+
+                shelf.products.forEach { product ->
+                    val outcome = ReinstateProduct(harness.catalog)(OPERATOR, product.id)
+                    val category = product.details.categoryId
+                    when {
+                        product.isActive -> {
+                            outcome.error() shouldBe CatalogError.NotWithdrawn(product.id)
+                        }
+
+                        category in hidden -> {
+                            outcome.error() shouldBe CatalogError.CategoryWithdrawn(product.id, category)
+                        }
+
+                        else -> {
+                            outcome.value().onSale shouldBe true
+                            GetProduct(harness.catalog)(SHOPPER, product.id).isRight() shouldBe true
+                        }
+                    }
+                }
+                val reinstated = shelf.products.filter { !it.isActive && it.details.categoryId !in hidden }
+                harness.audit.entries.map { it.targetId } shouldContainExactly reinstated.map { it.id.value }
+                harness.audit.entries.all { it.action == OperatorAction.REINSTATE_PRODUCT } shouldBe true
+                harness.products.products.values
+                    .count { it.isActive } shouldBe shelf.products.count { it.isActive } + reinstated.size
             }
         }
 

@@ -60,6 +60,8 @@ class CatalogAuditIT : CatalogIntegrationTest() {
             Triple(HttpMethod.POST, CATEGORIES, emptyMap<String, Any>()),
             Triple(HttpMethod.PUT, "$CATEGORIES/not-a-uuid", mapOf("name" to "x")),
             Triple(HttpMethod.POST, "$CATEGORIES/not-a-uuid/withdrawal", null),
+            Triple(HttpMethod.POST, "$PRODUCTS/not-a-uuid/reinstatement", null),
+            Triple(HttpMethod.POST, "$CATEGORIES/not-a-uuid/reinstatement", null),
         )
 
     @Test
@@ -78,6 +80,8 @@ class CatalogAuditIT : CatalogIntegrationTest() {
         val productId = call(HttpMethod.POST, PRODUCTS, operator(), body, correlationId).json(CREATED)["id"]
         call(HttpMethod.POST, "$PRODUCTS/$productId/withdrawal", operator(), null, correlationId).json(OK)
         call(HttpMethod.POST, "$CATEGORIES/$categoryId/withdrawal", operator(), null, correlationId).json(OK)
+        call(HttpMethod.POST, "$CATEGORIES/$categoryId/reinstatement", operator(), null, correlationId).json(OK)
+        call(HttpMethod.POST, "$PRODUCTS/$productId/reinstatement", operator(), null, correlationId).json(OK)
         // A change refused for its content is not a change: no entry.
         call(HttpMethod.PUT, "$CATEGORIES/$categoryId", operator(), mapOf("name" to ""), correlationId)
             .expectProblem(ProblemType.VALIDATION, UNPROCESSABLE)
@@ -90,6 +94,8 @@ class CatalogAuditIT : CatalogIntegrationTest() {
                 performed("createProduct", "product", productId, correlationId),
                 performed("withdrawProduct", "product", productId, correlationId),
                 performed("withdrawCategory", "category", categoryId, correlationId),
+                performed("reinstateCategory", "category", categoryId, correlationId),
+                performed("reinstateProduct", "product", productId, correlationId),
             )
         recorded.forEach { row ->
             val at =
@@ -134,6 +140,8 @@ class CatalogAuditIT : CatalogIntegrationTest() {
                 "createCategory",
                 "updateCategory",
                 "withdrawCategory",
+                "reinstateProduct",
+                "reinstateCategory",
             )
         recorded.single { it["action"] == "withdrawProduct" }["target_id"] shouldBe null
         recorded.single { it["action"] == "updateProduct" }["target_id"] shouldBe UUID.fromString(productId)

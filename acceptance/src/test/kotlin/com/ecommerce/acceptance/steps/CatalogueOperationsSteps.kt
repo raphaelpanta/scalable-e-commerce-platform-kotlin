@@ -7,6 +7,7 @@ import com.ecommerce.acceptance.support.items
 import com.ecommerce.acceptance.support.list
 import com.ecommerce.acceptance.support.minor
 import com.ecommerce.acceptance.support.requireString
+import com.ecommerce.acceptance.support.shouldBeProblem
 import com.ecommerce.acceptance.support.shouldHaveStatus
 import com.ecommerce.acceptance.support.string
 import io.cucumber.java.en.Then
@@ -73,6 +74,42 @@ class CatalogueOperationsSteps(
         world.catalogue.withdraw(world.product(alias).id) shouldHaveStatus Status.OK
     }
 
+    @When("the operator withdraws the category {string}")
+    fun theOperatorWithdrawsTheCategory(category: String) {
+        world.catalogue.withdrawCategory(categoryId(category)) shouldHaveStatus Status.OK
+    }
+
+    @When("the operator reinstates the category {string}")
+    fun theOperatorReinstatesTheCategory(category: String) {
+        world.catalogue.reinstateCategory(categoryId(category)) shouldHaveStatus Status.OK
+    }
+
+    @When("the operator reinstates {string}")
+    fun theOperatorReinstates(alias: String) {
+        val reinstated = world.catalogue.reinstate(world.product(alias).id)
+        reinstated shouldHaveStatus Status.OK
+        reinstated.body.string("status") shouldBe "active"
+    }
+
+    @Then("the operator cannot reinstate {string} while its category is withdrawn")
+    fun theOperatorCannotReinstate(alias: String) {
+        world.catalogue.reinstate(world.product(alias).id).shouldBeProblem(Status.CONFLICT, "conflict")
+        world.catalogue.view(world.product(alias).id) shouldHaveStatus Status.NOT_FOUND
+    }
+
+    @Then("the operator cannot create a product in the withdrawn category {string}")
+    fun theOperatorCannotCreateAProductIn(category: String) {
+        val categoryId = categoryId(category)
+        world.catalogue
+            .attemptProduct("Refused", REFUSED_PRICE, categoryId)
+            .shouldBeProblem(Status.UNPROCESSABLE, "validation")
+        world.catalogue.listCategory(categoryId, asOperator = true).body.items().forEach {
+            withClue("products of the withdrawn category '$category'") {
+                it.requireString("name").startsWith("Refused ") shouldBe false
+            }
+        }
+    }
+
     @Then("{string} no longer appears when browsing or searching")
     fun noLongerAppears(alias: String) {
         val product = world.product(alias)
@@ -96,7 +133,11 @@ class CatalogueOperationsSteps(
         order.body.string("orderStatus") shouldBe "placed"
     }
 
+    private fun categoryId(alias: String): String =
+        checkNotNull(world.categories[alias]) { "No category '$alias' in this scenario" }
+
     private companion object {
         val RECENT: Duration = Duration.ofMinutes(5)
+        const val REFUSED_PRICE = 1000L
     }
 }

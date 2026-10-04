@@ -5,8 +5,13 @@ import com.ecommerce.platform.testing.ProblemAssertions.expectProblem
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.springframework.http.HttpMethod
+import reactor.core.publisher.Flux
+import reactor.core.publisher.Mono
+import java.time.Duration
 import java.util.UUID
 
 private const val OK = 200
@@ -20,6 +25,15 @@ private const val GARDEN_PRODUCTS = 3
 private const val MAX_SIZE = 100
 private const val MATCHES = 4
 private const val DEFAULT_PRICE = 1990
+private val PLAN_TIMEOUT: Duration = Duration.ofSeconds(10)
+
+/**
+ * The search filter exactly as `R2dbcProductRepository` writes it (`MATCHES`, bound pattern, backslash escape), under
+ * EXPLAIN.
+ */
+private const val SEARCH_PLAN =
+    "EXPLAIN SELECT p.id FROM products p WHERE (lower(p.name) LIKE $1 ESCAPE '\\' " +
+        "OR lower(coalesce(p.description, '')) LIKE $1 ESCAPE '\\')"
 
 @Suppress("UNCHECKED_CAST")
 private fun Json.items(): List<Json> = this["items"] as List<Json>
@@ -97,6 +111,37 @@ class CatalogQueryIT : CatalogIntegrationTest() {
             MATCHES + 1
         call(HttpMethod.GET, "$PRODUCTS?q=${term.dropLast(1)}_").json(OK)["totalItems"] shouldBe 0
         call(HttpMethod.GET, "$PRODUCTS?q=$term&categoryId=${category()}").json(OK)["totalItems"] shouldBe 0
+    }
+
+    @Test
+    fun `the search filter is served by the trigram indexes of V7, not by a sequential scan`() {
+        // With sequential scans disabled the planner falls back to one only when no index can serve the predicate.
+        val plan =
+            database
+                .inConnection { connection ->
+                    Flux
+                        .concat(
+                            Flux
+                                .from(connection.createStatement("SET enable_seqscan = off").execute())
+                                .flatMap { it.rowsUpdated }
+                                .then(Mono.empty<String>()),
+                            Flux
+                                .from(connection.createStatement(SEARCH_PLAN).bind(0, "%lantern%").execute())
+                                .flatMap { result ->
+                                    result.map { row, _ -> row.get(0, String::class.java).orEmpty() }
+                                },
+                            Flux
+                                .from(connection.createStatement("RESET enable_seqscan").execute())
+                                .flatMap { it.rowsUpdated }
+                                .then(Mono.empty<String>()),
+                        ).collectList()
+                }.block(PLAN_TIMEOUT)
+                .orEmpty()
+                .joinToString("\n")
+
+        plan shouldContain "products_name_trgm"
+        plan shouldContain "products_description_trgm"
+        plan shouldNotContain "Seq Scan"
     }
 
     @Test

@@ -1,7 +1,7 @@
 @us7
 Feature: Operate the catalogue and inventory
-  A store operator creates products and categories, sets prices, adjusts stock levels and withdraws products from
-  sale. Only accounts with the operator role can do this, and every change is attributed.
+  A store operator creates products and categories, sets prices, adjusts stock levels and withdraws products and
+  categories from sale, reversibly. Only accounts with the operator role can do this, and every change is attributed.
 
   Background:
     Given an operator is signed in
@@ -32,6 +32,25 @@ Feature: Operate the catalogue and inventory
     And "Hammock" can no longer be added to a cart
     And the shopper's order still lists 1 "Hammock" at 75.00
 
+  Scenario: Withdrawing a category hides its products, keeps them out of carts and refuses new products in it
+    Given a new category "Garden"
+    And the operator creates a product "Watering can" in "Garden" priced at 35.00 with 5 units in stock
+    When the operator withdraws the category "Garden"
+    Then "Watering can" no longer appears when browsing or searching
+    And "Watering can" can no longer be added to a cart
+    And the operator cannot create a product in the withdrawn category "Garden"
+
+  Scenario: Reinstating a withdrawn category, then its withdrawn product, puts the product back on sale
+    Given a new category "Patio"
+    And the operator creates a product "Parasol" in "Patio" priced at 90.00 with 4 units in stock
+    And the operator withdraws "Parasol" from sale
+    And the operator withdraws the category "Patio"
+    Then the operator cannot reinstate "Parasol" while its category is withdrawn
+    When the operator reinstates the category "Patio"
+    And the operator reinstates "Parasol"
+    Then an anonymous shopper finds "Parasol" in the "Patio" category at 90.00 in stock
+    And a shopper can add 1 "Parasol" to a cart
+
   Scenario Outline: A shopper cannot change the catalogue
     Given a product "Lamp" priced at 50.00 with 5 units in stock
     And a signed-in shopper
@@ -44,4 +63,6 @@ Feature: Operate the catalogue and inventory
       | change the price of a product |
       | adjust stock                  |
       | withdraw a product            |
+      | reinstate a product           |
       | create a category             |
+      | reinstate a category          |

@@ -18,11 +18,13 @@ enum class OperatorAction(
     CREATE_PRODUCT("createProduct", AuditTarget.PRODUCT),
     UPDATE_PRODUCT("updateProduct", AuditTarget.PRODUCT),
     WITHDRAW_PRODUCT("withdrawProduct", AuditTarget.PRODUCT),
+    REINSTATE_PRODUCT("reinstateProduct", AuditTarget.PRODUCT),
     ADJUST_STOCK("adjustStock", AuditTarget.PRODUCT),
     ADD_PRODUCT_IMAGE("addProductImage", AuditTarget.PRODUCT),
     CREATE_CATEGORY("createCategory", AuditTarget.CATEGORY),
     UPDATE_CATEGORY("updateCategory", AuditTarget.CATEGORY),
     WITHDRAW_CATEGORY("withdrawCategory", AuditTarget.CATEGORY),
+    REINSTATE_CATEGORY("reinstateCategory", AuditTarget.CATEGORY),
 }
 
 /** Whether the operator capability was performed or refused for lack of the operator role. */

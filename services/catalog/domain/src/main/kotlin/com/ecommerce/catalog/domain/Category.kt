@@ -61,6 +61,18 @@ data class Category(
             CatalogError.CategoryAlreadyWithdrawn(id).left()
         }
 
+    /**
+     * Offers a withdrawn category to shoppers again (withdrawing is reversible by operator); reinstating an active
+     * category is refused. Its products keep their own sale state, and a category beneath a withdrawn one stays
+     * hidden until that one is reinstated too ([CategoryTree.hidden]).
+     */
+    fun reinstate(at: Instant): Either<CatalogError, Category> =
+        if (isActive) {
+            CatalogError.CategoryNotWithdrawn(id).left()
+        } else {
+            copy(status = CategoryStatus.ACTIVE, updatedAt = at, version = version + 1).right()
+        }
+
     companion object {
         /** Nesting depth limit: a root category has depth 1. */
         const val MAX_DEPTH: Int = 4

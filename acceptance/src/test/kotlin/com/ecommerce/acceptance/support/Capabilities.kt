@@ -57,12 +57,15 @@ class Capabilities(
             "change the price of a product" to
                 Operation("updateProduct", "PUT", Paths.product(productId), product - "initialStock"),
             "withdraw a product" to Operation("withdrawProduct", "POST", Paths.withdrawal(productId)),
+            "reinstate a product" to Operation("reinstateProduct", "POST", Paths.reinstatement(productId)),
             "adjust stock" to Operation("adjustStock", "POST", Paths.stockAdjustments(productId), stock),
             "add a product image" to Operation("addProductImage", "POST", Paths.images(productId), image),
             "create a category" to Operation("createCategory", "POST", Paths.CATEGORIES, mapOf("name" to "Forbidden")),
             "update a category" to
                 Operation("updateCategory", "PUT", Paths.category(categoryId), mapOf("name" to "Forbidden")),
             "withdraw a category" to Operation("withdrawCategory", "POST", Paths.categoryWithdrawal(categoryId)),
+            "reinstate a category" to
+                Operation("reinstateCategory", "POST", Paths.categoryReinstatement(categoryId)),
         )
     }
 
