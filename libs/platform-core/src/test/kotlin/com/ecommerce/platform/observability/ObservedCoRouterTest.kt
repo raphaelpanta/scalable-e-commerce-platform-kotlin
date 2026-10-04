@@ -59,6 +59,7 @@ class ObservedCoRouterTest(
     @TestConfiguration(proxyBeanMethods = false)
     class Routes {
         @Bean
+        @Suppress("InjectDispatcher") // the test deliberately hops to another dispatcher to prove the MDC survives it
         fun mdcRoutes() =
             observedCoRouter {
                 GET("/api/v1/public/mdc/{mode}") { request ->
