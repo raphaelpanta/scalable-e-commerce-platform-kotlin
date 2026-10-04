@@ -23,6 +23,12 @@ spring:
           httpclient:
             connect-timeout: 2000
             response-timeout: 10s
+            pool:
+              # Pooled upstream connections are recycled, so a service scaled up behind its DNS name receives traffic
+              # within max-life-time even from a light client that would otherwise reuse one keep-alive connection
+              # forever (resilience.sh, scale-up proof; SC-008).
+              max-idle-time: 15s
+              max-life-time: 30s
           default-filters:
             # Idempotent reads are retried, and only when no connection could be opened (DNS lists every instance; a
             # refused connection moves on to another one). Upstream statuses are never retried. POSTs are retried on

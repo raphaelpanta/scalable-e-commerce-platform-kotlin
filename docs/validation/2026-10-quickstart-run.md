@@ -227,3 +227,35 @@ included, and the restarts starved the services of CPU). The 10k dataset's price
 total ends in 13 or 14 (the simulator's decline rule), which had produced `payment-declined` checkout failures. The
 dataset was removed again afterwards (`seed-10k-apply.sh --remove`); the catalogue holds the 20 seed products plus the
 products the acceptance scenarios created.
+
+## 12. Phase 14 live runs (2026-10-03, T170, T176, T177, T180, T181, T185)
+
+Stack rebuilt from the Phase 14 merge (all seven images, shared build stage), started with
+`-f docker-compose.yml -f ../perf/compose.perf.yml` (rate-limit override, 2-minute order payment window) and
+`COMPOSE_PARALLEL_LIMIT=1`, `GATEWAY_PORT=18080`, `IDENTITY_SIGNING_KEY` from `.env`.
+
+- **Image health rehearsal (T170).** `.github/scripts/image-health.sh <service> ecommerce-platform/<service>:local`
+  for all seven services: every readiness group answered UP within 16 to 18 s (identity included, with the generated
+  signing key).
+- **Acceptance suite (T176, T181, T185).** `GATEWAY_URL=http://localhost:18080 ./gradlew -q :acceptance:test
+  -Dcucumber.filter.tags="not @chaos"`: 106 scenarios, 0 failures, 1 skipped (the excluded `@chaos` one), 5 min 51 s.
+  New in this run: the payment-expiry scenario (`PAYMENT_EXPIRED`, stock back, attempts voided, 128 s with the 2-minute
+  window), the category-withdrawal and reinstatement scenarios, the shopper/operator sweep rows for the reinstate
+  operations, and the central-log step requiring the order, payment and notification services.
+- **Performance suite (T177).** Rows "Phase 14" in `platform/perf/README.md`, "Recorded results": the trigram index
+  makes search as fast as the list, but neither the index nor `--scale catalog=2` brings the 1,000/100 profile near its
+  thresholds on this machine (p95 7.7 s, 37.5 % browse failures, 179 requests/s), and the 200/20 profile now misses
+  SC-002 by up to 0.3 s (p95 1.0 to 1.3 s, no errors). Recorded as a Known deviation in `docs/architecture.md`. Two
+  environment effects worth knowing: the Podman machine as left by a day of Testcontainers runs was two to three times
+  slower than after `podman machine stop/start`, and a freshly started service answers two times slower during its
+  first minute (JIT), so the numbers come from a restarted machine and a warmed stack. k6 ran inside the stack network
+  (`K6_NETWORK=ecommerce-platform_internal`, new option of `run.sh`) to keep the VM port-forward out of the path.
+- **Resilience script (T180).** `platform/compose/scripts/resilience.sh --no-build` (first full run of the T153
+  version). The first attempt failed its scale-up proof: after the catalog was scaled back to two, the new replica got
+  no request in 90 s because the gateway kept reusing its pooled keep-alive connection to the survivor (a light
+  sequential load never needs a second connection, so DNS was never consulted again). The gateway now recycles pooled
+  upstream connections (`httpclient.pool.max-life-time` 30 s, `max-idle-time` 15 s; `docs/gateway.md`). Second run,
+  3 min 4 s, exit 0: 0 non-2xx of 92 browse requests after stopping one catalog replica; the new replica handled its
+  first requests within the proof window (5 against 210 for the survivor) with 0 non-2xx of 289 requests during the
+  scale-up; 8 x 401 and no 5xx from sign-ins with two identity replicas, and 8 x 401, no 429 and nothing else after
+  stopping one of them (the gateway's connection-error-only POST retry, T180).

@@ -80,6 +80,10 @@ at most 5 s (instead of the record's own TTL) and selects the returned addresses
 services' internal clients (`WebClientDefaults.httpClient` in platform-core). The image also sets
 `networkaddress.cache.ttl=5` for lookups through the JDK resolver.
 
+Pooled upstream connections live at most 30 s (`httpclient.pool.max-life-time`, idle 15 s): a replica added behind
+a service name receives traffic within that time even from a client that would otherwise keep reusing one keep-alive
+connection (the scale-up proof of `platform/compose/scripts/resilience.sh`, SC-008).
+
 ### Timeouts and retries
 
 Connect timeout 2 s. Upstream response timeout per tier (route metadata `response-timeout`): auth 5 s, browse

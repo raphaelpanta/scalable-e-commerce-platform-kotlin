@@ -51,7 +51,8 @@ BROWSE_VUS=100 CHECKOUT_VUS=10 DURATION=1m platform/perf/run.sh   # quick rehear
 Environment (all optional): `GATEWAY_URL` (`http://localhost:8080`), `MAILPIT_URL` (`http://localhost:8025`),
 `BROWSE_VUS` (1000), `CHECKOUT_VUS` (100, `0` disables the scenario), `DURATION` (hold time, `3m`), `RAMP_UP` (`2m`),
 `THINK_TIME` (seconds between requests of a browsing shopper, 1), `CHECKOUT_PACE` (minimum seconds between two orders
-of one shopper, 5), `PERF_PRODUCTS` (10000), `K6_IMAGE`, `CONTAINER_ENGINE`, `K6_HOST`. `run.sh` prints the full list.
+of one shopper, 5), `PERF_PRODUCTS` (10000), `K6_IMAGE`, `CONTAINER_ENGINE`, `K6_HOST`, `K6_NETWORK` (with
+`K6_GATEWAY_URL` and `K6_MAILPIT_URL`, see below). `run.sh` prints the full list.
 
 Exit status: `0` all thresholds met, `99` a threshold was crossed (k6's own code), `2` the stack is not reachable.
 
@@ -63,6 +64,9 @@ so `run.sh` rewrites `localhost` in the URLs to `host.docker.internal` (Docker) 
 `cd platform/perf && k6 run -e GATEWAY_URL=http://localhost:8080 browse-and-checkout.js`.
 With Podman build the stack with `BUILDAH_FORMAT=docker` as described in `platform/compose/README.md`. The container
 raises the file-descriptor limit (`--ulimit nofile=65536`) for the 1,000 connections.
+`K6_NETWORK=ecommerce-platform_internal` runs k6 inside the stack's own network instead, against
+`K6_GATEWAY_URL` (default `http://gateway:8080`) and `K6_MAILPIT_URL` (default `http://mailpit:8025`), so no VM
+port-forward sits in the measured path; `GATEWAY_URL` then stays the host address used by the pre-flight and the seed.
 
 ## What the scenarios do
 
@@ -125,8 +129,9 @@ verification mail within seconds.
 - **In-memory rate limiter per gateway instance** (MVP deviation in `docs/gateway.md`). The override lifts it for the
   run; with several gateway instances every instance has its own buckets, so a limit measured on one instance says
   little about a scaled deployment.
-- Catalogue search is a case-insensitive `LIKE` over name and description (no full-text index), so its cost grows with
-  the catalogue: that is what SC-002 is meant to catch at 10,000 products.
+- Catalogue search is a case-insensitive `LIKE` over name and description served by trigram GIN indexes
+  (`V7__product_search_trigram.sql`, `pg_trgm`; a plan test in `CatalogQueryIT` keeps them in use), so since Phase 14
+  its p95 is the same as the list's; before the index search was the slowest browse request (550 vs 377 ms at 200 users).
 - 1,000 VUs with a 1 s think time generate roughly 1,000 requests per second, more than the 1,000 *shoppers* a human
   think time would produce; it is a deliberately conservative reading of SC-003. Raise `THINK_TIME` for a softer one.
 - Registration answers `202` (`identity.yaml`, `registerAccount`; the same generic body for an existing email). The script
@@ -145,6 +150,9 @@ gateway on port 18080 with `compose.perf.yml`; 10,000 products (`seed-10k.sql`);
 | 2026-10-03 | 1,000 / 100 | 7,687 / 7,659 / 7,739 / 7,647 ms | 42.4 % (gateway 504 after 5 s) | 187 | 53.4 % (503 behind the catalogue) | 0 | 163 | **FAIL** (every threshold) |
 | 2026-10-03 | 400 / 40 | 2,854 / 2,449 / 3,155 / 2,734 ms | 0 % | 1,074 | 0 % | 0 | 153 | **FAIL** (SC-002 latency only) |
 | 2026-10-03 | 200 / 20 | 457 / 377 / 550 / 437 ms | 0 % | 956 | 0 % | 0 | 152 | **PASS** (every threshold) |
+| 2026-10-03 (Phase 14, `--scale catalog=2`, k6 in-network) | 1,000 / 100 | 7,730 / 8,033 / 8,064 / 6,610 ms | 37.5 % (504) | 216 | 42.4 % | 0 | 179 | **FAIL** (every threshold) |
+| 2026-10-03 (Phase 14, `--scale catalog=2`, k6 in-network) | 200 / 20 | 2,403 / 2,177 / 2,574 / 2,378 ms | 0 % | 1,828 | 0 % | 0 | 111 | **FAIL** (SC-002 latency only) |
+| 2026-10-03 (Phase 14, one catalog, k6 in-network) | 200 / 20 | 1,183 / 1,002 / 1,290 / 1,141 ms | 0 % | 582 | 0 % | 0 | 123 | **FAIL** (SC-002 latency only, by 0.0 to 0.3 s) |
 
 Reading: the stack serves about 150 to 160 requests per second through the gateway on this machine. 200 users with a
 1 s think time ask for about that much, so they are served within SC-002; from 400 users on the catalog service sits at
@@ -153,6 +161,18 @@ gateway's 5 s upstream timeout turns waits into 504 and the cart and order calls
 users). SC-002 and SC-003 are therefore met at 200/20 and not at the specified 1,000/100 on a single laptop that also
 runs the load generator; the full profile needs a scaled catalogue (`--scale catalog=N`, more CPUs per service) or a
 separate, larger machine.
+
+Phase 14 re-run (task T177): the trigram index and `--scale catalog=2` on the same machine (`DURATION` 2m, `RAMP_UP` 1m,
+k6 inside the stack network with `K6_NETWORK`, after a `podman machine stop/start` and a two-minute warm-up: on the
+machine as left by a day of Testcontainers runs the same profiles were two to three times slower, and a cold JVM adds
+a further factor of two in its first minute). The second catalog replica does not help: the VM's 8 vCPUs are shared by
+20 containers and the load generator, the single catalog is throttled by its `cpus: 1.0` quota in 55 % of the
+scheduler periods at 200 users (`/sys/fs/cgroup/cpu.stat`), and with two replicas latency got worse, not better. Search
+is no longer slower than the list (the index removed that penalty), but the 200/20 profile that met SC-002 in the
+morning now sits at a p95 of 1.0 to 1.3 s; the difference is not explained by one change (the per-resumption
+thread-local propagation of T179 costs about 10 % in an A/B run with the plain `coRouter`). **Verified capacity on this
+machine: no errors up to 200 browsing + 20 checkout users (SC-003), browse p95 about 1.2 s there (SC-002 missed by up to
+0.3 s), and the specified 1,000/100 profile fails every threshold**; see `docs/architecture.md`, Known deviations.
 
 Fixes made while recording these runs (the first 1,000-user attempts had catalog, cart and Tempo OOM-killed): the JVM
 heap is 40 % of the 768 MiB limit, Netty's direct buffers are capped at 128 MiB and glibc keeps two malloc arenas

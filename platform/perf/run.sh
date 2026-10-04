@@ -14,6 +14,10 @@
 #   K6_HOST            host name the container uses for the machine's localhost (macOS/Windows engines; default
 #                      host.docker.internal, host.containers.internal with Podman). On Linux the container shares the
 #                      host network and URLs are used as given.
+#   K6_NETWORK         run k6 inside this container network (e.g. ecommerce-platform_internal) against
+#                      K6_GATEWAY_URL (default http://gateway:8080) and K6_MAILPIT_URL (default http://mailpit:8025);
+#                      GATEWAY_URL stays the host-side address used by the pre-flight and the seed. The load then skips
+#                      the VM's host port-forward, which caps a macOS Podman machine at roughly 150 requests per second
 #   COMPOSE_CMD        Compose command used by seed-10k-apply.sh (default "docker compose")
 set -euo pipefail
 
@@ -73,7 +77,16 @@ NETWORK=()
 MOUNT_OPTIONS=""
 CONTAINER_GATEWAY_URL="$GATEWAY_URL"
 CONTAINER_MAILPIT_URL="$MAILPIT_URL"
-if [[ "$(uname -s)" == "Linux" ]]; then
+if [[ -n "${K6_NETWORK:-}" ]]; then
+  # Inside the stack's own network: the pre-flight and the seed still use GATEWAY_URL from the host, k6 talks to the
+  # containers by service name, so no port-forward sits in the measured path.
+  NETWORK=(--network "$K6_NETWORK")
+  CONTAINER_GATEWAY_URL="${K6_GATEWAY_URL:-http://gateway:8080}"
+  CONTAINER_MAILPIT_URL="${K6_MAILPIT_URL:-http://mailpit:8025}"
+  if "$ENGINE" --version 2>/dev/null | grep -qi podman; then
+    MOUNT_OPTIONS=":z"
+  fi
+elif [[ "$(uname -s)" == "Linux" ]]; then
   NETWORK=(--network host)
   if "$ENGINE" --version 2>/dev/null | grep -qi podman; then
     MOUNT_OPTIONS=":z"
