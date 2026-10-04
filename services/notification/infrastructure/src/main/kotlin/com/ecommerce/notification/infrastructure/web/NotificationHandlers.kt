@@ -11,7 +11,6 @@ import com.ecommerce.notification.application.FailedFilter
 import com.ecommerce.notification.application.Forbidden
 import com.ecommerce.notification.application.ListFailed
 import com.ecommerce.notification.application.ListOwn
-import com.ecommerce.notification.application.OwnFilter
 import com.ecommerce.notification.application.Page
 import com.ecommerce.notification.application.PageRequest
 import com.ecommerce.notification.application.RetryFailed
@@ -28,7 +27,6 @@ import com.ecommerce.platform.problem.toServerResponse
 import com.ecommerce.platform.security.AccountPrincipal
 import com.ecommerce.platform.security.Role
 import com.ecommerce.platform.security.requireAccount
-import com.ecommerce.platform.security.requireShopper
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.web.reactive.function.server.ServerRequest
@@ -66,10 +64,10 @@ fun AccountPrincipal.toCaller(): Caller =
 
 /**
  * Handlers of `listOwnNotifications` (shopper), `listFailedNotifications` (operator) and `retryFailedNotification`
- * (operator). An anonymous request is refused first (401); the shopper listing checks its role here, while the
- * operator use cases receive the caller and refuse non-operators themselves ([Forbidden], answered 403, deny by
- * default). Malformed parameters answer 400 `validation`. Bodies follow the contract's `Notification` schema: no
- * message body and no recipient address, `accountId` for operators only.
+ * (operator). An anonymous request is refused first (401); every use case then receives the caller and refuses a
+ * caller without its role itself ([Forbidden], answered 403, deny by default), and the shopper listing derives the
+ * account filter from the caller. Malformed parameters answer 400 `validation`. Bodies follow the contract's
+ * `Notification` schema: no message body and no recipient address, `accountId` for operators only.
  */
 class NotificationHandlers(
     private val ownNotifications: ListOwn,
@@ -78,14 +76,12 @@ class NotificationHandlers(
 ) {
     suspend fun listOwn(request: ServerRequest): ServerResponse =
         either {
-            val shopper = requireShopper().bind()
-            val filter =
-                OwnFilter(
-                    AccountId(shopper.accountId),
-                    channel(request).bind(),
-                    kind(request).bind(),
-                )
-            ownNotifications(filter, page(request).bind())
+            val caller = requireAccount().bind().toCaller()
+            val channel = channel(request).bind()
+            val kind = kind(request).bind()
+            ownNotifications(caller, page(request).bind(), channel, kind)
+                .mapLeft { Problem.forbidden("This operation requires the shopper role.") }
+                .bind()
         }.toServerResponse(request) { ok(NotificationViews.page(it, operator = false)) }
 
     suspend fun listFailed(request: ServerRequest): ServerResponse =
