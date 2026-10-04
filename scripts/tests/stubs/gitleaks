@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Fake `gitleaks version` (STUB_GITLEAKS_VERSION, default 8.21.2).
+set -euo pipefail
+source "$(dirname "$0")/_stub_lib.sh"
+stub_log "$@"
+stub_version_tool gitleaks 8.21.2 '%s'

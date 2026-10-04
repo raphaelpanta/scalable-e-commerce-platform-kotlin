@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Fake `java`: `-version` on stderr like a real JDK. STUB_JAVA_VERSION (default 25.0.4).
+set -euo pipefail
+source "$(dirname "$0")/_stub_lib.sh"
+stub_log "$@"
+stub_is_absent java && stub_not_found java
+v="${STUB_JAVA_VERSION:-25.0.4}"
+printf 'openjdk version "%s" 2026-01-20 LTS\nOpenJDK Runtime Environment Temurin-%s+9 (build %s+9-LTS)\n' "$v" "$v" "$v" >&2

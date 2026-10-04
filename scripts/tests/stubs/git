@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Fake git: logs every call, answers `--version` from STUB_GIT_VERSION, passes everything else to the real git
+# (STUB_REAL_GIT, recorded by the fixture) so check-ignore and config work in the temporary repository.
+set -euo pipefail
+source "$(dirname "$0")/_stub_lib.sh"
+stub_log "$@"
+stub_is_absent git && stub_not_found git
+case "${1:-}" in
+  --version) printf 'git version %s\n' "${STUB_GIT_VERSION:-2.46.0}"; exit 0 ;;
+esac
+exec "${STUB_REAL_GIT:?STUB_REAL_GIT must point to the real git}" "$@"

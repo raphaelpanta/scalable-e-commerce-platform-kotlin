@@ -30,7 +30,8 @@ compose() {
 }
 
 # Creates .env from the example when missing (example values are safe for local use), and gives it a fresh
-# identity signing key (IDENTITY_SIGNING_KEY, required by identity, never committed) when it has none.
+# identity signing key (IDENTITY_SIGNING_KEY, required by identity, never committed) and a fresh browser session
+# key (BROWSER_SESSION_KEY, required by the gateway for the storefront) when it has none. A non-empty value is kept.
 ensure_env() {
   if [[ ! -f "$COMPOSE_DIR/.env" ]]; then
     cp "$COMPOSE_DIR/.env.example" "$COMPOSE_DIR/.env"
@@ -38,13 +39,19 @@ ensure_env() {
     log "created .env from .env.example"
   fi
   if ! grep -Eq '^IDENTITY_SIGNING_KEY=.+' "$COMPOSE_DIR/.env"; then
-    local key
-    key="$(openssl genpkey -algorithm ed25519 -outform DER | base64 | tr -d '\n')"
-    grep -v '^IDENTITY_SIGNING_KEY=' "$COMPOSE_DIR/.env" >"$COMPOSE_DIR/.env.tmp" || true
-    echo "IDENTITY_SIGNING_KEY=$key" >>"$COMPOSE_DIR/.env.tmp"
-    mv "$COMPOSE_DIR/.env.tmp" "$COMPOSE_DIR/.env"
-    log "generated IDENTITY_SIGNING_KEY in .env"
+    ensure_env_key IDENTITY_SIGNING_KEY "$(openssl genpkey -algorithm ed25519 -outform DER | base64 | tr -d '\n')"
   fi
+  if ! grep -Eq '^BROWSER_SESSION_KEY=.+' "$COMPOSE_DIR/.env"; then
+    ensure_env_key BROWSER_SESSION_KEY "$(openssl rand -base64 32 | tr -d '\n')"
+  fi
+}
+
+# ensure_env_key <key> <value>: writes key=value into .env through a temporary file in the same directory.
+ensure_env_key() {
+  grep -v "^$1=" "$COMPOSE_DIR/.env" >"$COMPOSE_DIR/.env.tmp" || true
+  echo "$1=$2" >>"$COMPOSE_DIR/.env.tmp"
+  mv "$COMPOSE_DIR/.env.tmp" "$COMPOSE_DIR/.env"
+  log "generated $1 in .env"
 }
 
 # log <message>: progress output, only when VERBOSE=1.

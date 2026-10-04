@@ -12,6 +12,7 @@ LAST_RC=0
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_ROOT="$(cd "$TESTS_DIR/../.." && pwd)"
+# shellcheck disable=SC2034  # read by the tests that source this file
 STUB_GH="$TESTS_DIR/stubs/gh"
 
 _TMP_DIRS=()

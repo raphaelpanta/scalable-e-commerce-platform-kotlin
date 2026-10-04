@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Fake uname: `-s` answers STUB_OS (default Darwin).
+set -euo pipefail
+source "$(dirname "$0")/_stub_lib.sh"
+stub_log "$@"
+case "${1:-}" in
+  -m) printf 'arm64\n' ;;
+  *) printf '%s\n' "${STUB_OS:-Darwin}" ;;
+esac

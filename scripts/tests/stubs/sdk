@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Fake SDKMAN `sdk`: `sdk env install` installs the JDK (removes java from the absent list).
+set -euo pipefail
+source "$(dirname "$0")/_stub_lib.sh"
+stub_log "$@"
+case "$*" in
+  "env install") stub_mark_installed java; echo "Installing: java 25.0.4-tem" ;;
+esac

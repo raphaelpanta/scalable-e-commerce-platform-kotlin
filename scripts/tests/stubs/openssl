@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Fake openssl: `version`, `genpkey -algorithm ed25519` (random bytes stand in for the DER key) and `rand -base64 N`.
+# No real key is ever produced; the output is random so the secret-leak tests can look for it.
+set -euo pipefail
+source "$(dirname "$0")/_stub_lib.sh"
+stub_log "$@"
+stub_is_absent openssl && stub_not_found openssl
+[ "${STUB_OPENSSL_FAIL:-0}" = 1 ] && { echo "openssl: injected failure" >&2; exit 1; }
+case "${1:-}" in
+  version) printf 'OpenSSL %s 4 Jun 2024 (Library: OpenSSL %s)\n' "${STUB_OPENSSL_VERSION:-3.3.1}" "${STUB_OPENSSL_VERSION:-3.3.1}" ;;
+  genpkey) head -c 48 /dev/urandom ;;
+  rand)
+    n=32
+    b64=0
+    shift
+    for a in "$@"; do
+      case "$a" in -base64) b64=1 ;; -hex) ;; [0-9]*) n="$a" ;; esac
+    done
+    if [ "$b64" = 1 ]; then
+      head -c "$n" /dev/urandom | base64 | tr -d '\n'
+      echo
+    else
+      head -c "$n" /dev/urandom
+    fi ;;
+esac

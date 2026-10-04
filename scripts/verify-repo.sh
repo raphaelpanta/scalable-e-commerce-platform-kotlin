@@ -4,6 +4,7 @@
 #
 # Environment overrides (used by tests): GH_BIN (gh binary), REPO_ANON_URL (git URL read anonymously),
 # ANON_API_BASE (unauthenticated API base, default https://api.github.com).
+# shellcheck disable=SC2015  # `[ cond ] && check ... 0 || check ... 1`: check always returns 0, so the form is exact
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

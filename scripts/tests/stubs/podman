@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Fake `podman` (engine CLI and `podman compose`), see _stub_lib.sh.
+set -euo pipefail
+source "$(dirname "$0")/_stub_lib.sh"
+stub_log "$@"
+stub_engine_cli podman "$@"
