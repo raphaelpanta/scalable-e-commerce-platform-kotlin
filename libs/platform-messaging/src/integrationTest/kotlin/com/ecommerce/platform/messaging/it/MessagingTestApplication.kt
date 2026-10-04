@@ -55,6 +55,9 @@ class TestListeners(
 
     /** The MDC `correlationId` seen by the payment handler, after the real `processed_event` insert (T145). */
     val handlerCorrelationIds = ConcurrentHashMap<UUID, String>()
+
+    /** The MDC `traceId` seen by the payment handler, after the `processed_event` insert (T188). */
+    val handlerTraceIds = ConcurrentHashMap<UUID, String>()
     val outcomes = ConcurrentHashMap<UUID, MutableList<Handled<Unit>>>()
     val failingAttempts = ConcurrentHashMap<UUID, AtomicInteger>()
 
@@ -66,6 +69,7 @@ class TestListeners(
         val handled =
             events.dispatch(record, ack) { envelope ->
                 MDC.get(CorrelationIds.MDC_KEY)?.let { handlerCorrelationIds[envelope.eventId] = it }
+                MDC.get(TRACE_ID)?.let { handlerTraceIds[envelope.eventId] = it }
                 effects += envelope.eventId
             }
         val eventId = EnvelopeJson.read(record.value()).eventId
@@ -81,5 +85,10 @@ class TestListeners(
             failingAttempts.computeIfAbsent(envelope.eventId) { AtomicInteger() }.incrementAndGet()
             error("notification handler always fails")
         }
+    }
+
+    private companion object {
+        /** MDC key of the current trace (Micrometer Tracing's Slf4J event listener). */
+        const val TRACE_ID = "traceId"
     }
 }

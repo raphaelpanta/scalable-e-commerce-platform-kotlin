@@ -145,7 +145,9 @@ slug named below.
    `{service=~".+"} | correlationId="<CID>"` (or use the dashboard **Requests by correlation id**). Expect entries from at
    least three services (gateway, order, payment, catalog or notification) for the order placed in step 9.
 2. Copy a trace id from a log line (or open the Tempo datasource and search by `correlationId`);
-   expect one trace spanning the gateway and the downstream services.
+   expect one trace spanning the gateway and the downstream services, event consumers included (notification, and
+   the catalog and cart consumers of `OrderPaid`): the outbox stores the producer's `traceparent` with each event and
+   the relay sends it as a Kafka header, which the consumer's listener span continues.
 3. In Prometheus (or the **Service RED** dashboard) confirm request, error and latency series for every
    service. Health is on the management port 8081, reachable only from inside the network, for example
    `docker compose exec catalog bash -c 'exec 3<>/dev/tcp/127.0.0.1/8081 && printf "GET /actuator/health HTTP/1.0\r\n\r\n" >&3 && cat <&3'`;

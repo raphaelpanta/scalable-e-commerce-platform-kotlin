@@ -44,11 +44,12 @@ private data class PendingRecord(
 /**
  * Relays outbox rows to Kafka, oldest first. Each batch runs in one database transaction that locks its rows
  * (`FOR UPDATE SKIP LOCKED`), so several instances of a service never send the same row concurrently. A row is
- * sent with key = aggregate id, value = the envelope JSON and the headers `eventId`, `type` and `correlationId`;
- * `published_at` is set once Kafka acknowledged it, otherwise `attempts` and `last_error` record the failure and
- * the row is retried by a later batch. After a failure the remaining rows of the same key wait for the next
- * batch, which keeps the per-aggregate order. Delivery is at-least-once: a row whose acknowledgment was lost is
- * sent again with the same `eventId`.
+ * sent with key = aggregate id, value = the envelope JSON and the headers stored with the row ([OutboxHeaders]:
+ * `eventId`, `type`, `correlationId` and, when the event was written inside a span, its W3C `traceparent`, which the
+ * consumer's listener observation continues); `published_at` is set once Kafka acknowledged it, otherwise
+ * `attempts` and `last_error` record the failure and the row is retried by a later batch. After a failure the
+ * remaining rows of the same key wait for the next batch, which keeps the per-aggregate order. Delivery is
+ * at-least-once: a row whose acknowledgment was lost is sent again with the same `eventId`.
  */
 class OutboxRelay(
     private val database: DatabaseClient,

@@ -11,6 +11,7 @@ import com.ecommerce.acceptance.support.eventually
 import com.ecommerce.acceptance.support.shouldBeProblem
 import com.ecommerce.acceptance.support.shouldHaveStatus
 import com.ecommerce.acceptance.support.string
+import io.cucumber.java.ParameterType
 import io.cucumber.java.en.Given
 import io.cucumber.java.en.Then
 import io.cucumber.java.en.When
@@ -33,6 +34,10 @@ class ObservabilitySteps(
     private val world: ScenarioWorld,
 ) {
     private var sentCorrelationId: String = ""
+
+    /** Service names written `a, b and c` in the feature files. */
+    @ParameterType("[a-z]+(?:, [a-z]+)*(?: and [a-z]+)?")
+    fun servicesList(names: String): List<String> = names.split(", ", " and ").map(String::trim)
 
     @When("a client requests a capability that does not exist")
     fun requestsAnUnknownCapability() {
@@ -73,6 +78,23 @@ class ObservabilitySteps(
             val services = world.telemetry.servicesLogging(correlationId)
             withClue("services logging correlation id $correlationId: $services") {
                 services.size shouldBeGreaterThanOrEqual count
+            }
+        }
+    }
+
+    /**
+     * The services that must have logged the checkout's correlation id: order handles the request, payment the
+     * synchronous charge (its access line) and notification the `OrderPaid` event (its consumer's line, the
+     * correlation id coming through the outbox and `EventListenerSupport`). Names as in [PLATFORM_SERVICES].
+     */
+    @Then("the central log holds entries with the checkout's correlation identifier from the {servicesList} services")
+    fun logsFromNamedServices(required: List<String>) {
+        val correlationId = checkNotNull(world.tracedCorrelationId) { "No checkout was traced" }
+        required.forEach { service -> check(service in PLATFORM_SERVICES) { "Unknown service $service" } }
+        eventually(within = Budgets.telemetry, every = Duration.ofSeconds(TELEMETRY_POLL_SECONDS)) {
+            val services = world.telemetry.servicesLogging(correlationId)
+            withClue("services logging correlation id $correlationId: $services") {
+                services shouldContainAll required
             }
         }
     }

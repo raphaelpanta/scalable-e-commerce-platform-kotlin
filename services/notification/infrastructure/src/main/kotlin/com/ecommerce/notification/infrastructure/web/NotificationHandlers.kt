@@ -23,6 +23,7 @@ import com.ecommerce.notification.domain.NotificationId
 import com.ecommerce.notification.domain.NotificationKind
 import com.ecommerce.platform.core.problem.Problem
 import com.ecommerce.platform.core.result.ValidationError
+import com.ecommerce.platform.observability.observedCoRouter
 import com.ecommerce.platform.problem.toServerResponse
 import com.ecommerce.platform.security.AccountPrincipal
 import com.ecommerce.platform.security.Role
@@ -33,7 +34,6 @@ import org.springframework.http.MediaType
 import org.springframework.web.reactive.function.server.ServerRequest
 import org.springframework.web.reactive.function.server.ServerResponse
 import org.springframework.web.reactive.function.server.bodyValueAndAwait
-import org.springframework.web.reactive.function.server.coRouter
 import org.springframework.web.reactive.function.server.queryParamOrNull
 import java.time.Instant
 import java.time.format.DateTimeParseException
@@ -45,7 +45,7 @@ private const val CONFLICT = 409
 
 /** The public routes of notification.yaml (the gateway forwards every path under `/api/v1/notifications`). */
 fun notificationRoutes(handlers: NotificationHandlers) =
-    coRouter {
+    observedCoRouter {
         GET("/api/v1/notifications/failed", handlers::listFailed)
         GET("/api/v1/notifications", handlers::listOwn)
         POST("/api/v1/notifications/{notificationId}/retry", handlers::retry)

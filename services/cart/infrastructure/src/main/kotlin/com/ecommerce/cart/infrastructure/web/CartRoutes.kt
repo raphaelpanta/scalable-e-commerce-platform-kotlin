@@ -1,10 +1,10 @@
 package com.ecommerce.cart.infrastructure.web
 
+import com.ecommerce.platform.observability.observedCoRouter
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.web.reactive.function.server.RouterFunction
 import org.springframework.web.reactive.function.server.ServerResponse
-import org.springframework.web.reactive.function.server.coRouter
 
 /** The HTTP surface: cart.yaml (public, through the gateway) and cart-internal.yaml (order only). */
 @Configuration(proxyBeanMethods = false)
@@ -14,7 +14,7 @@ class CartRoutes {
         cart: CartHandlers,
         internal: InternalCartHandlers,
     ): RouterFunction<ServerResponse> =
-        coRouter {
+        observedCoRouter {
             GET("/api/v1/cart", cart::get)
             DELETE("/api/v1/cart", cart::clear)
             POST("/api/v1/cart/lines", cart::addLine)

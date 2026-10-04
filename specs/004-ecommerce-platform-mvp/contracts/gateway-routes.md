@@ -71,9 +71,11 @@ also limits mass registration and mail flooding. Default values for the MVP:
    size and request time are also bounded.
 6. **Errors.** Gateway-originated errors (401, 404, 413, 429, 502/503 when no healthy instance
    exists) use the same RFC 9457 `Problem` shape as the services.
-7. **Retries and timeouts.** Upstream timeouts are applied per tier. Only idempotent methods
-   (GET, HEAD) are retried automatically on another instance; `POST /api/v1/orders` is never
-   retried by the gateway because it relies on the client's `Idempotency-Key`.
+7. **Retries and timeouts.** Upstream timeouts are applied per tier. Idempotent methods
+   (GET, HEAD) are retried automatically on another instance when no connection could be opened;
+   the identity POSTs are retried on the same connection errors only (nothing was sent);
+   `POST /api/v1/orders` is never retried by the gateway because it relies on the client's
+   `Idempotency-Key`.
 8. **Network isolation.** Services are attached only to the internal platform network and publish
    no host ports; the gateway is the sole container on the public-facing network (FR-023).
    Service-to-service calls (for example order -> payment authorise and refund) use the internal

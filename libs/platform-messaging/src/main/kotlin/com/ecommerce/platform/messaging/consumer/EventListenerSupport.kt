@@ -10,6 +10,7 @@ import kotlinx.coroutines.reactor.mono
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.slf4j.MDC
 import org.springframework.kafka.support.Acknowledgment
+import reactor.util.context.Context
 
 /**
  * Bridges a plain `@KafkaListener` method to [IdempotentConsumer]:
@@ -31,6 +32,12 @@ import org.springframework.kafka.support.Acknowledgment
  * [ReactorThreadLocals] restores into the MDC wherever the coroutine resumes. Every log line of the handler therefore
  * carries `correlationId`, [CorrelationIds.current] returns it, and the internal calls and events of the handler copy
  * it.
+ *
+ * The trace continues too (T188, FR-025): the listener container's observation (`observationEnabled`) starts its
+ * span from the record's `traceparent` header, which the outbox stored when the producer wrote the event, and
+ * [ReactorThreadLocals.capture] carries that observation into the handler's Reactor context (explicitly, not only
+ * through Reactor's automatic context propagation of `block()`). The handler's log lines therefore carry the
+ * producer's `traceId`, and its internal calls and the events it writes continue the trace.
  *
  * The listener method stays non-suspending on purpose: Spring Kafka hands a `suspend` listener's next record over
  * before the previous one completes, which would break the per-key ordering of events.yaml. The Kafka consumer
@@ -56,12 +63,18 @@ class EventListenerSupport(
             MDC.putCloseable(CorrelationIds.MDC_KEY, correlationId).use {
                 // Blocking wait on the Kafka consumer thread (see the class documentation).
                 mono(ReactorThreadLocals.INSTANCE) { idempotent.handle(envelope, consumer, block) }
-                    .contextWrite { context -> CorrelationIds.bind(context, correlationId) }
+                    .contextWrite { context -> handlerContext(context, correlationId) }
                     .block()
             }
         ack.acknowledge()
         return checkNotNull(handled) { "no outcome for record ${coordinates(record)}" }
     }
+
+    /** The listener's thread locals (observation, hence the trace) and the envelope's correlation id. */
+    private fun handlerContext(
+        context: Context,
+        correlationId: String,
+    ): Context = CorrelationIds.bind(ReactorThreadLocals.capture(context), correlationId)
 
     private fun coordinates(record: ConsumerRecord<*, *>): String =
         "${record.topic()}-${record.partition()}@${record.offset()}"

@@ -7,6 +7,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ThreadContextElement
 import kotlinx.coroutines.reactor.ReactorContext
 import kotlinx.coroutines.withContext
+import reactor.util.context.Context
 import reactor.util.context.ContextView
 import kotlin.coroutines.AbstractCoroutineContextElement
 import kotlin.coroutines.CoroutineContext
@@ -47,6 +48,14 @@ class ReactorThreadLocals :
             ContextSnapshotFactory.builder().contextRegistry(ContextRegistry.getInstance()).build()
 
         private val NOTHING_SET = Scope { }
+
+        /**
+         * [context] with the current values of the calling thread's registered thread locals written into it (the
+         * current observation, the correlation id of the MDC, the baggage), so that a coroutine subscribed with it and
+         * running with [ReactorThreadLocals] continues them on any thread. Kafka listeners use it to carry the
+         * listener observation, whose span continues the producer's `traceparent`, into the handler's coroutine.
+         */
+        fun capture(context: Context): Context = snapshots.captureAll().updateContext(context)
     }
 }
 

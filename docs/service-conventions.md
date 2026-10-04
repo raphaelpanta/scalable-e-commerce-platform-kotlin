@@ -73,6 +73,9 @@ Kafka are reachable only on the internal network (FR-023).
   carries `correlationId`. The public OpenAPI copies use the same host.
 - `X-Correlation-Id` is read, sanitised, echoed and logged by the `CorrelationIdWebFilter` of `platform-core`
   (rules in `contracts/gateway-routes.md`); clients copy it to downstream calls and events.
+- Routes are built with `com.ecommerce.platform.observability.observedCoRouter` instead of Spring's `coRouter`: handlers
+  run with `ReactorThreadLocals`, so their log lines and those of the use cases they call keep `correlationId` and
+  `traceId` after a Reactor hop.
 - Authentication: bearer JWT (EdDSA / Ed25519, 15 min) issued by identity. Claims: `sub` = account id (UUID),
   `roles` = array of `shopper` | `operator`, `iss` = `JWT_ISSUER`, `aud` = `JWT_AUDIENCE`, `exp`, `iat`, `jti`.
   The gateway **and every service** validate tokens against `JWKS_URI` (resource server from `platform-core`,
@@ -96,7 +99,9 @@ Kafka are reachable only on the internal network (FR-023).
 - Topics `<context>.<aggregate>.v1`, key = `aggregateId`, JSON envelope per `contracts/asyncapi/events.yaml`
   (`eventId`, `type`, `version`, `occurredAt`, `aggregateId`, `correlationId`, `producer`, `payload`).
 - Producers write through `com.ecommerce.platform.messaging.outbox.OutboxPublisher` inside the same transaction as
-  the aggregate change; the relay in `platform-messaging` publishes rows to Kafka.
+  the aggregate change; the relay in `platform-messaging` publishes rows to Kafka with the headers `eventId`, `type`,
+  `correlationId` and, when the event was written inside a span, the writer's W3C `traceparent` (the consumer's
+  listener span continues that trace).
 - Consumers wrap handling in `com.ecommerce.platform.messaging.consumer.IdempotentConsumer` (dedupe by `eventId`,
   table `processed_event`, 7-day purge); consumer group id = the context name.
 - Kafka images: Testcontainers `org.testcontainers.kafka.KafkaContainer` with the image named in
