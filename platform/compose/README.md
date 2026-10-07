@@ -96,11 +96,16 @@ Prometheus discovers replicas with `dns_sd_configs`. Services are built from the
 | Logs | gateway and services: Logback `OTEL` appender (`logback-spring.xml`) -> OTLP/HTTP -> `otel-collector` -> Loki native OTLP endpoint; the collector copies `service.name` to the label `service`, turns the severity into the label `level` and adds `traceId`/`spanId` from the record's trace context; `correlationId` is structured metadata: `{service=~".+"} \| correlationId="<id>"`. The console keeps ECS JSON (`docker compose logs`) |
 | Traces | services (OTLP/HTTP) -> `otel-collector` -> Tempo (OTLP gRPC) |
 | Metrics | Prometheus **pulls** `/actuator/prometheus` on port 8081 of `gateway` and the six services (DNS service discovery, every replica); OTLP metrics received by the collector are exposed on `otel-collector:8889` (`prometheus` exporter) and pulled as well; Tempo writes span metrics and service graphs to Prometheus (remote write) |
+| Browser telemetry | storefront (OpenTelemetry web SDK, OTLP/HTTP JSON) -> gateway `POST /api/v1/telemetry/v1/{traces,logs}` (anonymous, `browse` rate limit, 256 KiB, cookies and `Authorization` stripped; 503 while the profile is down and the storefront drops the batch) -> `otel-collector` -> Tempo / Loki with resource `service.name=storefront`. The storefront exports route templates, methods, status codes, element roles/ids, durations, error class names, `correlation.id` and a random `session.id` only; the collector is the second privacy layer: a `routing` connector sends `service.name == "storefront"` through `attributes/storefront` (deletes `http.url`, `http.target`, `url.*`, `user.*`, `enduser.*`, headers, `db.*`) and `redaction/storefront` (allow-list of exactly those keys plus `service.*`/`telemetry.sdk.*`; values and log bodies that look like an email, a JWT or a cookie are masked), then the usual Loki labels. The services' pipelines are untouched |
 
 Grafana provisions the data sources Prometheus, Loki and Tempo (logs link to traces through `traceId`, traces link back to
-logs) and two dashboards in the folder "E-commerce platform": *Requests by correlation id* and *Service RED*. The RED
-dashboard needs the Micrometer histogram buckets: services enable
-`management.metrics.distribution.percentiles-histogram.http.server.requests=true`.
+logs) and three dashboards in the folder "E-commerce platform": *Requests by correlation id*, *Service RED* and
+*Storefront RUM* (page-load and action p95 by route template from TraceQL metrics, client error rate, throttled or
+dropped telemetry exports, recent browser spans linking to *Requests by correlation id*). The RED dashboard needs the
+Micrometer histogram buckets: services enable
+`management.metrics.distribution.percentiles-histogram.http.server.requests=true`; the RUM dashboard's percentiles are
+TraceQL metrics (`quantile_over_time(duration, .95) by (span.http.route)`), computed by Tempo 3 without extra
+configuration.
 
 ## Scripts
 

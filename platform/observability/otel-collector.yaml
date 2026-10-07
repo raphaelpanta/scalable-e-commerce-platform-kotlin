@@ -5,6 +5,13 @@
 #   metrics OTLP -> `prometheus` exporter on :8889, which Prometheus PULLS (job `otel-collector`).
 # Micrometer HTTP/JVM metrics are not routed through the collector: Prometheus scrapes /actuator/prometheus on port 8081 of
 # every service directly (see prometheus.yml), so that scaled replicas are individually visible.
+#
+# Browser telemetry (spec 005, FR-032): the storefront's OpenTelemetry web SDK exports spans and client-error log records
+# through the gateway (`/api/v1/telemetry/v1/{traces,logs}`) to the same OTLP/HTTP receiver, with resource
+# `service.name=storefront`. The storefront `telemetry` module is the first privacy layer (attribute allow-list, route
+# templates instead of URLs); this file is the second one. A `routing` connector splits each signal by `service.name`:
+# storefront data goes through `attributes/storefront` and `redaction/storefront` before joining the exporters of the
+# services' data, which keeps its processors unchanged.
 
 receivers:
   otlp:
@@ -39,6 +46,90 @@ processors:
   # can make it a label next to `service`.
   groupbyattrs/level:
     keys: [level]
+  # Storefront only (routed below). First layer of the collector-side guard: the forbidden keys of
+  # specs/005-storefront-dev-bootstrap/contracts/openapi/telemetry.yaml are deleted from span and log record attributes
+  # whatever their value: concrete URLs and query strings (`http.route` and `page.route`, the route templates, stay),
+  # user identity, request/response headers (cookies, Authorization) and database attributes.
+  attributes/storefront:
+    actions:
+      - key: http.url
+        action: delete
+      - key: http.target
+        action: delete
+      - key: url.full
+        action: delete
+      - key: url.query
+        action: delete
+      - key: url.path
+        action: delete
+      - pattern: ^user\..*
+        action: delete
+      - pattern: ^enduser\..*
+        action: delete
+      - pattern: ^http\.request\.header\..*
+        action: delete
+      - pattern: ^http\.response\.header\..*
+        action: delete
+      - pattern: ^db\..*
+        action: delete
+  # Second layer, allow-list: every span, log record and resource attribute whose key is not listed is removed
+  # (data-model.md section 3.5 plus the semantic resource keys of the SDK; no `browser.*`, no `http.url`, no
+  # `http.user_agent`, no headers). Values of the kept attributes (and string log bodies) that look like an email, a JWT
+  # or a cookie are masked. `summary: info` adds only the counts of redacted and masked keys to the span or record
+  # (`redaction.redacted.count`, `redaction.masked.count`), never the names or values, so the Storefront RUM dashboard
+  # can show when the browser leaked something the first layer should have caught.
+  redaction/storefront:
+    allow_all_keys: false
+    allowed_keys:
+      # resource (storefront SDK)
+      - service.name
+      - service.version
+      - telemetry.sdk.name
+      - telemetry.sdk.language
+      - telemetry.sdk.version
+      - session.id
+      - correlation.id
+      # route template, never a URL
+      - http.route
+      - page.route
+      # method and status of platform calls (stable and legacy semantic convention names)
+      - http.request.method
+      - http.method
+      - http.response.status_code
+      - http.status_code
+      # interactions: kind, ARIA role and developer-assigned id, never text or values
+      - interaction.kind
+      - element.role
+      - element.id
+      # timings and errors: class or problem type slug, never a message
+      - duration.ms
+      - exception.type
+      - error.type
+      - error.name
+    blocked_values:
+      # email addresses
+      - '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+      # JWT-looking tokens
+      - 'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'
+      # cookie-like strings (session, cart token, __Host- prefixed cookies)
+      - 'session=|cart=|__Host-'
+    summary: info
+
+connectors:
+  # One connector per signal (a pipeline list is signal-typed). Default context is the resource: the condition reads
+  # the resource attributes of each ResourceSpans/ResourceLogs; everything else keeps the services' path unchanged.
+  routing/traces:
+    error_mode: ignore
+    default_pipelines: [traces/services]
+    table:
+      - condition: attributes["service.name"] == "storefront"
+        pipelines: [traces/storefront]
+  routing/logs:
+    error_mode: ignore
+    default_pipelines: [logs/services]
+    table:
+      - condition: attributes["service.name"] == "storefront"
+        pipelines: [logs/storefront]
 
 exporters:
   otlp_http/loki:
@@ -59,13 +150,32 @@ extensions:
 service:
   extensions: [health_check]
   pipelines:
-    logs:
+    # Logs: receive, route by service.name, then the services' chain (unchanged) or the storefront chain
+    # (attribute deletion and allow-list first, then the same labels and batching as the services).
+    logs/in:
       receivers: [otlp]
-      processors: [memory_limiter, transform/logs, groupbyattrs/level, batch]
+      processors: [memory_limiter]
+      exporters: [routing/logs]
+    logs/services:
+      receivers: [routing/logs]
+      processors: [transform/logs, groupbyattrs/level, batch]
       exporters: [otlp_http/loki]
-    traces:
+    logs/storefront:
+      receivers: [routing/logs]
+      processors: [attributes/storefront, redaction/storefront, transform/logs, groupbyattrs/level, batch]
+      exporters: [otlp_http/loki]
+    # Traces: same split.
+    traces/in:
       receivers: [otlp]
-      processors: [memory_limiter, batch]
+      processors: [memory_limiter]
+      exporters: [routing/traces]
+    traces/services:
+      receivers: [routing/traces]
+      processors: [batch]
+      exporters: [otlp_grpc/tempo]
+    traces/storefront:
+      receivers: [routing/traces]
+      processors: [attributes/storefront, redaction/storefront, batch]
       exporters: [otlp_grpc/tempo]
     metrics:
       receivers: [otlp]
