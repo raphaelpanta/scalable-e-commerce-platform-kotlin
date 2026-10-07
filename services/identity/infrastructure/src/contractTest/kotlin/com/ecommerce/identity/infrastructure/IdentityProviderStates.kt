@@ -1,5 +1,9 @@
 package com.ecommerce.identity.infrastructure
 
+import au.com.dius.pact.core.model.Interaction
+import au.com.dius.pact.core.model.Pact
+import au.com.dius.pact.provider.IHttpClientFactory
+import au.com.dius.pact.provider.IProviderInfo
 import au.com.dius.pact.provider.MessageAndMetadata
 import au.com.dius.pact.provider.PactVerifyProvider
 import au.com.dius.pact.provider.junit5.HttpTestTarget
@@ -7,18 +11,27 @@ import au.com.dius.pact.provider.junit5.MessageTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
 import au.com.dius.pact.provider.junitsupport.State
+import com.ecommerce.identity.application.AccessGrant
+import com.ecommerce.identity.application.Clock
+import com.ecommerce.identity.application.TokenSigner
 import com.ecommerce.identity.domain.Account
 import com.ecommerce.identity.domain.AccountDeleted
 import com.ecommerce.identity.domain.AccountId
 import com.ecommerce.identity.domain.AccountRegistered
+import com.ecommerce.identity.domain.AccountStatus
 import com.ecommerce.identity.domain.AccountVerified
 import com.ecommerce.identity.domain.Email
 import com.ecommerce.identity.domain.NotificationPreference
 import com.ecommerce.identity.domain.OneTimeToken
 import com.ecommerce.identity.domain.PasswordHash
 import com.ecommerce.identity.domain.PasswordResetRequested
+import com.ecommerce.identity.domain.PhoneVerification
 import com.ecommerce.identity.domain.Pseudonym
 import com.ecommerce.identity.domain.RecipientSnapshot
+import com.ecommerce.identity.domain.Role
+import com.ecommerce.identity.domain.SessionId
+import com.ecommerce.identity.domain.SessionRecord
+import com.ecommerce.identity.domain.SignInThrottle
 import com.ecommerce.identity.domain.TokenPurpose
 import com.ecommerce.identity.infrastructure.messaging.IdentityEnvelopes
 import com.ecommerce.identity.infrastructure.security.SecureSecrets
@@ -29,6 +42,10 @@ import com.ecommerce.platform.messaging.envelope.EnvelopeJson
 import com.ecommerce.platform.messaging.envelope.Topic
 import com.ecommerce.platform.testing.InternalToken
 import com.ecommerce.platform.testing.PostgresTestConfig
+import kotlinx.coroutines.runBlocking
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient
+import org.apache.hc.client5.http.impl.classic.HttpClients
+import org.apache.hc.core5.http.HttpRequest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
@@ -37,6 +54,7 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.annotation.Import
+import org.springframework.http.HttpHeaders
 import org.springframework.r2dbc.core.DatabaseClient
 import java.time.Duration
 import java.time.Instant
@@ -45,14 +63,20 @@ import java.util.UUID
 private val QUERY_TIMEOUT: Duration = Duration.ofSeconds(10)
 private val SEEDED_AT: Instant = Instant.parse("2026-10-02T09:00:00Z")
 private const val CORRELATION_ID = "3f6c1b2a-9d4e-4f70-8a15-6b2c7d9e0f13"
+private val ACCESS_TOKEN_LIFETIME: Duration = Duration.ofMinutes(15)
+private val EXPIRED_FOR: Duration = Duration.ofHours(1)
 
 /**
- * Provider side for every consumer of identity (pact-interactions.md sections 2.1, 2.5, 2.6, 3.2 and 5), against the
- * running service. HTTP interactions (JWKS, internal address and contact lookups, health) run against the server;
- * message interactions verify the envelopes that [IdentityEnvelopes], the builder of the outbox publisher, makes from
- * domain objects. Provider states create exactly the data their parameters describe. Shared by
- * [IdentityProviderVerificationTest] (pacts of `build/pacts`) and [IdentityBrokerVerificationTest] (pacts of the Pact
- * Broker), which only choose the pact source; both are tagged `provider` and run in `contractVerify`.
+ * Provider side for every consumer of identity (pact-interactions.md sections 2.1, 2.5, 2.6, 3.2 and 5, and the
+ * storefront rows I1 to I18 of specs/005-storefront-dev-bootstrap/contracts/pact-matrix.md), against the running
+ * service. HTTP interactions (JWKS, internal address and contact lookups, health, the storefront's public API) run
+ * against the server; message interactions verify the envelopes that [IdentityEnvelopes], the builder of the outbox
+ * publisher, makes from domain objects. Provider states create exactly the data their parameters (or, for the
+ * storefront, their sentences and [Storefront]) describe. The storefront's protected requests carry a placeholder
+ * bearer: [SigningHttpTestTarget] replaces it with a token identity signs for the account of the current state, as
+ * no consumer can forge the EdDSA signature. Shared by [IdentityProviderVerificationTest] (pacts of `build/pacts`)
+ * and [IdentityBrokerVerificationTest] (pacts of the Pact Broker), which only choose the pact source; both are
+ * tagged `provider` and run in `contractVerify`.
  */
 @SpringBootTest(
     webEnvironment = RANDOM_PORT,
@@ -75,14 +99,23 @@ abstract class IdentityProviderStates {
     @Autowired
     protected lateinit var envelopes: IdentityEnvelopes
 
+    @Autowired
+    protected lateinit var signer: TokenSigner
+
+    @Autowired
+    protected lateinit var clock: Clock
+
+    private val seeds: StorefrontSeeds by lazy { StorefrontSeeds(database) }
+
     @BeforeEach
     fun target(context: PactVerificationContext?) {
+        signedIn = null
         if (context != null) {
             context.target =
                 if (context.interaction.isAsynchronousMessage()) {
                     MessageTestTarget(listOf(javaClass.packageName))
                 } else {
-                    HttpTestTarget("localhost", port)
+                    SigningHttpTestTarget()
                 }
         }
     }
@@ -91,6 +124,38 @@ abstract class IdentityProviderStates {
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun identityHonoursItsConsumers(context: PactVerificationContext?) {
         context?.verifyInteraction()
+    }
+
+    /**
+     * The HTTP target of the storefront's protected routes: when a state signed an account in, the consumer's
+     * placeholder `Authorization` header is replaced by an access token identity signed for that account and session.
+     * Requests without the header (`no valid token`) and interactions of other consumers are replayed unchanged. The
+     * client never retries: Apache HttpClient would otherwise honour the `Retry-After` of a 429 and re-send the
+     * throttled sign-in once the lock has lapsed.
+     */
+    private inner class SigningHttpTestTarget : HttpTestTarget("localhost", port, "/", { NoRetryHttpClientFactory }) {
+        override fun prepareRequest(
+            pact: Pact,
+            interaction: Interaction,
+            context: MutableMap<String, Any>,
+        ): Pair<Any, Any>? {
+            val prepared = super.prepareRequest(pact, interaction, context)
+            prepared?.toList()?.filterIsInstance<HttpRequest>()?.forEach(::sign)
+            return prepared
+        }
+    }
+
+    private object NoRetryHttpClientFactory : IHttpClientFactory {
+        override fun newClient(provider: IProviderInfo): CloseableHttpClient =
+            HttpClients.custom().disableAutomaticRetries().build()
+    }
+
+    private fun sign(request: HttpRequest) {
+        val grant = signedIn ?: return
+        if (request.getFirstHeader(HttpHeaders.AUTHORIZATION) == null) return
+        val token = checkNotNull(runBlocking { signer.sign(grant) }) { "identity has no signing key" }
+        request.removeHeaders(HttpHeaders.AUTHORIZATION)
+        request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer ${token.value}")
     }
 
     // --- HTTP provider states ------------------------------------------------------------------------------------
@@ -182,6 +247,141 @@ abstract class IdentityProviderStates {
     @State("no account exists")
     fun noAccountExists(parameters: Map<String, Any?>) {
         execute("DELETE FROM account WHERE id = :id", mapOf("id" to uuid(parameters, "accountId")))
+    }
+
+    // --- Storefront provider states (pact-matrix.md "Storefront to identity", I1 to I18) ----------------------------
+
+    @State(
+        "an account ana@example.com exists with a verified email and password S3cure-passphrase!",
+        "an account ana@example.com exists with a verified email",
+    )
+    fun anaVerified() {
+        ana(AccountStatus.ACTIVE)
+    }
+
+    @State("an account ana@example.com exists with an unverified email")
+    fun anaUnverified() {
+        ana(AccountStatus.UNVERIFIED)
+    }
+
+    @State("ana@example.com has 5 failed sign-ins")
+    fun anaThrottled() {
+        ana(AccountStatus.ACTIVE, SignInThrottle(Storefront.FAILED_SIGN_INS, clock.now().plus(Storefront.RETRY_AFTER)))
+    }
+
+    @State("no account exists for new@example.com")
+    fun noAccountForNewcomer() {
+        seeds.deleteAccount(Storefront.NEW_EMAIL)
+    }
+
+    @State("a pending verification token tok-valid exists")
+    fun pendingVerificationToken() {
+        ana(AccountStatus.UNVERIFIED)
+        val purpose = TokenPurpose.EMAIL_VERIFICATION
+        seeds.oneTimeToken(Storefront.ANA_ID, purpose, Storefront.VERIFICATION_TOKEN, clock.now().plus(purpose.ttl))
+    }
+
+    @State("the verification token tok-expired is expired")
+    fun expiredVerificationToken() {
+        ana(AccountStatus.UNVERIFIED)
+        val purpose = TokenPurpose.EMAIL_VERIFICATION
+        seeds.oneTimeToken(Storefront.ANA_ID, purpose, Storefront.EXPIRED_TOKEN, clock.now().minus(EXPIRED_FOR))
+    }
+
+    @State("a pending password reset token tok-reset exists")
+    fun pendingResetToken() {
+        ana(AccountStatus.ACTIVE)
+        val purpose = TokenPurpose.PASSWORD_RESET
+        seeds.oneTimeToken(Storefront.ANA_ID, purpose, Storefront.RESET_TOKEN, clock.now().plus(purpose.ttl))
+    }
+
+    @State("an account ana@example.com has a valid refresh token")
+    fun anaRefreshToken() {
+        ana(AccountStatus.ACTIVE)
+        session(Storefront.ANA_ID, Storefront.REFRESH_TOKEN)
+    }
+
+    @State("an account ana@example.com is signed in", "ana@example.com has no addresses")
+    fun anaSignedIn() {
+        ana(AccountStatus.ACTIVE)
+        signIn(Storefront.ANA_ID, Role.SHOPPER)
+    }
+
+    @State("no valid token")
+    fun noValidToken() {
+        signedIn = null
+    }
+
+    @State("an operator ops@example.com is signed in")
+    fun operatorSignedIn() {
+        seeds.account(Storefront.OPS_ID, Storefront.OPS_EMAIL, AccountStatus.ACTIVE, Role.OPERATOR)
+        signIn(Storefront.OPS_ID, Role.OPERATOR)
+    }
+
+    @State("ana@example.com has 2 addresses")
+    fun anaAddresses() {
+        anaSignedIn()
+        seeds.addresses(Storefront.ANA_ID, Storefront.HOME_ADDRESS_ID to "Home", Storefront.WORK_ADDRESS_ID to "Work")
+    }
+
+    @State("ana@example.com has email notifications enabled")
+    fun anaEmailNotifications() {
+        anaSignedIn()
+        seeds.preference(Storefront.ANA_ID, Storefront.EMAIL_CHANNEL)
+    }
+
+    @State("ana@example.com has a pending phone verification")
+    fun anaPhoneVerification() {
+        anaEmailNotifications()
+        // Issued long enough ago that another code may be requested at once (I16 `requestPhoneVerification`).
+        val issuedAt = clock.now().minus(PhoneVerification.RESEND_INTERVAL)
+        seeds.phoneVerification(
+            Storefront.ANA_ID,
+            Storefront.PHONE,
+            Storefront.PHONE_CODE,
+            issuedAt,
+            PhoneVerification.TTL,
+        )
+    }
+
+    /** Ana as a shopper with her display name and password, [status] and [throttle]. */
+    private fun ana(
+        status: AccountStatus,
+        throttle: SignInThrottle = SignInThrottle.CLEAR,
+    ) {
+        seeds.account(
+            Storefront.ANA_ID,
+            Storefront.ANA_EMAIL,
+            status,
+            displayName = Storefront.ANA_NAME,
+            passwordHash = Storefront.PASSWORD_HASH,
+            throttle = throttle,
+        )
+    }
+
+    /** The session [Storefront.SESSION_ID] of [accountId] with the current [refreshToken]. */
+    private fun session(
+        accountId: UUID,
+        refreshToken: String,
+    ) {
+        seeds.session(accountId, Storefront.SESSION_ID, refreshToken, clock.now(), SessionRecord.DEFAULT_LIFETIME)
+    }
+
+    /** Signs [accountId] in with [role]: a session to sign out of and the grant [sign] mints the bearer from. */
+    private fun signIn(
+        accountId: UUID,
+        role: Role,
+    ) {
+        if (ring.active == null) ring.replace(listOf(SigningKey.generate()))
+        session(accountId, SecureSecrets().opaqueToken().value)
+        signedIn =
+            AccessGrant(
+                AccountId(accountId),
+                setOf(role),
+                SessionId(Storefront.SESSION_ID),
+                clock.now(),
+                ACCESS_TOKEN_LIFETIME,
+            )
     }
 
     // --- Message provider states and producers ---------------------------------------------------------------------
@@ -316,6 +516,10 @@ abstract class IdentityProviderStates {
 
         @Volatile
         private var deleted: Pair<UUID, Pseudonym>? = null
+
+        /** The account a storefront state signed in, whose bearer [sign] mints; null for anonymous requests. */
+        @Volatile
+        private var signedIn: AccessGrant? = null
 
         private fun text(
             parameters: Map<String, Any?>,
