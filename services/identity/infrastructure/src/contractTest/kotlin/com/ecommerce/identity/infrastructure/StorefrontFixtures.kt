@@ -37,11 +37,14 @@ internal object Storefront {
     val HOME_ADDRESS_ID: UUID = UUID.fromString("7a1c4e52-90b3-4d6f-8e21-5c3d9f0a1b22")
     val WORK_ADDRESS_ID: UUID = UUID.fromString("5f0c1a52-3a43-4a53-9f58-7a1d8b9d2c11")
 
-    /** The token values the consumer sends verbatim (I4, I5, I18). */
-    const val VERIFICATION_TOKEN = "tok-valid"
-    const val EXPIRED_TOKEN = "tok-expired"
-    const val RESET_TOKEN = "tok-reset"
-    const val REFRESH_TOKEN = "9b8d6c1a-opaque-refresh-token"
+    /**
+     * The token values the consumer sends verbatim (I4, I5, I18): the family the state sentence names, padded to the
+     * 43 url-safe characters of an [com.ecommerce.identity.domain.OpaqueToken] (pact-matrix.md, identity section).
+     */
+    const val VERIFICATION_TOKEN = "tok-valid-000000000000000000000000000000000"
+    const val EXPIRED_TOKEN = "tok-expired-0000000000000000000000000000000"
+    const val RESET_TOKEN = "tok-reset-000000000000000000000000000000000"
+    const val REFRESH_TOKEN = "9b8d6c1a-opaque-refresh-token-0000000000000"
 
     const val PHONE = "+351912345678"
     const val PHONE_CODE = "123456"

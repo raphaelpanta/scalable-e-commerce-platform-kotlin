@@ -25,7 +25,7 @@ import { pactFor } from './pact.config.ts';
 // verbatim, driving the real src/api/identity.ts. Identity sees the request as the gateway
 // forwards it: sign-in and refresh carry their token bodies (the gateway turns the answer into the
 // cookie summary; only the request shape is asserted here), protected calls carry the bearer.
-const { boolean, eachLike, integer, like, string } = MatchersV3;
+const { boolean, eachLike, integer, like, regex, string } = MatchersV3;
 
 const ACCOUNTS = '/api/v1/identity/accounts';
 const VERIFY = '/api/v1/identity/accounts/verify-email';
@@ -34,6 +34,11 @@ const REFRESH = '/api/v1/identity/sessions/refresh';
 const ME = '/api/v1/identity/accounts/me';
 const ADDRESSES = '/api/v1/identity/accounts/me/addresses';
 const GENERIC_MESSAGE = 'If the address can be registered, a verification message has been sent.';
+// Token fixtures (pact-matrix.md, identity section): the family the provider state names, padded to the 43
+// url-safe characters identity accepts as an opaque token.
+const VALID_TOKEN = 'tok-valid-000000000000000000000000000000000';
+const EXPIRED_TOKEN = 'tok-expired-0000000000000000000000000000000';
+const REFRESH_TOKEN = '9b8d6c1a-opaque-refresh-token-0000000000000';
 
 const ana = parsedEmail('ana@example.com');
 const newcomer = parsedEmail('new@example.com');
@@ -53,7 +58,7 @@ function parsedPassword(raw: string): Password {
 
 const tokenPair = {
   accessToken: like('eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIuLi4ifQ.signature'),
-  refreshToken: like('9b8d6c1a-opaque-refresh-token'),
+  refreshToken: like(REFRESH_TOKEN),
   tokenType: 'Bearer',
   expiresIn: integer(900),
 };
@@ -173,7 +178,7 @@ describe('storefront → identity pact (I1–I5, I7, I10, I11)', () => {
         })
         .willRespondWith(429, (response) => {
           response
-            .headers({ 'Content-Type': PROBLEM, 'Retry-After': '60' })
+            .headers({ 'Content-Type': PROBLEM, 'Retry-After': regex('^\\d+$', '60') })
             .jsonBody(
               problem(
                 'throttled',
@@ -272,11 +277,11 @@ describe('storefront → identity pact (I1–I5, I7, I10, I11)', () => {
         .given('a pending verification token tok-valid exists')
         .uponReceiving('a verification with the token tok-valid')
         .withRequest('POST', VERIFY, (request) => {
-          request.jsonBody({ token: 'tok-valid' });
+          request.jsonBody({ token: VALID_TOKEN });
         })
         .willRespondWith(204)
         .executeTest(async (mockServer) => {
-          await expect(anonymous(mockServer.url).verifyEmail('tok-valid')).resolves.toBeUndefined();
+          await expect(anonymous(mockServer.url).verifyEmail(VALID_TOKEN)).resolves.toBeUndefined();
         });
     });
 
@@ -286,7 +291,7 @@ describe('storefront → identity pact (I1–I5, I7, I10, I11)', () => {
         .given('the verification token tok-expired is expired')
         .uponReceiving('a verification with the expired token tok-expired')
         .withRequest('POST', VERIFY, (request) => {
-          request.jsonBody({ token: 'tok-expired' });
+          request.jsonBody({ token: EXPIRED_TOKEN });
         })
         .willRespondWith(422, (response) => {
           response
@@ -296,7 +301,7 @@ describe('storefront → identity pact (I1–I5, I7, I10, I11)', () => {
             );
         })
         .executeTest(async (mockServer) => {
-          await expect(anonymous(mockServer.url).verifyEmail('tok-expired')).rejects.toBeInstanceOf(
+          await expect(anonymous(mockServer.url).verifyEmail(EXPIRED_TOKEN)).rejects.toBeInstanceOf(
             ProblemError,
           );
         });
@@ -310,7 +315,7 @@ describe('storefront → identity pact (I1–I5, I7, I10, I11)', () => {
         .given('an account ana@example.com has a valid refresh token')
         .uponReceiving('a refresh of the session of ana@example.com')
         .withRequest('POST', REFRESH, (request) => {
-          request.jsonBody({ refreshToken: like('9b8d6c1a-opaque-refresh-token') });
+          request.jsonBody({ refreshToken: like(REFRESH_TOKEN) });
         })
         .willRespondWith(200, (response) => {
           response.jsonBody(tokenPair);
@@ -318,7 +323,7 @@ describe('storefront → identity pact (I1–I5, I7, I10, I11)', () => {
         .executeTest(async (mockServer) => {
           const identity = createIdentityApi({
             baseUrl: mockServer.url,
-            fetch: asGateway({ refreshToken: '9b8d6c1a-opaque-refresh-token' }),
+            fetch: asGateway({ refreshToken: REFRESH_TOKEN }),
           });
           await expect(identity.refresh()).resolves.toBeDefined();
         });
