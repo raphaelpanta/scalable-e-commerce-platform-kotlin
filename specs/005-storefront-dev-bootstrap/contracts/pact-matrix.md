@@ -50,6 +50,12 @@ the rules of that file ("How the matrix works", "Rules for contract changes") ap
 | I17 | `requestPasswordReset` | 202 generic message regardless of the email | `an account ana@example.com exists with a verified email`, `no account exists for new@example.com` | forgot password |
 | I18 | `completePasswordReset` | 204; 400/422 invalid, used or expired token or weak password | `a pending password reset token tok-reset exists` | reset password |
 
+Token fixtures: the state sentences name a token family (`tok-valid`, `tok-expired`, `tok-reset`, the refresh token
+`9b8d6c1a-opaque-refresh-token`); the value the consumer sends, and the provider state seeds by hash, is that name padded
+with `0` to the 43 url-safe characters identity accepts as an opaque token (`tok-valid-000000000000000000000000000000000`,
+`tok-expired-0000000000000000000000000000000`, `tok-reset-000000000000000000000000000000000`,
+`9b8d6c1a-opaque-refresh-token-0000000000000`). The 429 of I2 matches `Retry-After` as digits, not a fixed value.
+
 ## Storefront to catalog (`storefront-catalog.json`, verified by catalog)
 
 | # | Interaction (`operationId`) | Variants | Provider state | Used by |
