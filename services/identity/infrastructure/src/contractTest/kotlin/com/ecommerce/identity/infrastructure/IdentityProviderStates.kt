@@ -82,7 +82,7 @@ private val EXPIRED_FOR: Duration = Duration.ofHours(1)
     webEnvironment = RANDOM_PORT,
     properties = ["management.server.port=", "platform.security.internal-token=" + InternalToken.TEST],
 )
-@Import(PostgresTestConfig::class)
+@Import(PostgresTestConfig::class, RecordingSmsConfig::class)
 // Abstract: JUnit runs only the subclasses, which choose the pact source (folder or broker); one state method per
 // provider state and one producer per message description.
 @Suppress("TooManyFunctions", "AbstractClassCanBeConcreteClass")
