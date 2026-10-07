@@ -102,14 +102,20 @@ if (file("scripts/tests/run-all.sh").exists()) {
         tasks.register<Exec>("scriptsTest") {
             group = "verification"
             description = "Runs the offline tests of the repository scripts (scripts/tests/run-all.sh)"
-            executable = layout.projectDirectory.file("scripts/tests/run-all.sh").asFile.absolutePath
+            executable =
+                layout.projectDirectory
+                    .file("scripts/tests/run-all.sh")
+                    .asFile.absolutePath
             args("--quiet")
         }
     val scriptsLint =
         tasks.register<Exec>("scriptsLint") {
             group = "verification"
             description = "Shellcheck over the repository scripts (skipped when shellcheck is not installed)"
-            executable = layout.projectDirectory.file("scripts/lint.sh").asFile.absolutePath
+            executable =
+                layout.projectDirectory
+                    .file("scripts/lint.sh")
+                    .asFile.absolutePath
             onlyIf("shellcheck is on the PATH") {
                 (System.getenv("PATH") ?: "")
                     .split(File.pathSeparator)
