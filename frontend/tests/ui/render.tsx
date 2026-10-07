@@ -7,9 +7,11 @@ import { createCartApi } from '@api/cart';
 import { createCatalogApi } from '@api/catalog';
 import { createIdentityApi } from '@api/identity';
 import { createOrderApi } from '@api/order';
+import { createOrderConsoleApi } from '@api/orderConsole';
 import { createPaymentApi } from '@api/payment';
 import { createSessionPort } from '@api/session';
 import { type CatalogPort, CatalogPortContext } from '@app/catalog/catalogPort';
+import { type OrderConsolePort, OrderConsolePortContext } from '@app/console/consolePort';
 import { type Ports, PortsContext } from '@app/ports';
 import { createQueryClient } from '@app/queryClient';
 import {
@@ -69,6 +71,8 @@ export type Harness = {
   readonly catalog: CatalogPort;
   /** The real cart, identity, order and payment adapters over MSW (tests/msw/*). */
   readonly ports: Ports;
+  /** The real operator-console order adapter over MSW (tests/msw/console.ts). */
+  readonly orderConsole: OrderConsolePort;
 };
 
 export type HarnessOptions = {
@@ -96,7 +100,8 @@ export function harness(
     realSession ? createSessionPort({ baseUrl: API }, ports.identity) : port,
   );
   const catalog = createCatalogApi({ baseUrl: API });
-  return { queryClient, port, sessionStore, catalog, ports };
+  const orderConsole = createOrderConsoleApi({ baseUrl: API });
+  return { queryClient, port, sessionStore, catalog, ports, orderConsole };
 }
 
 export function Providers({
@@ -110,7 +115,11 @@ export function Providers({
     <QueryClientProvider client={h.queryClient}>
       <SessionStoreContext.Provider value={h.sessionStore}>
         <CatalogPortContext.Provider value={h.catalog}>
-          <PortsContext.Provider value={h.ports}>{children}</PortsContext.Provider>
+          <PortsContext.Provider value={h.ports}>
+            <OrderConsolePortContext.Provider value={h.orderConsole}>
+              {children}
+            </OrderConsolePortContext.Provider>
+          </PortsContext.Provider>
         </CatalogPortContext.Provider>
       </SessionStoreContext.Provider>
     </QueryClientProvider>

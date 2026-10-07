@@ -5,6 +5,7 @@ import com.ecommerce.order.domain.AccountId
 import com.ecommerce.order.domain.Order
 import com.ecommerce.order.domain.OrderId
 import com.ecommerce.order.domain.OrderNumber
+import com.ecommerce.order.domain.OrderStatus
 import com.ecommerce.order.domain.Page
 import com.ecommerce.order.domain.PageRequest
 import kotlinx.coroutines.flow.toList
@@ -72,21 +73,30 @@ class R2dbcOrderRepository(
             bind("id", id.value)
         }.firstOrNull()
 
-    override suspend fun findByAccount(
-        accountId: AccountId,
+    override suspend fun search(
+        accountId: AccountId?,
+        status: OrderStatus?,
         page: PageRequest,
     ): Page<Order> {
+        val conditions =
+            listOfNotNull(
+                "account_id = :accountId".takeIf { accountId != null },
+                "order_status = :orderStatus".takeIf { status != null },
+            )
+        val where = if (conditions.isEmpty()) "" else " WHERE " + conditions.joinToString(" AND ")
+
+        fun DatabaseClient.GenericExecuteSpec.filtered(): DatabaseClient.GenericExecuteSpec {
+            val withAccount = if (accountId == null) this else bind("accountId", accountId.value)
+            return if (status == null) withAccount else withAccount.bind("orderStatus", status.wire)
+        }
         val orders =
-            load(
-                "$SELECT_ORDER WHERE account_id = :accountId " +
-                    "ORDER BY placed_at DESC, id DESC LIMIT :limit OFFSET :offset",
-            ) {
-                bind("accountId", accountId.value).bind("limit", page.size).bind("offset", page.offset)
+            load("$SELECT_ORDER$where ORDER BY placed_at DESC, id DESC LIMIT :limit OFFSET :offset") {
+                filtered().bind("limit", page.size).bind("offset", page.offset)
             }
         val total =
             database
-                .sql("SELECT count(*) AS total FROM orders WHERE account_id = :accountId")
-                .bind("accountId", accountId.value)
+                .sql("SELECT count(*) AS total FROM orders$where")
+                .filtered()
                 .map { row, _ -> checkNotNull(row.get("total", Long::class.javaObjectType)) }
                 .awaitOne()
         return Page(orders, page, total)

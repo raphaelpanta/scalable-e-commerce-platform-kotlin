@@ -4,9 +4,10 @@ import {
   createBrowserRouter,
   createMemoryRouter,
   type LoaderFunctionArgs,
-  Outlet,
+  Navigate,
   replace,
   type RouteObject,
+  useLocation,
 } from 'react-router';
 
 import { signInLocationFor } from '@app/navigation/safeNext';
@@ -16,6 +17,10 @@ import { type KnownRouteTemplate, ROUTE_TEMPLATES } from '@domain/routeTemplate'
 
 import { Layout } from '../components/Layout.tsx';
 import { Loading } from '../components/Loading.tsx';
+import { ConsoleLayout } from '../console/ConsoleLayout.tsx';
+import { ConsoleOrderPage } from '../console/ConsoleOrderPage.tsx';
+import { ConsoleOrdersPage } from '../console/ConsoleOrdersPage.tsx';
+import { ConsoleStockPage } from '../console/ConsoleStockPage.tsx';
 import { AccountPage } from '../pages/AccountPage.tsx';
 import { AddressesPage } from '../pages/AddressesPage.tsx';
 import { CartPage } from '../pages/CartPage.tsx';
@@ -91,6 +96,10 @@ const PAGES: Partial<Readonly<Record<KnownRouteTemplate, JSX.Element>>> = {
   '/account/notifications': <NotificationsPage />,
   '/forgot-password': <ForgotPasswordPage />,
   '/reset-password': <ResetPasswordPage />,
+  // Operator console (US6): rendered inside `OperatorOnly` and the console layout.
+  '/console/orders': <ConsoleOrdersPage />,
+  '/console/orders/:id': <ConsoleOrderPage />,
+  '/console/stock': <ConsoleStockPage />,
 };
 
 const PLACEHOLDER_TITLES: Readonly<Record<KnownRouteTemplate, string>> = {
@@ -130,11 +139,20 @@ function requireSignedIn({ queryClient, sessionStore }: RouterDependencies) {
   };
 }
 
-/** Console pages render only for the operator role; the platform's 403 is what refuses (FR-012). */
+/**
+ * Console pages render only for the operator role, inside the console layout; a signed-in account
+ * without the role sees the "not allowed" state and the console requests nothing. The platform's
+ * 403 is what actually refuses (FR-012): a console page whose request is refused shows the same
+ * state with the platform's words. An account that is no longer signed in goes to sign-in.
+ */
 function OperatorOnly(): JSX.Element {
   const { summary, resolving } = useSession();
+  const location = useLocation();
   if (resolving) return <Loading />;
-  return hasRole(summary, 'operator') ? <Outlet /> : <NotAllowedPage />;
+  if (summary.state === 'anonymous') {
+    return <Navigate replace to={signInLocationFor(`${location.pathname}${location.search}`)} />;
+  }
+  return hasRole(summary, 'operator') ? <ConsoleLayout /> : <NotAllowedPage />;
 }
 
 function toRouterPath(template: KnownRouteTemplate): string {

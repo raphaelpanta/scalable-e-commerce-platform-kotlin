@@ -49,6 +49,16 @@ class Orders(
 
     fun list(bearer: String): ApiResponse = api.get(Paths.query(Paths.ORDERS, "size" to Catalogue.MAX_PAGE), bearer)
 
+    /** The orders in [orderStatus] (`listOwnOrders` with its `orderStatus` filter): an operator receives every shopper's. */
+    fun listWithStatus(
+        bearer: String,
+        orderStatus: String,
+    ): ApiResponse =
+        api.get(
+            Paths.query(Paths.ORDERS, "orderStatus" to orderStatus, "size" to Catalogue.MAX_PAGE),
+            bearer,
+        )
+
     fun cancel(
         bearer: String,
         orderId: String,

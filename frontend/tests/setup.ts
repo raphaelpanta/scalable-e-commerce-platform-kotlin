@@ -4,6 +4,7 @@ import * as fc from 'fast-check';
 import { afterAll, afterEach, beforeAll } from 'vitest';
 
 import { cartServer } from './msw/cart.ts';
+import { consoleServer } from './msw/console.ts';
 import { identityServer } from './msw/identity.ts';
 import { orderServer } from './msw/order.ts';
 import { paymentServer } from './msw/payment.ts';
@@ -27,6 +28,7 @@ afterEach(() => {
   cleanup();
   server.resetHandlers();
   cartServer.reset();
+  consoleServer.reset();
   identityServer.reset();
   orderServer.reset();
   paymentServer.reset();

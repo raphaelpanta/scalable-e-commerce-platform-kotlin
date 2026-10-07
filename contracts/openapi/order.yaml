@@ -219,13 +219,20 @@ paths:
     get:
       tags: [Orders]
       operationId: listOwnOrders
-      summary: List the caller's orders, newest first
+      summary: List the caller's orders, or every order for an operator, newest first
       description: |
-        Required role: `shopper`. Returns only the authenticated shopper's orders ordered by
-        `createdAt` descending (FR-016).
+        Required role: `shopper` or `operator`. A shopper receives only their own orders; an
+        operator receives every shopper's orders (additive, feature 005: the operator console).
+        Both are ordered by `createdAt` descending (FR-016) and may be narrowed to one
+        `orderStatus`; `totalItems` counts the narrowed set.
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/Size'
+        - name: orderStatus
+          in: query
+          required: false
+          description: Only orders in this status (additive, feature 005). An unknown value is a 400.
+          schema: {$ref: '#/components/schemas/OrderStatus'}
         - $ref: '#/components/parameters/CorrelationId'
       responses:
         '200':

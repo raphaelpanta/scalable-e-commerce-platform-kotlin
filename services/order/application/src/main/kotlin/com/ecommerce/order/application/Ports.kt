@@ -11,6 +11,7 @@ import com.ecommerce.order.domain.Order
 import com.ecommerce.order.domain.OrderEvent
 import com.ecommerce.order.domain.OrderId
 import com.ecommerce.order.domain.OrderNumber
+import com.ecommerce.order.domain.OrderStatus
 import com.ecommerce.order.domain.Page
 import com.ecommerce.order.domain.PageRequest
 import com.ecommerce.order.domain.PaymentOutcome
@@ -37,9 +38,13 @@ interface OrderRepository {
 
     suspend fun findById(id: OrderId): Order?
 
-    /** The orders of [accountId], newest first. */
-    suspend fun findByAccount(
-        accountId: AccountId,
+    /**
+     * One page of orders, newest first: those of [accountId] only, or of every account when it is null; narrowed to
+     * [status] when given (the total counts the narrowed set).
+     */
+    suspend fun search(
+        accountId: AccountId?,
+        status: OrderStatus?,
         page: PageRequest,
     ): Page<Order>
 

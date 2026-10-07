@@ -2,10 +2,13 @@ import type { CatalogPort, CategoryListParams, ProductListParams } from '@app/ca
 
 import { type ApiClientOptions, createApiClient, hasStatus, requireBody } from './client.ts';
 import type { paths as CatalogPaths } from './generated/catalog';
+import { ProblemError } from './problem.ts';
 
 // Adapter of the catalogue port over the generated catalog contract (`listProducts`,
-// `listCategories`, `getCategory`, `getProduct`). Only the parameters the storefront sets are sent;
-// a 404 on a detail lookup is a legitimate answer (unknown or withdrawn) and becomes `null`.
+// `listCategories`, `getCategory`, `getProduct` and the console's `adjustStock`). Only the
+// parameters the storefront sets are sent; a 404 on a detail lookup is a legitimate answer
+// (unknown or withdrawn) and becomes `null`; the refusals of `adjustStock` (404, 403, 422) are
+// values the console renders.
 type ProductQuery = NonNullable<
   CatalogPaths['/api/v1/catalog/products']['get']['parameters']['query']
 >;
@@ -25,6 +28,7 @@ function productQuery(params: ProductListParams): ProductQuery {
     ...listingQuery(params),
     ...(params.q === undefined || params.q === '' ? {} : { q: params.q }),
     ...(params.categoryId === undefined ? {} : { categoryId: params.categoryId }),
+    ...(params.includeWithdrawn === true ? { includeWithdrawn: true } : {}),
   };
 }
 
@@ -62,6 +66,27 @@ export function createCatalogApi(options: ApiClientOptions = {}): CatalogPort {
         return requireBody(data, response);
       } catch (error) {
         if (hasStatus(error, 404)) return null;
+        throw error;
+      }
+    },
+    async adjustStock(productId, request) {
+      try {
+        const { data, response } = await client.POST(
+          '/api/v1/catalog/products/{productId}/stock-adjustments',
+          { params: { path: { productId } }, body: request },
+        );
+        return { kind: 'adjusted', adjustment: requireBody(data, response) };
+      } catch (error) {
+        if (hasStatus(error, 404)) return { kind: 'notFound' };
+        if (hasStatus(error, 403)) return { kind: 'forbidden' };
+        if (error instanceof ProblemError && hasStatus(error, 400, 422)) {
+          const { problem } = error;
+          return {
+            kind: 'invalid',
+            message: problem.detail ?? problem.title,
+            errors: problem.errors,
+          };
+        }
         throw error;
       }
     },

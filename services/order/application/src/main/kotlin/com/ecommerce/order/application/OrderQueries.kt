@@ -7,18 +7,27 @@ import com.ecommerce.order.domain.Caller
 import com.ecommerce.order.domain.Order
 import com.ecommerce.order.domain.OrderError
 import com.ecommerce.order.domain.OrderId
+import com.ecommerce.order.domain.OrderStatus
 import com.ecommerce.order.domain.Page
 import com.ecommerce.order.domain.PageRequest
 
-/** The caller's own orders, newest first (FR-016); shoppers only. */
+/**
+ * The caller's own orders, newest first (FR-016); every shopper's orders for an operator (the console list). Both can
+ * narrow the page to one `orderStatus`. Callers with neither role are refused.
+ */
 class ListOwnOrders(
     private val orders: OrderRepository,
 ) {
     suspend operator fun invoke(
         caller: Caller,
         page: PageRequest,
+        status: OrderStatus? = null,
     ): Either<OrderError, Page<Order>> =
-        if (caller.isShopper) orders.findByAccount(caller.accountId, page).right() else OrderError.Forbidden.left()
+        when {
+            caller.isOperator -> orders.search(null, status, page).right()
+            caller.isShopper -> orders.search(caller.accountId, status, page).right()
+            else -> OrderError.Forbidden.left()
+        }
 }
 
 /** One order: its owner sees it, operators see any; another shopper's order is "not found" (FR-016). */
