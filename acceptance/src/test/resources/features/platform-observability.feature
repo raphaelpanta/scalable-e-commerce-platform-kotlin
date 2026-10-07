@@ -34,3 +34,19 @@ Feature: Run and observe the whole platform
     When the shopper attempts the operator capability "create a product"
     Then the shopper is refused for lacking the operator role
     And the central log records the refused attempt with its correlation identifier
+
+  @observability @slow
+  Scenario: A shopper's page view and the services it reaches share one correlation id in the logs and one trace
+    When a shopper opens the storefront and it loads the catalogue
+    And the storefront reports the page view and a failed action
+    Then the central log holds entries with the page view's correlation identifier from the storefront, gateway and catalog services
+    And the page view is one trace holding the spans of the storefront, gateway and catalog services
+
+  @observability @slow
+  Scenario: No storefront telemetry contains the shopper's email, address or search term
+    Given a signed-in shopper with a saved delivery address
+    When the shopper searches the storefront for "walnut standing desk"
+    And the storefront reports the page view and a failed action
+    And an unfiltered storefront reports the page with the shopper's email, address and search term
+    Then the storefront telemetry has reached the central log and the traces
+    And no storefront telemetry contains the shopper's email, address or search term

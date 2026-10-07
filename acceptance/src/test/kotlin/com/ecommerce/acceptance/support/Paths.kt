@@ -75,6 +75,10 @@ object Paths {
 
     fun notificationRetry(id: String) = "$NOTIFICATIONS/$id/retry" // retryFailedNotification
 
+    // telemetry.yaml (feature 005): the storefront's OTLP/HTTP JSON intake
+    const val TELEMETRY_TRACES = "/api/v1/telemetry/v1/traces" // exportBrowserTraces
+    const val TELEMETRY_LOGS = "/api/v1/telemetry/v1/logs" // exportBrowserLogs
+
     /** [path] with the query parameters [parameters], URL-encoded. */
     fun query(
         path: String,
@@ -92,6 +96,8 @@ object Headers {
     const val IDEMPOTENCY_KEY = "Idempotency-Key"
     const val CART_TOKEN = "X-Cart-Token"
     const val RETRY_AFTER = "Retry-After"
+    const val BROWSER_SESSION = "X-Browser-Session"
+    const val TRACEPARENT = "traceparent"
 }
 
 /** Status codes of the contracts. */

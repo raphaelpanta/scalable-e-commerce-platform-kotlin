@@ -82,6 +82,16 @@ The suite never logs credentials or tokens. Response bodies in assertion message
   records and `correlationId` is structured metadata (`platform/observability/loki.yaml`), so no `| json` parser stage is
   needed (`support/Telemetry.kt` still adds one before the filter). Metrics come from
   Prometheus (`up{job="services"}` and the Micrometer `http_server_requests_seconds_*` series).
+- **Storefront telemetry** (`@observability`, `StorefrontTelemetrySteps`, feature 005): the suite has no browser, so a
+  step issues the requests of a page view (`GET /`, then a catalogue call with `X-Correlation-Id`,
+  `X-Browser-Session: cookie` and a `traceparent`) and posts the OTLP/HTTP JSON the storefront would export (allow-listed
+  attributes, route templates) to `/api/v1/telemetry/v1/{traces,logs}` with `service.name=storefront` (`PageView` in
+  `support/StorefrontTelemetry.kt`). The browser records are found with `{service="storefront"} | correlation_id="<id>"`
+  (the OTLP attribute `correlation.id` becomes the structured metadata `correlation_id`), the trace through Tempo's
+  `/api/traces/<traceId>` behind Grafana's data source proxy, which must hold the storefront, gateway and catalog spans.
+  The privacy scenario also posts a batch from a storefront that does not filter (raw URL, email, address and search term
+  in attributes) and scans every storefront log entry and span stored in the last 15 minutes: the collector's attribute
+  and redaction processors must have removed them. It needs the `storefront` service in the stack under test.
 
 ## Coverage
 
@@ -94,7 +104,7 @@ The suite never logs credentials or tokens. Response bodies in assertion message
 | US5 order tracking | `order-tracking.feature` | 6 | `OrderTrackingSteps` |
 | US6 notifications | `notifications.feature` | 5 | `NotificationSteps` |
 | US7 catalogue operations | `catalogue-operations.feature` | 9 | `CatalogueOperationsSteps` |
-| US8 platform and observability | `platform-observability.feature` | 5 | `ObservabilitySteps` |
+| US8 platform and observability | `platform-observability.feature` | 7 | `ObservabilitySteps`, `StorefrontTelemetrySteps` |
 | SC-010 authorisation sweep | `authorisation-sweep.feature` | 47 | `AuthorisationSteps` |
 
 US9 (pipeline scope and image publication) is a CI property, not a platform journey. The CI workflows cover it,
