@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Fake df: `df -Pk <path>` reports STUB_DF_AVAIL_KB free kilobytes (default 60 GiB).
+set -euo pipefail
+source "$(dirname "$0")/_stub_lib.sh"
+stub_log "$@"
+avail="${STUB_DF_AVAIL_KB:-62914560}"
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/stub 500000000 100000000 %s 20%% /\n' "$avail"

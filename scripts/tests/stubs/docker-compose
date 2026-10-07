@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Fake standalone `docker-compose`, see _stub_lib.sh.
+set -euo pipefail
+source "$(dirname "$0")/_stub_lib.sh"
+stub_log "$@"
+stub_compose "$@"

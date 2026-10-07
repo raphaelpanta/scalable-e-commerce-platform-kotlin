@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Fake dnf: `install` marks the packages' tools installed.
+set -euo pipefail
+source "$(dirname "$0")/_stub_lib.sh"
+stub_log "$@"
+case "${1:-}" in
+  install)
+    shift
+    for p in "$@"; do
+      case "$p" in -*) continue ;; esac
+      # shellcheck disable=SC2046  # word splitting of the tool list is intended
+      stub_mark_installed $(stub_package_tools "$p")
+    done ;;
+esac

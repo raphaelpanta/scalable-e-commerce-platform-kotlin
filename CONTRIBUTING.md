@@ -6,19 +6,23 @@ Please also read the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Set up your clone
 
-1. Install [gitleaks](https://github.com/gitleaks/gitleaks): `brew install gitleaks` (macOS) or see its
-   documentation for other platforms.
-2. Activate the versioned secret-scanning hook in your clone. Git does not apply it automatically:
+1. Run the bootstrap:
 
    ```bash
-   git config core.hooksPath .githooks
+   scripts/dev-env.sh init            # add --start to also build and start the local platform
    ```
 
-   The `pre-push` hook scans the commits you are about to push and refuses the push on any finding. It
-   fails closed: without `gitleaks` it blocks the push. Never bypass it with `--no-verify`. GitHub also
+   It checks every prerequisite (JDK 25, a container engine with Compose v2, Node 24, `gitleaks`, `curl`, `jq`,
+   `openssl`, `git`) and tells you how to install what is missing (`--install` does it for you through the
+   package manager, announcing each step), creates `platform/compose/.env` with generated secrets, and activates
+   the versioned secret-scanning hook (`git config core.hooksPath .githooks`; Git does not apply it
+   automatically). Details: [docs/dev-environment.md](docs/dev-environment.md).
+2. About the hook: `pre-push` runs [gitleaks](https://github.com/gitleaks/gitleaks) over the commits you are
+   about to push and refuses the push on any finding. It fails closed: without `gitleaks` it blocks the push
+   (`brew install gitleaks` on macOS, or see its documentation). Never bypass it with `--no-verify`. GitHub also
    runs secret scanning with push protection on the server as a second layer.
 3. Run the offline repository tests when you change anything under `scripts/`:
-   `scripts/tests/run-all.sh`.
+   `scripts/tests/run-all.sh` (also part of `./gradlew -q verify`), and `scripts/lint.sh` for shellcheck.
 
 ## Branch and pull-request flow
 

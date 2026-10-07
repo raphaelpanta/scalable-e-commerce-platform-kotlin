@@ -38,17 +38,30 @@ full quality gate from the repository root:
 ./gradlew check          # compile, lint, tests (quiet, failures only)
 ```
 
+## Quick start
+
+```bash
+scripts/dev-env.sh init --start   # check the machine, configure the clone, start the platform and the storefront
+scripts/dev-env.sh status         # components, addresses, engine resources, checks
+scripts/dev-env.sh down           # stop everything, keep the data
+```
+
+The storefront and API answer on http://localhost:8080 (Grafana on :3000, Mailpit on :8025). The command, its
+flags and the manual steps it replaces: [docs/dev-environment.md](docs/dev-environment.md) and
+[docs/running-locally.md](docs/running-locally.md).
+
 Repository tooling (shell scripts, no Gradle needed):
 
 ```bash
-scripts/tests/run-all.sh          # offline tests of the publication scripts, prints PASS: N tests
+scripts/tests/run-all.sh          # offline tests of the repository scripts, prints PASS: N tests
+scripts/lint.sh                   # shellcheck over the repository scripts
 scripts/verify-repo.sh            # verify the published repository (visibility, protection, scanning)
 ```
 
 ## Contributing
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) first. In short: enable the secret-scanning hook with
-`git config core.hooksPath .githooks` (it needs [gitleaks](https://github.com/gitleaks/gitleaks)), work on a
+Read [CONTRIBUTING.md](CONTRIBUTING.md) first. In short: run `scripts/dev-env.sh init` (it enables the
+secret-scanning hook, which needs [gitleaks](https://github.com/gitleaks/gitleaks)), work on a
 branch, open a pull request and complete the checklist in the template. `main` is protected and pull
 requests are squash-merged. Please follow the [code of conduct](CODE_OF_CONDUCT.md) and report
 vulnerabilities privately as described in [SECURITY.md](SECURITY.md).

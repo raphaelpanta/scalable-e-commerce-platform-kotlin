@@ -91,10 +91,13 @@ jobs:
             --env-file platform/compose/.env.example --profile core --profile observability config -q
           "${compose[@]}" -f platform/ci-runner/docker-compose.yml --env-file platform/ci-runner/.env.example config -q
 
-      - name: Shellcheck the platform scripts
+      # The same file list as scripts/lint.sh (run locally and by `./gradlew -q scriptsCheck`), feature 005 FR-029.
+      - name: Shellcheck the platform and repository scripts
         run: |
           docker run --rm -v "$PWD:$PWD" -w "$PWD" "$SHELLCHECK_IMAGE" -x -P SCRIPTDIR \
-            platform/compose/scripts/*.sh platform/ci-runner/scripts/*.sh platform/perf/*.sh
+            platform/compose/scripts/*.sh platform/ci-runner/scripts/*.sh platform/perf/*.sh \
+            scripts/*.sh scripts/lib/*.sh scripts/lib/dev-env/*.sh scripts/tests/*.sh scripts/tests/lib/*.sh \
+            scripts/tests/stubs/*
 
       - name: Lint the observability and Compose YAML
         run: |

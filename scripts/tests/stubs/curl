@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Fake curl: never opens a socket. Answers by URL: 127.0.0.1:<port> (port probe, STUB_PORT_IN_USE), the Docker
+# registry (STUB_NETWORK), the gateway (STUB_ENTRY_STATUS, STUB_STOREFRONT_HEADERS), the Pact Broker
+# (STUB_BROKER_STATUS) and the private registry (STUB_REGISTRY_STATUS). Honours -o, -w '%{http_code}' and -D -.
+set -euo pipefail
+source "$(dirname "$0")/_stub_lib.sh"
+stub_log "$@"
+stub_is_absent curl && stub_not_found curl
+url="" write_out="" dump_headers=0 version=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --version) version=1; shift ;;
+    -o | -H | -X | -d | --cacert | -u | --connect-timeout | --max-time | --retry) shift 2 ;;
+    -w) write_out="$2"; shift 2 ;;
+    -D) [ "$2" = "-" ] && dump_headers=1; shift 2 ;;
+    -*) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+if [ "$version" = 1 ]; then
+  printf 'curl %s (arm64-apple-darwin) libcurl/%s\n' "${STUB_CURL_VERSION:-8.7.1}" "${STUB_CURL_VERSION:-8.7.1}"
+  exit 0
+fi
+
+fail_connect() { # curl-exit-code
+  [ -n "$write_out" ] && printf '000'
+  exit "$1"
+}
+
+host_port="${url#*://}"
+host_port="${host_port%%/*}"
+host="${host_port%%:*}"
+port="${host_port#*:}"
+[ "$port" = "$host" ] && port=80
+rest="${url#*://}"
+case "$rest" in */*) path="/${rest#*/}" ;; *) path="/" ;; esac
+
+status=000
+headers=""
+case "$host" in
+  127.0.0.1)
+    for p in ${STUB_PORT_IN_USE:-}; do [ "$p" = "$port" ] && status=200; done
+    [ "$status" = 000 ] && fail_connect 7
+    headers="HTTP/1.1 200 OK" ;;
+  registry-1.docker.io)
+    [ "${STUB_NETWORK:-1}" = 0 ] && fail_connect 6
+    status=401
+    headers="HTTP/1.1 401 Unauthorized" ;;
+  localhost)
+    case "$port:$path" in
+      9292:*) status="${STUB_BROKER_STATUS:-200}" ;;
+      5443:*) status="${STUB_REGISTRY_STATUS:-401}" ;;
+      *:/api/*) status="${STUB_ENTRY_STATUS:-200}" ;;
+      *:/)
+        headers="${STUB_STOREFRONT_HEADERS-HTTP/1.1 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'}"
+        status="$(printf '%s\n' "$headers" | head -n1 | awk '{print $2}')" ;;
+      *) status=404 ;;
+    esac
+    [ -n "$headers" ] || headers="HTTP/1.1 $status"
+    [ "$status" = 000 ] && fail_connect 7 ;;
+  *) fail_connect 6 ;;
+esac
+[ "$dump_headers" = 1 ] && printf '%s\r\n\r\n' "$headers"
+[ -n "$write_out" ] && printf '%s' "$status"
+exit 0

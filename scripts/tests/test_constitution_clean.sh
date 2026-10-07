@@ -14,7 +14,8 @@ test_case "real constitution has no HTML comment before its first heading"
 head_part="$(awk '/^#/ {exit} {print}' "$doc")"
 assert_not_contains "$head_part" "<!--" "comment opener before first heading"
 assert_eq "# Scalable E-Commerce Platform Constitution" "$(grep -m1 '^# ' "$doc")" "first heading"
-assert_contains "$(tail -n 1 "$doc")" "**Version**: 1.1.0" "version line"
+printf '%s' "$(tail -n 1 "$doc")" | grep -Eq '^\*\*Version\*\*: [0-9]+\.[0-9]+\.[0-9]+ \| ' ||
+  _fail "version line: last line must start with '**Version**: <semver> | ', got '$(tail -n 1 "$doc")'"
 
 tmp="$(mk_tmp)"
 

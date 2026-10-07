@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016  # jq filters use $var bindings inside single quotes on purpose
 # Stateful fake `gh` for offline tests. Never contacts GitHub.
 #   GH_STUB_STATE        state directory (required): repo.json, calls.log, user, signed_out, scopes
 #   GH_STUB_REMOTE_URL   URL added as the remote by `repo create --source` (a local bare repository)

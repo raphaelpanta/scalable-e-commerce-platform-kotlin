@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Fake `node --version` (STUB_NODE_VERSION, default 24.4.1).
+set -euo pipefail
+source "$(dirname "$0")/_stub_lib.sh"
+stub_log "$@"
+stub_version_tool node 24.4.1 'v%s'
