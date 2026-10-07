@@ -54,6 +54,19 @@ export function randomShopper(): Credentials {
   return { email: `shopper-${suffix}@storefront.test`, password: `Shopper-${suffix}-Passw0rd!` };
 }
 
+/** A 1x1 PNG served for the fixture image host, so product images load instead of falling back to the placeholder. */
+const FIXTURE_IMAGE_HOST = 'https://cdn.example.test/**';
+const ONE_PIXEL_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+async function serveFixtureImages(page: Page): Promise<void> {
+  await page.route(FIXTURE_IMAGE_HOST, (route) =>
+    route.fulfill({ status: 200, contentType: 'image/png', body: ONE_PIXEL_PNG }),
+  );
+}
+
 export class StorefrontWorld extends World {
   readonly baseUrl: string;
   readonly mailpit: MailpitClient;
@@ -106,6 +119,7 @@ export class StorefrontWorld extends World {
     this.browser = browser;
     this.context = await browser.newContext(this.#contextOptions());
     this.page = await this.context.newPage();
+    await serveFixtureImages(this.page);
     return this.page;
   }
 
@@ -126,6 +140,7 @@ export class StorefrontWorld extends World {
       storageState: { cookies: kept, origins: [] },
     });
     this.page = await this.context.newPage();
+    await serveFixtureImages(this.page);
     return this.page;
   }
 

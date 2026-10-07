@@ -47,7 +47,8 @@ type JsonRecord = Record<string, unknown>;
 export class CatalogueFixtures {
   readonly #baseUrl: string;
   readonly #operator: Credentials;
-  #token: string | undefined;
+  // One operator sign-in per process: the gateway's auth tier allows 10 sign-ins per minute per address.
+  static #token: string | undefined;
   #scenarioCategory: string | undefined;
 
   constructor(baseUrl: string, operator: Credentials) {
@@ -137,7 +138,7 @@ export class CatalogueFixtures {
   }
 
   async #bearer(): Promise<string> {
-    if (this.#token !== undefined) return this.#token;
+    if (CatalogueFixtures.#token !== undefined) return CatalogueFixtures.#token;
     const response = await fetch(`${this.#baseUrl}/api/v1/identity/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -147,8 +148,8 @@ export class CatalogueFixtures {
       throw new Error(`operator sign-in failed with status ${response.status}`);
     }
     const body = (await response.json()) as JsonRecord;
-    this.#token = requireString(body, 'accessToken');
-    return this.#token;
+    CatalogueFixtures.#token = requireString(body, 'accessToken');
+    return CatalogueFixtures.#token;
   }
 
   async #post(path: string, body: unknown, expectedStatus: number): Promise<JsonRecord> {

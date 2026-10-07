@@ -28,7 +28,17 @@ async function addThroughProductPage(
 }
 
 export async function openCart(world: StorefrontWorld): Promise<void> {
-  await world.goto('/cart');
+  const page = world.currentPage();
+  // Like a shopper: follow the header link when already on the storefront (keeps in-page state such as the
+  // merge notice); load the cart address only when the browser is elsewhere.
+  if (page.url().startsWith(world.baseUrl)) {
+    await page
+      .getByRole('navigation', { name: 'Primary' })
+      .getByRole('link', { name: /^Cart/ })
+      .click();
+  } else {
+    await world.goto('/cart');
+  }
   await world
     .currentPage()
     .getByRole('heading', { level: 1, name: 'Your cart' })

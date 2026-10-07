@@ -356,7 +356,7 @@ export function CheckoutPage(): JSX.Element {
               </dd>
             </dl>
             {!view.canCheckout ? (
-              <p className={cart.unavailable} role="alert">
+              <p className={cart.unavailable}>
                 Some items are no longer available. Remove them from the cart to continue.
               </p>
             ) : null}
