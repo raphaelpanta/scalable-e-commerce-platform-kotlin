@@ -131,6 +131,14 @@ reached only through the gateway's `storefront` route (`STOREFRONT_URL`).
   reads them from there (`@PactFolder` with the `pact.folder` system property set by the `pact` convention),
   is tagged `provider` and runs in the `contractVerify` task after every consumer test of the build.
   `@IgnoreNoPactsToVerify` keeps a provider green while its consumers do not exist yet.
+- Storefront pacts (feature 005): the consumer `storefront` (Pact JS, `frontend/pact/`, `npm run pact`) writes one pact per
+  provider to the same root `build/pacts` as `storefront-<provider>.json` (`identity`, `catalog`, `cart`, `order`,
+  `payment`, `gateway`); the services' `contractVerify` replays them next to the service pacts. The storefront pipeline
+  (`.github/workflows/storefront.yml`) publishes them to the Pact Broker with the commit SHA as consumer version and runs
+  `can-i-deploy` for `storefront`. The gateway is now also a provider: `services/gateway/src/contractTest` verifies
+  `storefront-gateway.json` (browser-session and telemetry routes) in `./gradlew -q :services:gateway:contractVerify`, and the
+  gateway pipeline's broker verification picks it up like any other consumer. Interactions and provider states:
+  `specs/005-storefront-dev-bootstrap/contracts/pact-matrix.md`.
 - Test layers follow the generator template (`services/catalog` before feature 004): `@SpringBootTest` with
   `@ServiceConnection` Testcontainers configs, WebTestClient, Kotest assertions, Cucumber JVM suites.
 - Mutation: `./gradlew -q :services:<ctx>:domain:pitest` and `:application:pitest` must reach 80 %. Keep use cases

@@ -3,6 +3,11 @@
 Load test of the running Compose stack through the gateway, written for [k6](https://k6.io): evidence for
 **SC-002** and **SC-003** of `specs/004-ecommerce-platform-mvp/spec.md`.
 
+k6 drives the API through the gateway (`/api/v1/...`) and bypasses the storefront: the web pages, their bundle and the
+browser's own work are not part of this load. The browser-side criterion of feature 005 (**SC-004**, page content within
+2 s for 95 % of page loads) is measured from the telemetry the storefront reports, on the *Storefront RUM* Grafana
+dashboard (panel "Page-load p95 by route template"), not by this suite.
+
 **Status: first runs recorded on 2026-10-03 (T151), see "Recorded results" at the end of this page.** On the
 development machine the full 1,000/100 profile overloads the single-CPU catalog service; the thresholds are met at
 200 browsing and 20 checkout users.

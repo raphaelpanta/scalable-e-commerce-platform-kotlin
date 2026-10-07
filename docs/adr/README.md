@@ -9,6 +9,7 @@ stack choices taken during planning are in
 | [0001](0001-two-status-order-model.md) | Two-status order model | Accepted 2026-10-02 |
 | [0002](0002-synchronous-stock-reservation.md) | Synchronous stock reservation at checkout | Accepted 2026-10-02 |
 | [0003](0003-cart-revision-checkout.md) | Cart revision checkout | Accepted 2026-10-02 |
+| [0005](0005-browser-session-at-the-gateway.md) | Browser session at the gateway | Accepted 2026-10-04 |
 
 ## Template
 

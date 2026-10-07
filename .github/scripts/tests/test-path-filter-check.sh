@@ -42,6 +42,11 @@ CHANGED="platform/compose/docker-compose.yml"; check_triggers "platform.yml"
 CHANGED="acceptance/src/test/kotlin/Journey.kt"; check_triggers "platform.yml"
 CHANGED="services/cart/domain/Foo.kt services/order/domain/Bar.kt"; check_triggers "cart.yml order.yml"
 CHANGED="docs/ci-cd.md README.md"; check_triggers ""
+# the storefront (feature 005, T099): its own workflow, plus platform.yml for the browser acceptance suite
+CHANGED="frontend/src/ui/App.tsx"; check_triggers "platform.yml storefront.yml"
+CHANGED="platform/docker/Dockerfile.storefront"; check_triggers "$ALL_SEVEN platform.yml storefront.yml"  # the services filter platform/docker/**
+CHANGED="contracts/openapi/telemetry.yaml"; check_triggers "$ALL_SEVEN platform.yml storefront.yml"
+CHANGED=".github/workflows/storefront.yml"; check_triggers "storefront.yml"
 
 printf 'services/payment/domain/Foo.kt\ndocs/x.md\n' | "$SCRIPTS_DIR/path-filter-check.sh" - >"$T_OUT/stdout" 2>"$T_OUT/stderr"
 RC=$?; assert_exit 0 "stdin"
@@ -74,6 +79,42 @@ for s in $SERVICES; do
   done
   awk '/^permissions:/{f=1;next} f&&/^[^ ]/{f=0} f&&NF{print}' "$f" | sed 's/^ *//' >"$T_OUT/perm"
   [ "$(cat "$T_OUT/perm")" = "contents: read" ] || _t_fail "$s.yml: permissions must be exactly contents: read"
+done
+
+# --- the storefront workflow (T099): same safeguards as the service callers, in one file
+F="$W/storefront.yml"
+[ -f "$F" ] || _t_fail "missing $F"
+grep -q '^name: storefront$' "$F" || _t_fail "storefront.yml: workflow name must be storefront"
+need "$F" '  push:' '    branches: [main]' '  workflow_dispatch:' "storefront.yml must trigger on push to main and workflow_dispatch"
+grep -q '^  pull_request:' "$F" || _t_fail "storefront.yml must trigger on pull_request"
+grep -v '^[[:space:]]*#' "$F" | grep -q 'pull_request_target' && _t_fail "storefront.yml: pull_request_target must never be used"
+for p in 'frontend/**' 'platform/docker/Dockerfile.storefront' 'platform/docker/storefront/**' \
+  'contracts/openapi/gateway-browser-session.yaml' 'contracts/openapi/telemetry.yaml' \
+  'specs/005-storefront-dev-bootstrap/contracts/openapi/**' '.github/workflows/storefront.yml'; do
+  [ "$(grep -cF "      - '$p'" "$F")" = 2 ] || _t_fail "storefront.yml: path filter $p missing on push or pull_request"
+done
+grep -hE '^[[:space:]]*(-[[:space:]]+)?uses:' "$F" | grep -vqE '[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+$' &&
+  _t_fail "storefront.yml: every uses: must be pinned to a full SHA with a trailing # vX.Y.Z comment"
+grep -q 'runs-on: \[self-hosted, linux, ecommerce\]' "$F" || _t_fail "storefront.yml: self-hosted runner labels missing"
+grep -q 'github.event.pull_request.head.repo.full_name == github.repository' "$F" || _t_fail "storefront.yml: fork guard missing"
+awk '/^permissions:/{f=1;next} f&&/^[^ ]/{f=0} f&&NF{print}' "$F" | sed 's/^ *//' >"$T_OUT/perm"
+[ "$(cat "$T_OUT/perm")" = "contents: read" ] || _t_fail "storefront.yml: permissions must be exactly contents: read"
+need "$F" 'npm ci --silent --no-audit --no-fund' 'npm run lint' 'npm run test' 'npm run mutate' 'npm run pact' \
+  "storefront.yml: the gate must install, lint, test, mutate and run the pact tests"
+# shellcheck disable=SC2016  # literal workflow text
+need "$F" 'build/pacts/storefront-*.json' '--consumer-app-version "$GITHUB_SHA"' '--pacticipant storefront' \
+  "storefront.yml: publish the storefront pacts and ask can-i-deploy for the pacticipant storefront"
+need "$F" 'osv-scanner' 'frontend:/src:ro' '/src/package-lock.json' "storefront.yml: osv-scanner over frontend/package-lock.json"
+need "$F" 'platform/docker/Dockerfile.storefront' '--exit-code 1' '--severity CRITICAL' 'cyclonedx-json' \
+  '.github/scripts/image-health.sh storefront' "storefront.yml: image build, Trivy (CRITICAL), SBOM and start-and-health"
+awk '/^  image:/{f=1} f&&/^    needs:/{print; exit}' "$F" | grep -q 'needs: gate$' || _t_fail "storefront.yml: image must need gate"
+awk '/^  publish:/{f=1} f&&/^    needs:/{print; exit}' "$F" | grep -q 'needs: \[gate, image\]$' || _t_fail "storefront.yml: publish must need gate and image"
+grep -q -- '--password-stdin' "$F" || _t_fail "storefront.yml must docker login with --password-stdin"
+grep -q '^    name: service-ci / storefront$' "$F" || _t_fail "storefront.yml: the aggregate job must be named service-ci / storefront"
+grep -q 'needs: \[gate, image, publish\]' "$F" || _t_fail "storefront.yml: the aggregate job must need gate, image and publish"
+# every tool image is pinned exactly as in service-ci.yml
+for v in PACT_CLI_IMAGE OSV_SCANNER_IMAGE TRIVY_IMAGE SYFT_IMAGE; do
+  [ "$(grep -E "^  $v:" "$F")" = "$(grep -E "^  $v:" "$W/service-ci.yml")" ] || _t_fail "storefront.yml: $v differs from service-ci.yml"
 done
 
 # --- service-ci.yml and platform.yml
@@ -141,6 +182,10 @@ need "$P" 'compose.perf.yml' 'GATEWAY_PORT:' 'GATEWAY_URL:' "platform.yml: rate-
 need "$P" 'cucumber.filter.tags="not @slow and not @chaos"' 'cucumber.filter.tags="@slow and not @chaos"' 'cucumber.filter.tags="@chaos"' \
   "platform.yml: the acceptance suite must be split by tags"
 need "$P" 'smoke.sh --no-build --keep' ':acceptance:test' 'down -v' "platform.yml: smoke, acceptance and teardown steps"
+# shellcheck disable=SC2016  # literal workflow expression
+need "$P" 'npm ci --prefix frontend' 'npx playwright install' 'npm --prefix frontend run acceptance' 'STOREFRONT_URL: ${{ env.GATEWAY_URL }}' \
+  'MAILPIT_URL:' 'STOREFRONT_VIEWPORT: mobile' 'CUCUMBER_TAGS: "@us1"' "platform.yml: the storefront acceptance steps (desktop and the 360 px @us1 run)"
+[ "$(grep -cF "      - 'frontend/**'" "$P")" = 1 ] || _t_fail "platform.yml: path filter frontend/** must be on pull_request only"
 grep -A1 'name: Tear down the stack' "$P" | grep -q 'if: always()' || _t_fail "platform.yml: teardown must run always"
 
 if command -v ruby >/dev/null 2>&1; then

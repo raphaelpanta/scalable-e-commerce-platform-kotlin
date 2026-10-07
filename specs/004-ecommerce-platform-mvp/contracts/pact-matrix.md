@@ -34,6 +34,17 @@ contracts (the event payload shapes are defined in `contracts/asyncapi/`).
 | cart | catalog | read price and availability for a product (in stock, out of stock, withdrawn, unknown product) and for several products in one call | catalog |
 | platform-probe (image `HEALTHCHECK`, Compose health check, CI start-and-health) | identity, catalog, cart, order, payment, notification (each its own pact, `platform-probe-<service>.json`) | `GET /actuator/health/readiness` on the management port answers 200 with `"status":"UP"` (provider state `the <identity, catalogue, cart, order, payment or notification> service is running`; other body members are allowed); readiness path per T129 | the provider of each pact |
 | gateway | all services | the gateway has no health pact; its own health endpoints are checked by integration tests (`ManagementPortIT`), not by a pact | not applicable |
+| storefront | identity | sign in, register, verify email, refresh, sign out, own profile, addresses, notification and phone verification preferences, password reset, account deletion (feature 005, rows I1 to I18 of the linked matrix) | identity |
+| storefront | catalog | products and categories (list, filter, sort, page, detail), operator stock reads and adjustments (feature 005, rows C1 to C7 of the linked matrix) | catalog |
+| storefront | cart | anonymous and account cart reads and mutations, merge, revision (feature 005, rows K1 to K7 of the linked matrix) | cart |
+| storefront | order | checkout with `cartRevision` and `Idempotency-Key` (created, `price-changed`, stock refusal), order list and detail, cancel, operator advance and cancel (feature 005, rows O1 to O11 of the linked matrix) | order |
+| storefront | payment | the payment reads the storefront uses (operator simulator rules, payment status of an order; feature 005, rows P1 and P2 of the linked matrix) | payment |
+| storefront | gateway | the browser-session routes (cookie sign-in, refresh and sign-out summaries, idle expiry, origin check, cart cookie) and the telemetry routes (feature 005, rows G1 to G19 of the linked matrix); the gateway is a provider for the first time (`contractVerify` in `services/gateway`) | gateway |
+
+The six `storefront` rows are additions of feature 005: interactions, provider states and verification topology are in
+[`specs/005-storefront-dev-bootstrap/contracts/pact-matrix.md`](../../005-storefront-dev-bootstrap/contracts/pact-matrix.md)
+(pacts `storefront-<provider>.json` in the same root `build/pacts`, published by the storefront pipeline
+`.github/workflows/storefront.yml`).
 
 ## Message (event) interactions
 

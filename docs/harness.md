@@ -22,9 +22,13 @@ budgets so the script's own timeout and report fire first). Shared code lives in
   them) plus the tests that cover it: every test class named `<File>*` (Kotest `*Spec`, `*Test`,
   `*PropertyTest`) in any `src/*[tT]est*` source set, at most 20; editing a test file runs that class; no
   covering test means style checks only. A `*.gradle.kts` file runs `gradle help` (script compilation). A
-  TypeScript file runs `eslint`, `tsc --noEmit`, `prettier --check` only when a Prettier config exists, and
-  `vitest related --run --passWithNoTests`, with `CI=1` and stdin closed. Missing tools (no `gradlew`, no
-  `package.json`) make the gate a silent no-op.
+  TypeScript file (`.ts`, `.tsx`, `.mts`, `.cts`; for the storefront everything under `frontend/src`,
+  `frontend/tests`, `frontend/pact` and `frontend/acceptance`) runs, inside its nearest `package.json`
+  directory, `eslint --max-warnings=0 <file>` when an ESLint config exists, `tsc --noEmit` when a
+  `tsconfig.json` exists, `prettier --check <file>` only when a Prettier config exists (the storefront has
+  `frontend/.prettierrc`) and `vitest related <file> --run --passWithNoTests` (the Vitest tests that import
+  the file), with `CI=1` and stdin closed, all quiet and reporting failures only. Stryker is not part of the
+  per-file gate. Missing tools (no `gradlew`, no `package.json`) make the gate a silent no-op.
 - **Budget**: 300 s for all checks of one edit, shared. A check that runs over is killed and reported as
   `<check>: TIMEOUT after <N>s`; no child process is left behind (the Gradle daemon is intentionally left to
   idle out).
@@ -44,8 +48,12 @@ budgets so the script's own timeout and report fire first). Shared code lives in
   architecture rules and full Pitest run, plus `frontend/` lint and test once that package exists. Then
   incremental Pitest (below); for every other frontend package `lint` and `test` (package manager from the
   lockfile, `CI=1`, stdin closed; `frontend/package.json` itself is left to `verify`, so it never runs twice);
-  Stryker `run --incremental` only when a `stryker.config.*` exists in that package. The Stryker step is
-  deferred: it stays inert until a frontend with a Stryker config exists.
+  `npx --no-install stryker run --incremental` when a `stryker.config.*` exists in that package. Stryker was
+  deferred until a frontend existed; since feature 005 `frontend/stryker.config.json` exists, so the step is
+  active: it mutates `src/domain`, `src/app` and `src/telemetry`, reuses the incremental result in
+  `frontend/build/stryker-incremental.json` (only mutants of changed code and tests are re-run) and breaks below
+  80 %. The CI pipeline of the storefront (`.github/workflows/storefront.yml`) runs the full suite
+  (`npm run mutate`).
 - **Bootstrapping**: a Gradle answer of the form `Task '...' not found` (no `verify` or `pitest` task, as in a
   repository that predates feature 002) is treated as "skipped: no such task yet": silent, not a failure.
 - **Mutation testing of changed code**: `verify` already runs the full Pitest of every `domain` and
@@ -90,8 +98,11 @@ budgets so the script's own timeout and report fire first). Shared code lives in
     `quality/mutation-baseline.json`; and the baseline file itself may only go up compared with the base
     branch copy) then `.github/scripts/surviving-mutants.sh` (every `SURVIVED` or `NO_COVERAGE` mutant on a line
     added by `git diff -U0 <base>...HEAD` fails unless the description lists `path:line reason` under
-    `## Mutant justifications`; the description comes from the event payload, no network). Stryker runs here
-    only when a frontend package has a Stryker config.
+    `## Mutant justifications`; the description comes from the event payload, no network). The `mutation` job
+    installs the dependencies of every frontend package that has a lock file and a Stryker config
+    (`frontend/`), and `pr-gate.sh` then runs the full `stryker run` of each such package (threshold 80 %, the
+    `thresholds.break` of its `stryker.config.json`). The Pitest baseline file does not cover Stryker: the
+    storefront's ratchet is the threshold in its own configuration.
   - `hook-tests` runs `.claude/hooks/tests/run-all.sh` and `.github/scripts/tests/run-all.sh`.
   - `pr-gate` (always runs, no checkout) fails when the description lacks a filled `## Gate bypasses` section
     and unless the three jobs above succeeded; it writes a summary of at most 20 lines. It is the single
@@ -153,7 +164,8 @@ adds `com.arcmutate:pitest-kotlin-plugin` (catalogue entry `arcmutate-pitest-kot
 classpath, which also needs an `arcmutate-licence.txt` in the repository root. Arcmutate licences are paid,
 tied to packages and time-limited, and none exists for this public repository (outcome recorded in
 specs/001-harness-quality-gates/research.md), so CI never sets it.
-Stryker for the TypeScript frontend is deferred as described above.
+Stryker for the TypeScript frontend, once deferred, is active as described above (end-of-task and pull-request
+gates).
 
 ## Pull-request runner safeguards
 

@@ -39,6 +39,13 @@ run_agg 'services/cart/domain/Foo.kt\n' 'service-ci / cart'"$tab"'completed'"$ta
 assert_exit 0 "cart green"
 assert_contains stdout '`service-ci / cart` | success'
 
+# the storefront reports `service-ci / storefront`, and the browser acceptance suite makes platform expected too
+run_agg 'frontend/src/ui/App.tsx\n' 'service-ci / storefront'"$tab"'completed'"$tab"'success\nplatform'"$tab"'completed'"$tab"'success\n'
+assert_exit 0 "storefront and platform green"
+assert_contains stdout '`service-ci / storefront` | success'
+run_agg 'frontend/src/ui/App.tsx\n' 'platform'"$tab"'completed'"$tab"'success\n'
+assert_fails "storefront check never reported"
+
 # platform and a service, both green; neutral and skipped pass
 run_agg 'services/cart/domain/Foo.kt\nplatform/compose/docker-compose.yml\n' \
   'service-ci / cart'"$tab"'completed'"$tab"'neutral\nplatform'"$tab"'completed'"$tab"'skipped\n'

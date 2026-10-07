@@ -46,6 +46,11 @@ labels `linux` (added automatically) and `ecommerce`. The decision and its secur
   (`platform/ci-runner/`, see "Feature 004" below) registers such runners; the runner must be treated as
   disposable and must hold no credentials beyond its registration token.
 - No secrets in its environment. `verify` needs none.
+- For the storefront (feature 005): outbound access to the npm registry and to the Playwright download hosts (the
+  storefront pipeline and the browser acceptance run in `platform.yml` install Node 24 with `actions/setup-node` and
+  Chromium with `npx playwright install`); root or passwordless sudo in the runner container lets `--with-deps` install
+  the browser's system libraries, otherwise they belong in the runner image (`platform/ci-runner/README.md`, "Host
+  requirements").
 
 Because the repository is public, GitHub advises against self-hosted runners. If the mitigations above
 cannot be met, switch `runs-on` to a GitHub-hosted label (`ubuntu-latest`, which has Docker) for pull
@@ -58,7 +63,8 @@ gh api repos/actions/checkout/commits/<tag> --jq .sha
 ```
 
 Replace the SHA and the version comment together. The same applies to `actions/setup-java`,
-`gradle/actions`, `actions/upload-artifact` and, in `pr-gate.yml`, `actions/download-artifact`.
+`gradle/actions`, `actions/upload-artifact`, `actions/setup-node` (`storefront.yml`, `platform.yml`) and, in
+`pr-gate.yml`, `actions/download-artifact`.
 
 ## Feature 004: per-service pipelines, platform pipeline, registry
 
@@ -72,7 +78,8 @@ Runner, private registry and Pact Broker live in `platform/ci-runner/` (setup in
 | --- | --- | --- | --- |
 | `gateway.yml`, `identity.yml`, `catalog.yml`, `cart.yml`, `order.yml`, `payment.yml`, `notification.yml` | push to `main`, pull request | `services/<ctx>/**`, `libs/**`, `build-logic/**`, `gradle/**`, `contracts/**`, `platform/docker/**`, `settings.gradle.kts`, `build.gradle.kts`, `gradle.properties`, `config/**`, `.github/workflows/service-ci.yml`, `.github/workflows/<ctx>.yml` | `service-ci / <ctx>` (per-service aggregate, informational: required through `services-aggregate`), `service-ci / gate (<ctx>)`, `service-ci / image (<ctx>)` |
 | `service-ci.yml` | `workflow_call` only | (called by the seven workflows above with `service` and `publish-image`) | |
-| `platform.yml` | pull request (filtered), every push to `main` except documentation-only ones, nightly (02:17 UTC), manual | pull request only: `platform/**`, `acceptance/**`, `contracts/**`, `.github/workflows/platform.yml`; the push trigger uses `paths-ignore` (`docs/**`, `specs/**`, `**.md`, `.specify/**`, `.claude/**`) so a service change merged to `main` is exercised against the whole stack | `platform`, `acceptance-slow` (not on pull requests) |
+| `storefront.yml` | push to `main`, pull request, manual (feature 005) | `frontend/**`, `platform/docker/Dockerfile.storefront`, `platform/docker/storefront/**`, `contracts/openapi/gateway-browser-session.yaml`, `contracts/openapi/telemetry.yaml`, `specs/004-ecommerce-platform-mvp/contracts/openapi/**`, `specs/005-storefront-dev-bootstrap/contracts/openapi/**`, `.github/workflows/storefront.yml` | `service-ci / storefront` (aggregate, informational: required through `services-aggregate`), `gate (storefront)`, `image (storefront)`, `publish (storefront)` |
+| `platform.yml` | pull request (filtered), every push to `main` except documentation-only ones, nightly (02:17 UTC), manual | pull request only: `platform/**`, `acceptance/**`, `frontend/**`, `contracts/**`, `.github/workflows/platform.yml`; the push trigger uses `paths-ignore` (`docs/**`, `specs/**`, `**.md`, `.specify/**`, `.claude/**`) so a service change merged to `main` is exercised against the whole stack | `platform`, `acceptance-slow` (not on pull requests) |
 | `pr-gate.yml` / `verify.yml` | every pull request / push to `main` | none (feature 001) | `pr-gate`, `verify / verify` |
 | `required-checks.yml` | every pull request | none (path-neutral on purpose) | `services-aggregate` (the one to require beside `pr-gate`) |
 
@@ -196,6 +203,46 @@ actions (one action less to trust with the job token); the Pact CLI is the `pact
 names are the service names (`cart`, `catalog`, ...); a service with neither a consumer pact nor a published provider
 verification is unknown to the broker, so set `PACT_CAN_I_DEPLOY=false` until it has one.
 
+### Storefront pipeline (`storefront.yml`, feature 005)
+
+The storefront (`frontend/`, TypeScript and React, served by the gateway) has one workflow of its own because its
+toolchain is Node, not Gradle. It keeps the shape, the safeguards (read-only token, no `pull_request_target`, every `uses:`
+pinned to a full SHA, no fork pull requests on the self-hosted runner, secrets only in the steps that need them), the
+broker variables and the tool images of `service-ci.yml` (the test of the workflow asserts that the four image pins are
+identical), and reports the same check name, `service-ci / storefront`: its aggregate job carries that name on purpose, so
+`services-aggregate` expects it exactly like the seven service checks. A change confined to `frontend/**` also triggers
+`platform` (the browser acceptance suite runs there, see "Platform workflow").
+
+| Job | Step | Tool | Fails when |
+| --- | --- | --- | --- |
+| `gate` | Install | `actions/setup-node` (Node 24 from `frontend/.nvmrc`, npm cache keyed by `package-lock.json`), `npm ci --silent --no-audit --no-fund` | the lock file and `package.json` disagree, or the Node version is not 24 (`engine-strict`) |
+| | Lint | `npm run lint`: `prettier --check`, `eslint --max-warnings 0`, `tsc --noEmit`, freshness of `src/api/generated` | any of them reports something |
+| | Unit and component tests | `npm run test` (Vitest, dot reporter) | a test fails |
+| | Mutation tests | `npm run mutate` (Stryker over `src/domain`, `src/app`, `src/telemetry`; `thresholds.break` 80; always a full run in CI, the incremental file is not restored) | the mutation score is below 80 % |
+| | Consumer pacts | `npm run pact`: one pact per provider written to the repository root `build/pacts/storefront-<provider>.json` | a consumer test fails |
+| | Publish pacts | `pactfoundation/pact-cli` `publish build/pacts/storefront-*.json --consumer-app-version <sha> --branch <branch> --build-url <run>`; a changed pact fires `contract_content_changed`, which dispatches the provider's pipeline | the broker rejects the pacts, or no pact was written; skipped without `PACT_BROKER_URL` |
+| | `can-i-deploy` | `pact-broker can-i-deploy --pacticipant storefront --version <sha> [--to-environment $PACT_ENVIRONMENT]`, retried every 10 s while verification results are unknown (`PACT_CAN_I_DEPLOY_RETRIES`, default 24); `PACT_CAN_I_DEPLOY=false` switches it off | a provider has not verified, or does not honour, the storefront's pacts |
+| | Dependency scan | `osv-scanner scan source --lockfile frontend/package-lock.json`; `DEPENDENCY_SCAN_ENFORCE=false` downgrades findings to annotations | a dependency has a known vulnerability (stricter than "critical blocks": every finding fails, as for the services) |
+| `image` (after `gate`) | Build | `docker build -f platform/docker/Dockerfile.storefront -t <image>:<sha> -t <image>:<branch> .` (Node build stage, rootless nginx runtime) | the build fails |
+| | Image scan | `aquasec/trivy image --severity CRITICAL --ignore-unfixed --exit-code 1` | a CRITICAL vulnerability with a fix is in the image |
+| | SBOM | `anchore/syft` CycloneDX JSON, artifact `sbom-storefront` (30 days) | |
+| | Start and health | `.github/scripts/image-health.sh storefront <image>`: run the image alone with its 64 MB bound and wait up to 90 s for `GET /healthz` to answer `ok` | the container exits or does not answer in 90 s |
+| | Hand-over (push to `main` only) | `docker save` to the artifact `image-storefront` (1 day) | |
+| `publish` (push to `main` only) | Push | as in `service-ci.yml`: `<REGISTRY_HOST>/storefront:<sha>` and `:<branch>` | the registry rejects the push; skipped with a warning when the registry is not configured |
+| `service-ci / storefront` | Aggregate | shell | `gate` or `image` did not succeed, or `publish` failed (a skipped `publish` is fine) |
+
+Image names, the registry variables and the broker variables are those of "Image naming and publication" with `storefront`
+as the repository name. The storefront is a Pact consumer only (no provider verification, so no webhook inputs on
+`workflow_dispatch`); the gateway verifies its pact in the gateway pipeline (`contractVerify`, see
+[service-conventions.md](service-conventions.md) section 6). On a failed `gate` the artifact `reports-storefront` holds the
+pacts and the Stryker incremental file for 7 days. Rehearsing it locally, from the repository root:
+
+```bash
+(cd frontend && npm ci --silent && npm run lint && npm run test && npm run mutate && npm run pact)
+docker build -f platform/docker/Dockerfile.storefront -t storefront:local .
+.github/scripts/image-health.sh storefront storefront:local
+```
+
 ### Image naming and publication
 
 `<REGISTRY_HOST>/<ctx>:<40-character commit SHA>` and `<REGISTRY_HOST>/<ctx>:<branch>` (`:main` after a merge), for example
@@ -234,7 +281,7 @@ Repository configuration used by the pipelines (Settings > Secrets and variables
 ### Required status checks and merge policy (T113, amended by T148, for the maintainer)
 
 **Decision (2026-10-03, T148, amending T113 of 2026-10-02):** require **`pr-gate`** and **`services-aggregate`** on `main`.
-The seven `service-ci / <ctx>` checks and `platform` stay informational on their own: they are path-filtered, GitHub
+The seven `service-ci / <ctx>` checks, `service-ci / storefront` (feature 005) and `platform` stay informational on their own: they are path-filtered, GitHub
 reports no check for a workflow its `paths:` filter skipped, and a required check that is never reported stays
 "Expected - Waiting for status" and blocks the merge (a pull request that touches only `services/cart/**` would wait
 forever for `service-ci / catalog` and the other five, a docs-only one for all of them). `services-aggregate` removes the
@@ -249,7 +296,7 @@ problem: it exists on every pull request and requires exactly the checks the cha
    read; no secrets.
 2. It lists the files of the pull request (`gh api repos/<repo>/pulls/<n>/files`, renames count with both names) and feeds
    them to `.github/scripts/path-filter-check.sh`, the offline simulation of the `paths:` filters. A listed `<ctx>.yml`
-   expects the check `service-ci / <ctx>`, `platform.yml` expects `platform`. A workflow that is not listed was not
+   (`storefront.yml` included) expects the check `service-ci / <ctx>`, `platform.yml` expects `platform`. A workflow that is not listed was not
    triggered, which counts as success.
 3. It polls `gh api repos/<repo>/commits/<head sha>/check-runs?filter=latest` every 20 seconds until each expected check
    has been reported (10 minutes at most) and has completed (40 minutes at most). `success`, `neutral` and `skipped`
@@ -292,7 +339,12 @@ Jobs: `platform` (45 minutes) validates the Compose files (every profile, also m
 shellchecks the scripts, lints the YAML, starts the `core` stack with `-f docker-compose.yml -f ../perf/compose.perf.yml`
 (the override lifts the gateway's per-source-address rate limits: the suite signs in from one address, and with the default
 tiers the run would measure the limiter), runs `smoke.sh --keep` and the **fast** acceptance scenarios
-(`-Dcucumber.filter.tags="not @slow and not @chaos"`). `acceptance-slow` (75 minutes, after `platform`, never on pull
+(`-Dcucumber.filter.tags="not @slow and not @chaos"`), and then the storefront's browser scenarios (feature 005, research
+section 10): Node 24 (`actions/setup-node`), `npm ci --prefix frontend`, Playwright Chromium
+(`npx playwright install --with-deps chromium` when the runner has root or passwordless sudo, plain `install chromium`
+otherwise), `npm --prefix frontend run acceptance` with `STOREFRONT_URL=$GATEWAY_URL` and `MAILPIT_URL=http://localhost:8025`
+(every scenario at 1280x800), then the `@us1` scenarios again with `STOREFRONT_VIEWPORT=mobile` (360x780, FR-017).
+`acceptance-slow` (75 minutes, after `platform`, never on pull
 requests) rebuilds the stack the same way and runs `@slow and not @chaos`, then `@chaos` (which waits
 `NOTIFICATION_FAILURE_TIMEOUT_MINUTES`, 15 by default, for a failing delivery to run out of retries). Both tear the stack
 down always. `GATEWAY_PORT` and `GATEWAY_URL` are set once in the workflow `env:` (change both if 8080 is taken), and
@@ -312,6 +364,9 @@ export COMPOSE_FILE=docker-compose.yml:../perf/compose.perf.yml GATEWAY_PORT=808
 platform/compose/scripts/smoke.sh --no-build --keep               # health, gateway 200, ports not published
 export GATEWAY_URL=http://localhost:$GATEWAY_PORT
 ./gradlew -q :acceptance:test -Dcucumber.filter.tags="not @slow and not @chaos"       # fast suite
+npm --prefix frontend ci && npx --prefix frontend playwright install chromium            # once
+STOREFRONT_URL=$GATEWAY_URL npm --prefix frontend run acceptance                         # storefront, desktop
+STOREFRONT_URL=$GATEWAY_URL STOREFRONT_VIEWPORT=mobile CUCUMBER_TAGS=@us1 npm --prefix frontend run acceptance   # 360 px
 ./gradlew -q :acceptance:test -Dcucumber.filter.tags="@slow and not @chaos"           # slow suite
 ./gradlew -q :acceptance:test -Dcucumber.filter.tags="@chaos"                         # chaos (Mailpit chaos API)
 (cd platform/compose && docker compose --profile core --profile observability --profile ci down -v)
