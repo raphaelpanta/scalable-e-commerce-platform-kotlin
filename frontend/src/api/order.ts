@@ -1,4 +1,6 @@
+import type { Listing } from '@app/catalog/browseParams';
 import type {
+  CancelOrderResult,
   ChangedLine,
   DeclineReason,
   OrderPort,
@@ -106,6 +108,13 @@ export function refusalOf(problem: Problem): PlaceOrderResult | undefined {
   }
 }
 
+function listingQuery(params: Listing): { page?: number; size?: number } {
+  return {
+    ...(params.page === undefined ? {} : { page: params.page }),
+    ...(params.size === undefined ? {} : { size: params.size }),
+  };
+}
+
 export function createOrderApi(options: ApiClientOptions = {}): OrderPort {
   const client = createApiClient<OrderPaths>(options);
   return {
@@ -133,6 +142,26 @@ export function createOrderApi(options: ApiClientOptions = {}): OrderPort {
         return requireBody(data, response);
       } catch (error) {
         if (hasStatus(error, 404)) return null;
+        throw error;
+      }
+    },
+    async listOwnOrders(params: Listing = {}) {
+      const { data, response } = await client.GET('/api/v1/orders', {
+        params: { query: listingQuery(params) },
+      });
+      return requireBody(data, response);
+    },
+    async cancelOwnOrder(id): Promise<CancelOrderResult> {
+      try {
+        const { data, response } = await client.POST('/api/v1/orders/{orderId}/cancellation', {
+          params: { path: { orderId: id } },
+        });
+        return { kind: 'cancelled', order: requireBody(data, response) };
+      } catch (error) {
+        if (hasStatus(error, 404)) return { kind: 'notFound' };
+        if (error instanceof ProblemError && error.problem.type === 'order-not-cancellable') {
+          return { kind: 'notCancellable', message: error.problem.detail ?? error.problem.title };
+        }
         throw error;
       }
     },

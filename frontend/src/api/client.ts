@@ -24,6 +24,12 @@ export type ApiClientOptions = {
   readonly baseUrl?: string;
   readonly fetch?: (input: Request) => Promise<Response>;
   readonly correlation?: CorrelationSource;
+  /**
+   * Whether a 401 tells the session layer the session is gone (default). A call that proves a
+   * password (the re-authentication before an account deletion) answers 401 for a wrong password
+   * and must not end the session it is made from.
+   */
+  readonly reportUnauthorized?: boolean;
 };
 
 type UnauthorizedListener = () => void;
@@ -41,7 +47,10 @@ function notifyUnauthorized(): void {
   for (const listener of unauthorizedListeners) listener();
 }
 
-function browserSessionMiddleware(correlation: CorrelationSource): Middleware {
+function browserSessionMiddleware(
+  correlation: CorrelationSource,
+  reportUnauthorized: boolean,
+): Middleware {
   return {
     onRequest({ request }) {
       request.headers.set(BROWSER_SESSION_HEADER, BROWSER_SESSION_MODE);
@@ -60,7 +69,7 @@ function browserSessionMiddleware(correlation: CorrelationSource): Middleware {
         throw new ThrottledError(problem, retryAfterSeconds(response.headers.get('Retry-After')));
       }
       if (response.status === 401) {
-        notifyUnauthorized();
+        if (reportUnauthorized) notifyUnauthorized();
         throw new UnauthorizedError(problem);
       }
       throw new ProblemError(problem);
@@ -97,6 +106,11 @@ export function createApiClient<Paths extends object>(
     credentials: 'same-origin',
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
   });
-  client.use(browserSessionMiddleware(options.correlation ?? defaultCorrelation));
+  client.use(
+    browserSessionMiddleware(
+      options.correlation ?? defaultCorrelation,
+      options.reportUnauthorized ?? true,
+    ),
+  );
   return client;
 }

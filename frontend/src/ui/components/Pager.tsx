@@ -14,6 +14,8 @@ export type PagerProps = {
   readonly totalItems: number;
   /** Items on this page. */
   readonly shown: number;
+  /** What the list holds, singular and plural ("product" and "products" by default). */
+  readonly noun?: { readonly singular: string; readonly plural: string };
 };
 
 function searchFor(current: URLSearchParams, page: number): string {
@@ -25,7 +27,13 @@ function searchFor(current: URLSearchParams, page: number): string {
  * Page controls driven by the URL (`?page=` zero-based, `?size=` kept as it is, FR-003). A link
  * exists only where a page exists; the other control is an inert, announced placeholder.
  */
-export function Pager({ page, size, totalItems, shown }: PagerProps): JSX.Element {
+export function Pager({
+  page,
+  size,
+  totalItems,
+  shown,
+  noun = { singular: 'product', plural: 'products' },
+}: PagerProps): JSX.Element {
   const [searchParams] = useSearchParams();
   const pages = pageCount(totalItems, size);
   const hasPrevious = page > 0;
@@ -33,7 +41,7 @@ export function Pager({ page, size, totalItems, shown }: PagerProps): JSX.Elemen
   return (
     <nav className={styles.pager} aria-label="Pagination">
       <p className={styles.summary}>
-        Showing {shown} of {totalItems} {totalItems === 1 ? 'product' : 'products'}
+        Showing {shown} of {totalItems} {totalItems === 1 ? noun.singular : noun.plural}
       </p>
       <p className={styles.position}>
         Page {page + 1} of {pages}

@@ -1,8 +1,14 @@
-import { useQuery, type UseQueryResult } from '@tanstack/react-query';
+import {
+  useMutation,
+  type UseMutationResult,
+  useQuery,
+  useQueryClient,
+  type UseQueryResult,
+} from '@tanstack/react-query';
 
-import type { PaymentAttemptPage } from '../payment/paymentPort.ts';
+import type { PaymentAttempt, PaymentAttemptPage } from '../payment/paymentPort.ts';
 import { usePorts } from '../ports.ts';
-import type { Order } from './orderPort.ts';
+import type { CancelOrderResult, Order } from './orderPort.ts';
 import { pollInterval } from './orderView.ts';
 
 export const ORDERS_KEY = 'orders';
@@ -10,6 +16,9 @@ export const ORDERS_KEY = 'orders';
 export const orderKeys = {
   order: (id: string) => [ORDERS_KEY, 'own', id] as const,
   attempts: (id: string) => [ORDERS_KEY, 'attempts', id] as const,
+  attempt: (id: string) => [ORDERS_KEY, 'attempt', id] as const,
+  list: (page: number | null, size: number | null) => [ORDERS_KEY, 'list', page, size] as const,
+  lists: () => [ORDERS_KEY, 'list'] as const,
 };
 
 /**
@@ -37,5 +46,35 @@ export function usePaymentAttempts(
     queryKey: orderKeys.attempts(orderId ?? ''),
     queryFn: (): Promise<PaymentAttemptPage> => port.listAttempts(orderId ?? ''),
     enabled: enabled && orderId !== undefined,
+  });
+}
+
+/** One payment attempt by id (the order's latest one), read only when the page needs it. */
+export function usePaymentAttempt(
+  attemptId: string | null | undefined,
+  enabled: boolean,
+): UseQueryResult<PaymentAttempt | null> {
+  const { payment: port } = usePorts();
+  return useQuery({
+    queryKey: orderKeys.attempt(attemptId ?? ''),
+    queryFn: (): Promise<PaymentAttempt | null> => port.getAttempt(attemptId ?? ''),
+    enabled: enabled && typeof attemptId === 'string',
+  });
+}
+
+/**
+ * Cancels an own order. A cancelled order replaces the cached one and the lists are refreshed;
+ * a refusal (`notCancellable`) leaves every cached status as it was (FR-010).
+ */
+export function useCancelOrder(): UseMutationResult<CancelOrderResult, Error, string> {
+  const { order: port } = usePorts();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string): Promise<CancelOrderResult> => port.cancelOwnOrder(id),
+    onSuccess: async (result, id) => {
+      if (result.kind !== 'cancelled') return;
+      queryClient.setQueryData(orderKeys.order(id), result.order);
+      await queryClient.invalidateQueries({ queryKey: orderKeys.lists() });
+    },
   });
 }

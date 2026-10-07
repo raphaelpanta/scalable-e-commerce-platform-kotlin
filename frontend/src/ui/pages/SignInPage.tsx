@@ -157,6 +157,9 @@ export function SignInPage(): JSX.Element {
           <Link className={buttons.link} to="/register">
             Create an account
           </Link>
+          <Link className={buttons.link} to="/forgot-password">
+            Forgot your password?
+          </Link>
         </div>
       </form>
     </section>
