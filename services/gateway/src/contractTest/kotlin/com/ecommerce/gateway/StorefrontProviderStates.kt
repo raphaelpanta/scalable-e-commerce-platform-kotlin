@@ -50,8 +50,12 @@ private const val TOKEN_LIFETIME_MINUTES = 15L
 private const val NEAR_EXPIRY_SECONDS = 30L
 private const val IDLE_EXCEEDED_MINUTES = 31L
 private const val RETRY_AFTER_SECONDS = 42
-private const val BROWSE_PER_MINUTE = 600
-private const val EXHAUST_ATTEMPTS = BROWSE_PER_MINUTE + 5
+
+// The bucket refills continuously, one token every minute / limit. With the production budget of 600 a token comes
+// back every 100 ms, before the replayed request arrives, so this verification runs with a budget of 60 (one token a
+// second): the state empties it with sequential requests and stops at the first 429.
+private const val BROWSE_PER_MINUTE = 60
+private const val EXHAUST_ATTEMPTS = BROWSE_PER_MINUTE * 20
 private const val SHELL = "<!doctype html><html><body><div id=\"root\"></div></body></html>"
 private val KEY_BYTES = ByteArray(AesGcmSessionSealer.KEY_BYTES) { (it * 3 + 1).toByte() }
 private val SESSION_COOKIES = setOf("session", "__Host-session")
@@ -89,6 +93,7 @@ abstract class StorefrontProviderStates {
             listOf("IDENTITY_URL", "CART_URL", "STOREFRONT_URL").forEach { registry.add(it) { upstream.baseUrl() } }
             registry.add("OTEL_COLLECTOR_URL") { "http://localhost:$collectorPort" }
             registry.add("JWKS_URI") { upstream.baseUrl() + JWKS_PATH }
+            registry.add("gateway.rate-limit.requests-per-minute.browse") { BROWSE_PER_MINUTE }
             registry.add("BROWSER_SESSION_KEY") { Base64.getEncoder().encodeToString(KEY_BYTES) }
         }
     }
