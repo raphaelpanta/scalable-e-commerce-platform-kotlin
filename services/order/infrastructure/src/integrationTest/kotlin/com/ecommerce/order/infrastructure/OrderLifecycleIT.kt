@@ -5,7 +5,9 @@ import com.ecommerce.platform.messaging.envelope.Envelope
 import com.ecommerce.platform.messaging.envelope.EnvelopeJson
 import com.ecommerce.platform.messaging.envelope.EventType
 import com.ecommerce.platform.testing.ProblemAssertions.expectProblem
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
@@ -53,6 +55,33 @@ class OrderLifecycleIT : OrderIntegrationTest() {
             .get()
             .uri("$ORDERS?size=101")
             .header(AUTHORIZATION, bearer(shopper.accountId, SHOPPER))
+            .exchange()
+            .expectProblem(ProblemType.VALIDATION, HttpStatus.BAD_REQUEST.value())
+    }
+
+    @Test
+    fun `an operator lists every shopper's orders newest first and filters them by orderStatus`() {
+        val (_, first) = paidOrder()
+        val (cancelledBy, second) = paidOrder()
+        cancel(second, cancelledBy).expectStatus().isOk
+
+        val all = listAs(OPERATOR, "page=0&size=100")
+        val ids = (all["items"] as List<*>).map { (it as Map<*, *>)["id"] }
+        ids.take(2) shouldContainExactly listOf(second, first)
+
+        val cancelled = listAs(OPERATOR, "orderStatus=cancelled&size=100")
+        (cancelled["items"] as List<*>).map { (it as Map<*, *>)["orderStatus"] }.toSet() shouldBe setOf("cancelled")
+        (cancelled["items"] as List<*>).map { (it as Map<*, *>)["id"] } shouldContain second
+        (cancelled["items"] as List<*>).map { (it as Map<*, *>)["id"] } shouldNotContain first
+        (cancelled["totalItems"] as Number).toLong() shouldBe (cancelled["items"] as List<*>).size.toLong()
+
+        val own = listAs(SHOPPER, "orderStatus=cancelled", cancelledBy.accountId)
+        (own["items"] as List<*>).map { (it as Map<*, *>)["id"] } shouldContainExactly listOf(second)
+        listAs(SHOPPER, "orderStatus=placed", cancelledBy.accountId)["totalItems"] shouldBe 0
+        client
+            .get()
+            .uri("$ORDERS?orderStatus=teleported")
+            .header(AUTHORIZATION, bearer(operatorId, OPERATOR))
             .exchange()
             .expectProblem(ProblemType.VALIDATION, HttpStatus.BAD_REQUEST.value())
     }
@@ -213,6 +242,21 @@ class OrderLifecycleIT : OrderIntegrationTest() {
             listOf("anon-4f9c2d71@anonymised.invalid")
         column("SELECT count(*) FROM processed_event WHERE event_id = :id", "id" to refund.eventId) shouldBe listOf(1L)
     }
+
+    private fun listAs(
+        role: String,
+        query: String,
+        accountId: UUID = operatorId,
+    ): Map<String, Any?> =
+        body(
+            client
+                .get()
+                .uri("$ORDERS?$query")
+                .header(AUTHORIZATION, bearer(accountId, role))
+                .exchange()
+                .expectStatus()
+                .isOk,
+        )
 
     private fun transition(
         orderId: String,

@@ -136,7 +136,11 @@ class OrderContractConformanceIT(
         contract.check(request(GET, "$ORDERS?page=0&size=10", own), OK)
         contract.check(request(GET, "$ORDERS?size=101", own), BAD_REQUEST)
         contract.check(request(GET, ORDERS, null), UNAUTHORIZED)
-        contract.check(request(GET, ORDERS, bearer(operatorId, OPERATOR)), FORBIDDEN)
+        contract.check(request(GET, "$ORDERS?orderStatus=placed&size=10", own), OK)
+        contract.check(request(GET, "$ORDERS?orderStatus=teleported", own), BAD_REQUEST)
+        contract.check(request(GET, ORDERS, bearer(operatorId, OPERATOR)), OK)
+        contract.check(request(GET, "$ORDERS?orderStatus=cancelled&page=0&size=10", bearer(operatorId, OPERATOR)), OK)
+        contract.check(request(GET, ORDERS, bearer(UUID.randomUUID())), FORBIDDEN)
 
         contract.check(request(GET, "$ORDERS/$paid", own), OK)
         contract.check(request(GET, "$ORDERS/$paid", bearer(operatorId, OPERATOR)), OK)

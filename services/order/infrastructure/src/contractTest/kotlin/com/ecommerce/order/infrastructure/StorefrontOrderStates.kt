@@ -189,6 +189,13 @@ abstract class StorefrontOrderStates {
         harness.store(StorefrontOrders.paid())
     }
 
+    @State("order 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10 is placed with payment pending")
+    fun order1PlacedWithPaymentPending() {
+        fresh()
+        caller = StorefrontCaller.OPERATOR
+        harness.store(StorefrontOrders.pending())
+    }
+
     @State("order 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10 is delivered")
     fun order1Delivered() {
         fresh()

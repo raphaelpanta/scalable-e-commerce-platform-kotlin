@@ -26,6 +26,7 @@ import com.ecommerce.order.domain.Recipient
 import com.ecommerce.order.domain.RefundId
 import com.ecommerce.order.domain.Role
 import com.ecommerce.order.domain.applyPayment
+import com.ecommerce.order.domain.transition
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
@@ -175,8 +176,51 @@ class OrderUseCasesTest :
 
                 page?.items shouldBe listOf(newer, older)
                 page?.totalItems shouldBe 2
-                ListOwnOrders(backend.orders)(OPERATOR_CALLER, PageRequest(0, 20)).leftOrNull() shouldBe
-                    OrderError.Forbidden
+                ListOwnOrders(backend.orders)(NOBODY, PageRequest(0, 20)).leftOrNull() shouldBe OrderError.Forbidden
+            }
+
+            test("operators list every shopper's orders newest first") {
+                val backend = Backend()
+                val oldest = backend.stored(newOrder(placedAt = NOW.minusSeconds(120)))
+                val middle = backend.stored(newOrder(OTHER_SHOPPER, placedAt = NOW.minusSeconds(60)))
+                val newest = backend.stored(newOrder())
+
+                val page = ListOwnOrders(backend.orders)(OPERATOR_CALLER, PageRequest(0, 20)).getOrNull()
+
+                page?.items shouldBe listOf(newest, middle, oldest)
+                page?.totalItems shouldBe 3
+            }
+
+            test("the orderStatus filter narrows the list of both roles and the total") {
+                val backend = Backend()
+                val placed = backend.stored(newOrder())
+                val cancelled =
+                    backend.stored(
+                        checkNotNull(
+                            newOrder(OTHER_SHOPPER, placedAt = NOW.minusSeconds(60))
+                                .transition(OrderStatus.CANCELLED, OPERATOR, NOW)
+                                .getOrNull(),
+                        ).order,
+                    )
+                val list = ListOwnOrders(backend.orders)
+
+                list(OPERATOR_CALLER, PageRequest(0, 20), OrderStatus.CANCELLED).getOrNull()?.items shouldBe
+                    listOf(cancelled)
+                list(OPERATOR_CALLER, PageRequest(0, 20), OrderStatus.CANCELLED).getOrNull()?.totalItems shouldBe 1
+                list(OPERATOR_CALLER, PageRequest(0, 20), OrderStatus.PLACED).getOrNull()?.items shouldBe
+                    listOf(placed)
+                list(SHOPPER_CALLER, PageRequest(0, 20), OrderStatus.CANCELLED).getOrNull()?.items shouldBe emptyList()
+                list(SHOPPER_CALLER, PageRequest(0, 20), OrderStatus.PLACED).getOrNull()?.items shouldBe
+                    listOf(placed)
+            }
+
+            test("an account holding both roles lists as an operator") {
+                val backend = Backend()
+                backend.stored(newOrder())
+                backend.stored(newOrder(OTHER_SHOPPER, placedAt = NOW.minusSeconds(60)))
+                val both = Caller(OPERATOR_CALLER.accountId, setOf(Role.SHOPPER, Role.OPERATOR))
+
+                ListOwnOrders(backend.orders)(both, PageRequest(0, 20)).getOrNull()?.totalItems shouldBe 2
             }
 
             test("an order is visible to its owner and operators, not to other shoppers") {

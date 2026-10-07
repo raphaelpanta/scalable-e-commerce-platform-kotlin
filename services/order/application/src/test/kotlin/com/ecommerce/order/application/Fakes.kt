@@ -131,13 +131,18 @@ class InMemoryOrders : OrderRepository {
         return stored[id]
     }
 
-    override suspend fun findByAccount(
-        accountId: AccountId,
+    override suspend fun search(
+        accountId: AccountId?,
+        status: OrderStatus?,
         page: PageRequest,
     ): Page<Order> {
         yield()
-        val mine = stored.values.filter { it.accountId == accountId }.sortedByDescending { it.placedAt }
-        return Page(mine.drop(page.offset.toInt()).take(page.size), page, mine.size.toLong())
+        val matching =
+            stored.values
+                .filter { accountId == null || it.accountId == accountId }
+                .filter { status == null || it.orderStatus == status }
+                .sortedByDescending { it.placedAt }
+        return Page(matching.drop(page.offset.toInt()).take(page.size), page, matching.size.toLong())
     }
 
     override suspend fun findAllByAccount(accountId: AccountId): List<Order> {

@@ -63,6 +63,12 @@ object OrderRequests {
         }
     }
 
+    /** The optional `orderStatus` filter of the order list: absent is no filter, an unknown value a 400. */
+    fun orderStatus(request: ServerRequest): Either<Problem, OrderStatus?> =
+        request.queryParam("orderStatus").orElse(null)?.let { wire ->
+            OrderStatus.fromWire(wire)?.right() ?: invalid("orderStatus", "must be an order status")
+        } ?: null.right()
+
     /** `PlaceOrderRequest`: `addressId`, `cartRevision` and a card `paymentMethod`, nothing else. */
     fun checkout(body: Map<String, Any?>?): Either<Problem, CheckoutRequest> {
         if (body == null) return Problem.badRequest("A request body is required.").left()

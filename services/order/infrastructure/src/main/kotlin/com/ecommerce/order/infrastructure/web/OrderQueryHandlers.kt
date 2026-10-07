@@ -5,7 +5,6 @@ import com.ecommerce.order.application.GetOwnOrder
 import com.ecommerce.order.application.ListOwnOrders
 import com.ecommerce.platform.problem.toServerResponse
 import com.ecommerce.platform.security.requireAccount
-import com.ecommerce.platform.security.requireShopper
 import org.springframework.http.MediaType
 import org.springframework.web.reactive.function.server.ServerRequest
 import org.springframework.web.reactive.function.server.ServerResponse
@@ -16,12 +15,16 @@ class OrderQueryHandlers(
     private val listOwnOrders: ListOwnOrders,
     private val getOwnOrder: GetOwnOrder,
 ) {
-    /** `GET /api/v1/orders?page&size`: the shopper's orders, newest first. */
+    /**
+     * `GET /api/v1/orders?page&size&orderStatus`: the shopper's orders, or every order for an operator, newest first
+     * (the application layer decides by role); `orderStatus` narrows the page for both.
+     */
     suspend fun listOwnOrders(request: ServerRequest): ServerResponse =
         either {
-            val shopper = requireShopper().bind()
+            val account = requireAccount().bind()
             val page = OrderRequests.page(request).bind()
-            listOwnOrders(shopper.toCaller(), page).mapLeft(OrderProblems::of).bind()
+            val status = OrderRequests.orderStatus(request).bind()
+            listOwnOrders(account.toCaller(), page, status).mapLeft(OrderProblems::of).bind()
         }.toServerResponse(request) { ok(OrderPageView.of(it)) }
 
     /** `GET /api/v1/orders/{orderId}`: own orders for shoppers, any order for operators, 404 otherwise. */
