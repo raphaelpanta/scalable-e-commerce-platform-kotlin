@@ -162,6 +162,7 @@ export function reduceCheckout(state: CheckoutState, event: CheckoutEvent): Chec
   if (state.status === 'confirmed') return state;
   switch (event.type) {
     case 'stepShown':
+      if (state.draft.step === event.step) return state;
       return { ...state, draft: { ...state.draft, step: event.step } };
     case 'addressChosen':
       return changed(state, { addressId: event.addressId });

@@ -12,6 +12,7 @@ import {
   initialCheckoutState,
   keyFor,
   reduceCheckout,
+  type Refusal,
   requestOf,
 } from './checkoutDraft.ts';
 import { clearDraft, type DraftStorage, loadDraft, saveDraft } from './draftStorage.ts';
@@ -19,10 +20,10 @@ import { clearDraft, type DraftStorage, loadDraft, saveDraft } from './draftStor
 export type SubmitOutcome =
   | { readonly kind: 'placed'; readonly order: Order }
   | { readonly kind: 'priceChanged' }
-  | { readonly kind: 'refused' }
+  | { readonly kind: 'refused'; readonly refusal: Refusal }
   | { readonly kind: 'unauthorized' }
-  /** Network failure: nothing is retried automatically; the same key is kept for a manual retry. */
-  | { readonly kind: 'interrupted' }
+  /** Network failure or outage: nothing is retried automatically; the key is kept for a manual retry. */
+  | { readonly kind: 'interrupted'; readonly error: unknown }
   /** A part of the draft is missing, or a submission is already in flight. */
   | { readonly kind: 'notSent' };
 
@@ -57,7 +58,7 @@ function fromResult(result: PlaceOrderResult): SubmitOutcome {
     case 'unauthorized':
       return { kind: 'unauthorized' };
     default:
-      return { kind: 'refused' };
+      return { kind: 'refused', refusal: result };
   }
 }
 
@@ -96,9 +97,9 @@ export function useCheckout({
     let result: PlaceOrderResult;
     try {
       result = await port.placeOrder(request, key);
-    } catch {
+    } catch (error: unknown) {
       dispatch({ type: 'interrupted' });
-      return { kind: 'interrupted' };
+      return { kind: 'interrupted', error };
     }
     switch (result.kind) {
       case 'placed':
@@ -122,29 +123,37 @@ export function useCheckout({
     return fromResult(result);
   }, [port, uuid]);
 
+  // Stable callbacks (dispatch is stable), so effects may depend on them without re-running.
+  const showStep = useCallback((step: CheckoutStep) => {
+    dispatch({ type: 'stepShown', step });
+  }, []);
+  const chooseAddress = useCallback((addressId: string) => {
+    dispatch({ type: 'addressChosen', addressId });
+  }, []);
+  const choosePaymentMethod = useCallback((paymentMethodId: PaymentMethodId) => {
+    dispatch({ type: 'paymentMethodChosen', paymentMethodId });
+  }, []);
+  const seeCart = useCallback((revision: CartRevision) => {
+    dispatch({ type: 'cartSeen', revision });
+  }, []);
+  const acceptPrices = useCallback(() => {
+    dispatch({ type: 'pricesAccepted', fresh: mint(uuid) });
+  }, [uuid]);
+  const adjust = useCallback(() => {
+    dispatch({ type: 'adjusted' });
+  }, []);
+
   return useMemo(
     () => ({
       state,
-      showStep: (step) => {
-        dispatch({ type: 'stepShown', step });
-      },
-      chooseAddress: (addressId) => {
-        dispatch({ type: 'addressChosen', addressId });
-      },
-      choosePaymentMethod: (paymentMethodId) => {
-        dispatch({ type: 'paymentMethodChosen', paymentMethodId });
-      },
-      seeCart: (revision) => {
-        dispatch({ type: 'cartSeen', revision });
-      },
-      acceptPrices: () => {
-        dispatch({ type: 'pricesAccepted', fresh: mint(uuid) });
-      },
-      adjust: () => {
-        dispatch({ type: 'adjusted' });
-      },
+      showStep,
+      chooseAddress,
+      choosePaymentMethod,
+      seeCart,
+      acceptPrices,
+      adjust,
       submit,
     }),
-    [state, submit, uuid],
+    [state, showStep, chooseAddress, choosePaymentMethod, seeCart, acceptPrices, adjust, submit],
   );
 }

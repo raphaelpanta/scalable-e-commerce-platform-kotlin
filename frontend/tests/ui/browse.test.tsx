@@ -4,6 +4,7 @@ import { delay, http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { renderApp } from './render.tsx';
+import { CART_URL } from '../msw/cart.ts';
 import {
   CATEGORIES_URL,
   gardenTools,
@@ -296,7 +297,8 @@ describe('Product page (FR-002)', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Page not found' }),
     ).toBeInTheDocument();
-    expect(urls).toEqual([]);
+    // The shell reads the cart for its badge on every page (route table); nothing else is asked.
+    expect(urls.filter((url) => !url.startsWith(CART_URL))).toEqual([]);
   });
 });
 

@@ -113,10 +113,23 @@
 }
 
 .notice {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-1);
   padding: var(--space-2) var(--space-4);
   background: var(--color-warning);
   color: var(--color-bg);
   text-align: center;
+}
+
+.noticeList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notice .textButton {
+  color: var(--color-bg);
 }
 
 .footer {
