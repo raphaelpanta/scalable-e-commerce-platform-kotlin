@@ -2,7 +2,6 @@ package com.ecommerce.catalog.infrastructure
 
 import au.com.dius.pact.provider.MessageAndMetadata
 import au.com.dius.pact.provider.PactVerifyProvider
-import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.MessageTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
@@ -26,12 +25,10 @@ import com.ecommerce.platform.testing.PostgresTestConfig
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
-import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.annotation.Import
-import org.springframework.r2dbc.core.DatabaseClient
 import java.time.Duration
 import java.time.Instant
 import java.util.Locale
@@ -49,19 +46,17 @@ private const val SKU_DIGITS = 8
  * parameters describe. HTTP interactions run against the server, message interactions (stock events, none consumed
  * under a pact yet) against the `@PactVerifyProvider` methods below. Shared by [CatalogProviderVerificationTest] (pacts
  * of `build/pacts`) and [CatalogBrokerVerificationTest] (pacts of the Pact Broker), which only choose the pact source;
- * both are tagged `provider` and run in `contractVerify`.
+ * both are tagged `provider` and run in `contractVerify`. The storefront's own states (`storefront-catalog.json`) are
+ * inherited from [StorefrontCatalogStates].
  */
 @SpringBootTest(webEnvironment = RANDOM_PORT, properties = ["management.server.port="])
 @Import(PostgresTestConfig::class)
 // Abstract: JUnit runs only the subclasses, which choose the pact source (folder or broker); one method per provider
 // state and per message description.
 @Suppress("TooManyFunctions", "AbstractClassCanBeConcreteClass")
-abstract class CatalogProviderStates {
+abstract class CatalogProviderStates : StorefrontCatalogStates() {
     @LocalServerPort
     protected var port: Int = 0
-
-    @Autowired
-    protected lateinit var database: DatabaseClient
 
     @BeforeEach
     fun target(context: PactVerificationContext?) {
@@ -70,7 +65,7 @@ abstract class CatalogProviderStates {
                 if (it.interaction.isAsynchronousMessage()) {
                     MessageTestTarget(listOf(CatalogProviderStates::class.java.packageName))
                 } else {
-                    HttpTestTarget("localhost", port)
+                    httpTarget(port)
                 }
         }
         execute(
