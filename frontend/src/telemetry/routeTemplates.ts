@@ -13,6 +13,7 @@ export const API_ROUTE_TEMPLATES = [
   '/api/v1/catalog/categories/:id',
   '/api/v1/catalog/products',
   '/api/v1/catalog/products/:id',
+  '/api/v1/catalog/products/:id/stock-adjustments',
   '/api/v1/identity/accounts',
   '/api/v1/identity/accounts/me',
   '/api/v1/identity/accounts/me/addresses',

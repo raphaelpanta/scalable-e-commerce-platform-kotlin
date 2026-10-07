@@ -8,9 +8,11 @@ import { createCatalogApi } from '@api/catalog';
 import { hasStatus } from '@api/client';
 import { createIdentityApi } from '@api/identity';
 import { createOrderApi } from '@api/order';
+import { createOrderConsoleApi } from '@api/orderConsole';
 import { createPaymentApi } from '@api/payment';
 import { createSessionPort } from '@api/session';
 import { CatalogPortContext } from '@app/catalog/catalogPort';
+import { OrderConsolePortContext } from '@app/console/consolePort';
 import { correlation } from '@app/correlation';
 import { type Ports, PortsContext } from '@app/ports';
 import { createQueryClient } from '@app/queryClient';
@@ -59,6 +61,7 @@ const ports: Ports = {
   order: createOrderApi(),
   payment: createPaymentApi(),
 };
+const orderConsole = createOrderConsoleApi();
 const router = createStorefrontRouter({ queryClient, sessionStore });
 
 const container = document.getElementById('root');
@@ -70,7 +73,9 @@ createRoot(container).render(
       <SessionStoreContext.Provider value={sessionStore}>
         <CatalogPortContext.Provider value={catalog}>
           <PortsContext.Provider value={ports}>
-            <RouterProvider router={router} />
+            <OrderConsolePortContext.Provider value={orderConsole}>
+              <RouterProvider router={router} />
+            </OrderConsolePortContext.Provider>
           </PortsContext.Provider>
         </CatalogPortContext.Provider>
       </SessionStoreContext.Provider>

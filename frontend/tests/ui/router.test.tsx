@@ -65,10 +65,9 @@ describe('router (contracts/storefront-routes.md)', () => {
   });
 
   it('lets an operator open the console', async () => {
-    renderApp(`/console/orders/${ID}`, { kind: 'signedIn', roles: ['shopper', 'operator'] });
-    expect(
-      await screen.findByRole('heading', { level: 1, name: 'Console: order' }),
-    ).toBeInTheDocument();
+    renderApp('/console/stock', { kind: 'signedIn', roles: ['shopper', 'operator'] });
+    expect(await screen.findByRole('heading', { level: 1, name: 'Stock' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Console' })).toBeInTheDocument();
   });
 
   it('a 401 while signed in sends the visitor back to anonymous navigation', async () => {

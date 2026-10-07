@@ -156,6 +156,7 @@ describe('browse parameters (FR-003, storefront-routes.md)', () => {
         size: fc.integer({ min: 1, max: 100 }),
         q: fc.string({ maxLength: 10 }),
         categoryId: fc.uuid(),
+        includeWithdrawn: fc.boolean(),
       },
       { requiredKeys: [] },
     );
@@ -168,14 +169,15 @@ describe('browse parameters (FR-003, storefront-routes.md)', () => {
           left.page === right.page &&
           left.size === right.size &&
           left.q === right.q &&
-          left.categoryId === right.categoryId;
+          left.categoryId === right.categoryId &&
+          (left.includeWithdrawn ?? false) === (right.includeWithdrawn ?? false);
         expect(same).toBe(equal);
       }),
     );
     expect(catalogKeys.products({})).toEqual([
       'catalog',
       'products',
-      { page: null, size: null, q: null, categoryId: null },
+      { page: null, size: null, q: null, categoryId: null, includeWithdrawn: false },
     ]);
   });
 });

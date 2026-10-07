@@ -26,6 +26,7 @@ export const catalogKeys = {
         size: params.size ?? null,
         q: params.q ?? null,
         categoryId: params.categoryId ?? null,
+        includeWithdrawn: params.includeWithdrawn ?? false,
       },
     ] as const,
   categories: (params: CategoryListParams) =>

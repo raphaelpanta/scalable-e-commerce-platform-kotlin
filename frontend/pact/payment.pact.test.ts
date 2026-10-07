@@ -1,14 +1,25 @@
 import { MatchersV3 } from '@pact-foundation/pact';
 import { describe, expect, it } from 'vitest';
 
-import { createPaymentApi } from '@api/payment';
+import { createPaymentApi, createPaymentRulesApi } from '@api/payment';
 
-import { asGateway, ATTEMPT_DECLINED, bearer, instant, money, ORDER_1, uuid } from './gateway.ts';
+import {
+  asGateway,
+  ATTEMPT_DECLINED,
+  bearer,
+  instant,
+  money,
+  ORDER_1,
+  problem,
+  PROBLEM,
+  uuid,
+} from './gateway.ts';
 import { pactFor } from './pact.config.ts';
 
-// Storefront → payment consumer pact: interaction P2 of contracts/pact-matrix.md (the payment
-// attempts of an order, newest first), provider states verbatim, driving the real
-// src/api/payment.ts with the bearer the gateway injects. P1 (simulator rules) joins with US6.
+// Storefront → payment consumer pact: interactions P1 (the simulator rules document, operator
+// only, read by the console) and P2 (the payment attempts of an order, newest first) of
+// contracts/pact-matrix.md, provider states verbatim, driving the real src/api/payment.ts with the
+// bearer the gateway injects.
 const { eachLike, integer, like, regex } = MatchersV3;
 
 const ATTEMPTS = '/api/v1/payments/attempts';
@@ -74,6 +85,67 @@ describe('storefront → payment pact (P2)', () => {
       .executeTest(async (mockServer) => {
         const page = await shopper(mockServer.url).listAttempts(ORDER_1);
         expect(page.items).toEqual([]);
+      });
+  });
+});
+
+const RULES = '/api/v1/payments/simulator/rules';
+
+const rules = (url: string) =>
+  createPaymentRulesApi({ baseUrl: url, fetch: asGateway({ bearer: true }) });
+
+describe('storefront → payment pact, console row (P1)', () => {
+  it('reads the rules document as an operator', async () => {
+    await provider
+      .addInteraction()
+      .given('the simulator rules document version 2 is active')
+      .uponReceiving('an operator reads the simulator rules')
+      .withRequest('GET', RULES, (request) => {
+        request.headers({ Authorization: bearer() });
+      })
+      .willRespondWith(200, (response) => {
+        response.jsonBody({
+          version: 2,
+          defaultOutcome: regex('^(approved|declined|pending|voided)$', 'approved'),
+          rules: eachLike({
+            order: integer(1),
+            id: like('provider-unreachable'),
+            description: like('Token marks the provider as unreachable for the first attempt.'),
+            match: {
+              field: regex('^(amountMinor|token)$', 'token'),
+              operator: regex('^(equals|startsWith|endsWith)$', 'equals'),
+              value: like('tok_sim_unreachable'),
+            },
+            outcome: regex('^(approved|declined|pending|voided)$', 'pending'),
+          }),
+        });
+      })
+      .executeTest(async (mockServer) => {
+        const result = await rules(mockServer.url).getSimulatorRules();
+        expect(result.kind).toBe('rules');
+        if (result.kind !== 'rules') return;
+        expect(result.rules.version).toBe(2);
+        expect(result.rules.rules.length).toBeGreaterThan(0);
+      });
+  });
+
+  it('refuses a shopper (403)', async () => {
+    await provider
+      .addInteraction()
+      .given('a shopper ana@example.com is signed in')
+      .uponReceiving('a shopper tries to read the simulator rules')
+      .withRequest('GET', RULES, (request) => {
+        request.headers({ Authorization: bearer() });
+      })
+      .willRespondWith(403, (response) => {
+        response
+          .headers({ 'Content-Type': PROBLEM })
+          .jsonBody(
+            problem('forbidden', 403, 'Forbidden', 'This operation requires the operator role.'),
+          );
+      })
+      .executeTest(async (mockServer) => {
+        expect(await rules(mockServer.url).getSimulatorRules()).toEqual({ kind: 'forbidden' });
       });
   });
 });
