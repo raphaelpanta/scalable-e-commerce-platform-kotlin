@@ -3,15 +3,19 @@ import { describe, expect, it } from 'vitest';
 
 import {
   catalogIdFromParam,
+  categoryPath,
   DEFAULT_PAGE_SIZE,
   listingFromSearch,
   MAX_PAGE_SIZE,
   MAX_SEARCH_LENGTH,
+  MAX_SLUG_LENGTH,
   normalizeSearchTerm,
   pageCount,
   parsePage,
   parseSize,
   productIdFromParam,
+  productPath,
+  slugOf,
   withPage,
 } from '@app/catalog/browseParams';
 import { catalogKeys } from '@app/catalog/catalogQueries';
@@ -59,6 +63,8 @@ describe('browse parameters (FR-003, storefront-routes.md)', () => {
       }),
     );
     expect(normalizeSearchTerm(`  ${'a'.repeat(150)}  `)).toBe('a'.repeat(100));
+    // The cut can leave a trailing space behind; it is trimmed again.
+    expect(normalizeSearchTerm(`${'a'.repeat(99)} b`)).toBe('a'.repeat(99));
     expect(normalizeSearchTerm(null)).toBe('');
     expect(normalizeSearchTerm(undefined)).toBe('');
     expect(normalizeSearchTerm('   ')).toBe('');
@@ -84,6 +90,25 @@ describe('browse parameters (FR-003, storefront-routes.md)', () => {
     expect(catalogIdFromParam('shoes 0b4e6d1c-2a57-4c83-9f10-6d8a3e5b7c21')).toBeUndefined();
   });
 
+  it('categoryPath yields a slug the category route resolves back to the same id', () => {
+    fc.assert(
+      fc.property(fc.uuid(), fc.string({ maxLength: 80 }), (id, name) => {
+        const path = categoryPath({ id, name });
+        expect(path.startsWith('/categories/')).toBe(true);
+        expect(catalogIdFromParam(path.slice('/categories/'.length))).toBe(id.toLowerCase());
+        const slug = slugOf(name);
+        expect(slug).toMatch(/^(?:[a-z0-9]+(?:-[a-z0-9]+)*)?$/);
+        expect(slug.length).toBeLessThanOrEqual(MAX_SLUG_LENGTH);
+        expect(path).toBe(slug === '' ? `/categories/${id}` : `/categories/${slug}-${id}`);
+      }),
+    );
+    expect(slugOf('Garden tools')).toBe('garden-tools');
+    expect(slugOf('  Café & Bar!! ')).toBe('cafe-bar');
+    expect(slugOf('***')).toBe('');
+    expect(slugOf(`${'a'.repeat(39)}-b`)).toBe('a'.repeat(39));
+    expect(productPath({ id: 'x' })).toBe('/products/x');
+  });
+
   it('listingFromSearch and withPage round-trip the page while keeping the other parameters', () => {
     fc.assert(
       fc.property(
@@ -98,11 +123,16 @@ describe('browse parameters (FR-003, storefront-routes.md)', () => {
           const listing = listingFromSearch(search);
           expect(listing.page ?? 0).toBe(page);
           expect(listing.size).toBe(size === DEFAULT_PAGE_SIZE ? undefined : size);
+          // Absent parameters are absent keys, not `undefined` values (query keys, spreads).
+          expect(Object.keys(listing).sort()).toEqual(
+            [...(page > 0 ? ['page'] : []), ...(size === DEFAULT_PAGE_SIZE ? [] : ['size'])].sort(),
+          );
         },
       ),
     );
-    expect(listingFromSearch(new URLSearchParams(''))).toEqual({});
-    expect(listingFromSearch(new URLSearchParams('page=-2&size=0'))).toEqual({});
+    expect(listingFromSearch(new URLSearchParams(''))).toStrictEqual({});
+    expect(listingFromSearch(new URLSearchParams('page=-2&size=0'))).toStrictEqual({});
+    expect(listingFromSearch(new URLSearchParams('page=3'))).toStrictEqual({ page: 3 });
   });
 
   it('pageCount is at least one and covers every item', () => {

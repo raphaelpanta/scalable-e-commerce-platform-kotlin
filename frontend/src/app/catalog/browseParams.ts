@@ -76,3 +76,26 @@ export function pageCount(totalItems: number, size: number): number {
   if (size <= 0) return 1;
   return Math.max(1, Math.ceil(totalItems / size));
 }
+
+export const MAX_SLUG_LENGTH = 40;
+
+/** A readable, URL-safe prefix from a name: lower-case ASCII letters and digits joined by `-`. */
+export function slugOf(name: string): string {
+  return name
+    .normalize('NFKD')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, MAX_SLUG_LENGTH)
+    .replace(/-$/, '');
+}
+
+/** `/categories/<slug>-<id>` (or `/categories/<id>` when the name yields no slug). */
+export function categoryPath(category: { readonly id: string; readonly name: string }): string {
+  const slug = slugOf(category.name);
+  return slug === '' ? `/categories/${category.id}` : `/categories/${slug}-${category.id}`;
+}
+
+export function productPath(product: { readonly id: string }): string {
+  return `/products/${product.id}`;
+}

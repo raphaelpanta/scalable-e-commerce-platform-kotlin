@@ -5,9 +5,15 @@ import { ROUTE_TEMPLATES } from '@domain/routeTemplate';
 import { ROUTE_ACCESS } from '@ui/routes/router';
 
 import { renderApp } from './render.tsx';
+import { gardenTools, rake } from '../msw/catalog.ts';
 
 const ID = '0b4e6d1c-7e1c-4a7b-9c43-2d5e8f1a2b3c';
-const instantiate = (template: string) => template.replace(':id', ID);
+// Catalogue routes resolve their id against the MSW fixtures; every other id is opaque.
+const instantiate = (template: string) =>
+  template
+    .replace('/categories/:id', `/categories/${gardenTools.id}`)
+    .replace('/products/:id', `/products/${rake.id}`)
+    .replace(':id', ID);
 
 describe('router (contracts/storefront-routes.md)', () => {
   it('registers every route of the closed list with an access level', () => {
