@@ -1,4 +1,3 @@
-// Browser telemetry (FR-031, FR-032) is implemented in a later phase (tasks T092–T093). This
-// placeholder keeps the layer present so the ESLint boundaries and the Stryker scope already
-// cover it. Nothing is exported yet.
-export {};
+// Browser telemetry (FR-031, FR-032): the one exporter, the allow-list policy and the wiring of the
+// OpenTelemetry web SDK. `main.tsx` calls `initTelemetry` at runtime; tests import the modules.
+export { initTelemetry, type Telemetry, type TelemetryOptions } from './setup.ts';

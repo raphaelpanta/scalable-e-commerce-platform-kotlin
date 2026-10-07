@@ -1,8 +1,14 @@
+import { readFileSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
 
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
+const version = (
+  JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as {
+    version: string;
+  }
+).version;
 const gatewayPort = process.env['GATEWAY_PORT'] ?? '8080';
 
 const alias = {
@@ -19,6 +25,8 @@ export default defineConfig({
   base: '/',
   plugins: [react()],
   resolve: { alias },
+  // `service.version` of browser telemetry (research §4): the version of package.json.
+  define: { __APP_VERSION__: JSON.stringify(version) },
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
