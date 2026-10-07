@@ -377,6 +377,10 @@ components:
     ValidationBothCredentials:
       description: |
         400 `validation`: the request carries both a session cookie and its own `Authorization`
+        header. Authentication runs first, so an `Authorization: Bearer` value that is not a valid
+        token answers 401 `unauthorized` like any other request; the 400 applies to a valid bearer
+        or to any other authorization scheme presented together with the cookie.
+        Detail of the 400:
         header. Nothing is forwarded and no cookie is changed.
       headers: { X-Correlation-Id: { $ref: '#/components/headers/CorrelationId' } }
       content:
