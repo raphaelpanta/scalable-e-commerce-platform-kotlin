@@ -88,6 +88,11 @@ git diff --name-only origin/main...HEAD | .github/scripts/path-filter-check.sh -
 .github/scripts/tests/run-all.sh                                                    # includes test-path-filter-check.sh
 ```
 
+The repository shell scripts (`scripts/dev-env.sh`, the publication scripts, the platform scripts) are tested and
+linted inside `verify` (`scriptsCheck`: `scripts/tests/run-all.sh --quiet` and `scripts/lint.sh`, see
+[build.md](build.md)), so the pull-request gate needs no separate step for them; `platform.yml` additionally runs the
+pinned shellcheck image over the same file list when the platform changes and on every push to `main`.
+
 ### Per-service pipeline (`service-ci.yml`)
 
 | Job | Step | Tool | Fails when |
