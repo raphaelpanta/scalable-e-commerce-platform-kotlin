@@ -138,7 +138,13 @@ When(
 When('I tab to the product {string}', async function (this: StorefrontWorld, alias: string) {
   const name = this.product(alias).name;
   const page = this.currentPage();
-  for (let index = 0; index < 80; index += 1) {
+  // A keyboard user skips the banner and the category navigation with the skip link first.
+  await page.keyboard.press('Tab');
+  const skipLink = page.getByRole('link', { name: /skip to/i });
+  if (await skipLink.evaluate((el) => el === document.activeElement).catch(() => false)) {
+    await page.keyboard.press('Enter');
+  }
+  for (let index = 0; index < 200; index += 1) {
     const focused = await page.evaluate(() => document.activeElement?.textContent.trim() ?? '');
     if (focused === name) return;
     await page.keyboard.press('Tab');

@@ -11,10 +11,12 @@ import { QueryBoundary } from './QueryBoundary.tsx';
 export type CategoryNavProps = {
   /** The category being browsed, marked `aria-current="page"`. */
   readonly currentId?: string | undefined;
+  /** The browsed category itself, listed even when it falls outside the page of categories fetched. */
+  readonly current?: { readonly id: string; readonly name: string } | null | undefined;
 };
 
 /** The categories offered for browsing on every browsing page (FR-001), with its own states. */
-export function CategoryNav({ currentId }: CategoryNavProps): JSX.Element {
+export function CategoryNav({ currentId, current }: CategoryNavProps): JSX.Element {
   const headingId = useId();
   const categories = useCategories();
   return (
@@ -41,6 +43,13 @@ export function CategoryNav({ currentId }: CategoryNavProps): JSX.Element {
                 </Link>
               </li>
             ))}
+            {current && !page.items.some((category) => category.id === current.id) ? (
+              <li key={current.id}>
+                <Link className={styles.link} to={categoryPath(current)} aria-current="page">
+                  {current.name}
+                </Link>
+              </li>
+            ) : null}
             {page.items.length === 0 ? <li className={styles.empty}>No categories yet.</li> : null}
           </ul>
         )}

@@ -40,7 +40,7 @@ export function CategoryPage(): JSX.Element {
               <p className={browse.lead}>{found.description}</p>
             )}
             <div className={browse.layout}>
-              <CategoryNav currentId={categoryId} />
+              <CategoryNav currentId={categoryId} current={category.data} />
               <div className={browse.results}>
                 <ProductListing
                   query={products}
