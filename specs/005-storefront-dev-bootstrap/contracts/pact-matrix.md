@@ -88,9 +88,9 @@ The cart service sees `X-Cart-Token` (injected by the gateway from the cart cook
 | O6 | `listOwnOrders` | 200 page newest first; 200 empty page | `ana@example.com has 3 orders`, `ana@example.com has no orders` | orders |
 | O7 | `getOwnOrder` | 200 with `statusHistory`; 200 pending payment (polled every 5 s; later 200 approved); 404 another shopper's order | `ana@example.com owns order 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10`, `the payment of order 0b9a3b0e-... is pending and becomes approved`, `order 0b9a3b0e-... belongs to another shopper` | confirmation, order |
 | O8 | `cancelOwnOrder` | 200 `cancelled`; 409 `order-not-cancellable` | `ana@example.com owns a placed order 0b9a3b0e-...`, `ana@example.com owns a shipped order 0b9a3b0e-...` | order |
-| O9 | `listOwnOrders` (console, operator: all orders) | 200 page including orders of other shoppers; 403 for a shopper where the contract refuses | `an operator ops@example.com is signed in and 5 orders of 2 shoppers exist` | console orders |
+| O9 | `listOwnOrders` (console, operator: all orders; requires the additive order change of plan.md "Operator order listing": operator role accepted, optional `orderStatus` filter) | 200 page including orders of other shoppers; 403 for a shopper where the contract refuses | `an operator ops@example.com is signed in and 5 orders of 2 shoppers exist` | console orders |
 | O10 | `getOwnOrder` (console, operator: any order) | 200 | `an operator ops@example.com is signed in and order 0b9a3b0e-... exists` | console order |
-| O11 | `transitionOrderStatus` (console) | 200 new status; 409 `invalid-transition`; 409 preparing without approved payment; 403 shopper | `order 0b9a3b0e-... is placed with payment approved`, `order 0b9a3b0e-... is delivered`, `a shopper ana@example.com is signed in` | console order (FR-011) |
+| O11 | `transitionOrderStatus` (console) | 200 new status; 409 `invalid-transition`; 409 preparing without approved payment; 403 shopper | `order 0b9a3b0e-... is placed with payment approved`, `order 0b9a3b0e-... is delivered`, `order 0b9a3b0e-... is placed with payment pending`, `a shopper ana@example.com is signed in` | console order (FR-011) |
 
 ## Storefront to payment (`storefront-payment.json`, verified by payment)
 

@@ -217,6 +217,13 @@ harness; images, Compose and workflows follow the service conventions so nothing
   response; the UI uses it only to warn before expiry, the gateway decides.
 - **Missing `Sec-Fetch-Site`**: the origin check fails closed (403) for a non-GET request with a
   session cookie that carries neither `Sec-Fetch-Site` nor a matching `Origin`.
+- **Operator order listing (console)**: feature 004's `listOwnOrders` is role `shopper` only, so the console's
+  "all orders" view needs a second additive provider change: `GET /api/v1/orders` accepts the operator role and
+  then returns every shopper's orders, with an optional `orderStatus` query parameter (both OpenAPI copies, order
+  authorisation in the application layer, provider state O9). Found by the order provider verification on
+  2026-10-07; delivered with US6 (T088).
+- **Pending payment attempt id**: the storefront must not assert `paymentAttemptId` is null while a payment is
+  pending (the id exists once the provider was reached); the consumer pact uses a nullable matcher.
 - **Payment-method options for shoppers**: payment's `getSimulatorRules` is operator-only, so the
   storefront ships a build-time list of the seeded simulator methods (approving, declining,
   pending) in `frontend/src/domain/paymentMethods.ts`, labelled as local-development methods; the

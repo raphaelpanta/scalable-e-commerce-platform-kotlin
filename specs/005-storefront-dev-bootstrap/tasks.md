@@ -235,7 +235,7 @@
 
 ### Implementation for User Story 6
 
-- [ ] T088 [P] [US6] Extend `frontend/src/api/catalog.ts` (adjustStock, `includeWithdrawn`), `frontend/src/api/order.ts` (transitionOrderStatus, operator list), `frontend/src/api/payment.ts` (getSimulatorRules) until T084 passes; implement `frontend/src/app/console/{consoleOrders,stockAdjustment}.ts` until T085 passes
+- [ ] T088 [P] [US6] Extend `frontend/src/api/catalog.ts` (adjustStock, `includeWithdrawn`), `frontend/src/api/order.ts` (transitionOrderStatus, operator list), `frontend/src/api/payment.ts` (getSimulatorRules) until T084 passes; implement `frontend/src/app/console/{consoleOrders,stockAdjustment}.ts` until T085 passes; additive order provider change for the operator listing (plan.md "Operator order listing": `GET /api/v1/orders` accepts role `operator` and returns all orders with an optional `orderStatus` filter, both OpenAPI copies, application-layer authorisation, `OrderContractConformanceIT`, provider state O9 and the new O11 state `order 0b9a3b0e-... is placed with payment pending`)
 - [ ] T089 [US6] Implement `frontend/src/ui/console/{ConsoleLayout,ConsoleOrdersPage,ConsoleOrderPage,ConsoleStockPage}.tsx` and components `frontend/src/ui/console/{OrdersTable,TransitionButtons,StockAdjustmentForm}.tsx` until T086 passes
 - [ ] T090 [US6] Register `/console/orders`, `/console/orders/:id`, `/console/stock` (operator-protected) in `frontend/src/ui/routes/router.tsx`; run `npm run acceptance` and `./gradlew -q :acceptance:test` (with `GATEWAY_URL`) until T087 passes; `./gradlew -q contractTest contractVerify verify`
 
