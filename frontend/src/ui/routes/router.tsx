@@ -16,9 +16,13 @@ import { type KnownRouteTemplate, ROUTE_TEMPLATES } from '@domain/routeTemplate'
 
 import { Layout } from '../components/Layout.tsx';
 import { Loading } from '../components/Loading.tsx';
+import { CategoryPage } from '../pages/CategoryPage.tsx';
+import { HomePage } from '../pages/HomePage.tsx';
 import { NotAllowedPage } from '../pages/NotAllowedPage.tsx';
 import { NotFoundPage } from '../pages/NotFoundPage.tsx';
 import { PlaceholderPage } from '../pages/PlaceholderPage.tsx';
+import { ProductPage } from '../pages/ProductPage.tsx';
+import { SearchPage } from '../pages/SearchPage.tsx';
 
 export type RouterDependencies = {
   readonly queryClient: QueryClient;
@@ -49,6 +53,15 @@ export const ROUTE_ACCESS: Readonly<Record<KnownRouteTemplate, Access>> = {
   '/console/orders': 'operator',
   '/console/orders/:id': 'operator',
   '/console/stock': 'operator',
+};
+
+/** The pages implemented so far; every other template renders its placeholder. */
+const PAGES: Partial<Readonly<Record<KnownRouteTemplate, JSX.Element>>> = {
+  '/': <HomePage />,
+  // `/categories/:slugOrId` of the route table: the `id` segment accepts a slug prefix (app/catalog).
+  '/categories/:id': <CategoryPage />,
+  '/search': <SearchPage />,
+  '/products/:id': <ProductPage />,
 };
 
 const PLACEHOLDER_TITLES: Readonly<Record<KnownRouteTemplate, string>> = {
@@ -105,7 +118,7 @@ export function buildRoutes(dependencies: RouterDependencies): RouteObject[] {
   const consoleChildren: RouteObject[] = [];
   for (const template of ROUTE_TEMPLATES) {
     const access = ROUTE_ACCESS[template];
-    const element = <PlaceholderPage title={PLACEHOLDER_TITLES[template]} />;
+    const element = PAGES[template] ?? <PlaceholderPage title={PLACEHOLDER_TITLES[template]} />;
     const route: RouteObject =
       template === '/'
         ? { index: true, element }

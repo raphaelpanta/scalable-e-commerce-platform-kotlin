@@ -3,6 +3,8 @@ import { render, type RenderResult } from '@testing-library/react';
 import type { JSX, ReactNode } from 'react';
 import { RouterProvider } from 'react-router';
 
+import { createCatalogApi } from '@api/catalog';
+import { type CatalogPort, CatalogPortContext } from '@app/catalog/catalogPort';
 import { createQueryClient } from '@app/queryClient';
 import {
   createSessionStore,
@@ -13,6 +15,8 @@ import {
 } from '@app/session/sessionStore';
 import { SessionStoreContext } from '@app/session/useSession';
 import { createTestRouter } from '@ui/routes/router';
+
+import { API } from '../msw/catalog.ts';
 
 /** An in-memory session port: no network, every call recorded. */
 export type FakeSessionPort = SessionPort & {
@@ -55,13 +59,16 @@ export type Harness = {
   readonly queryClient: QueryClient;
   readonly port: FakeSessionPort;
   readonly sessionStore: SessionStore;
+  /** The real catalogue adapter over MSW (tests/msw/catalog.ts). */
+  readonly catalog: CatalogPort;
 };
 
 export function harness(initial: ProbeResult = { kind: 'anonymous' }): Harness {
   const queryClient = createQueryClient();
   const port = fakeSessionPort(initial);
   const sessionStore = createSessionStore(queryClient, port);
-  return { queryClient, port, sessionStore };
+  const catalog = createCatalogApi({ baseUrl: API });
+  return { queryClient, port, sessionStore, catalog };
 }
 
 export function Providers({
@@ -73,7 +80,9 @@ export function Providers({
 }): JSX.Element {
   return (
     <QueryClientProvider client={h.queryClient}>
-      <SessionStoreContext.Provider value={h.sessionStore}>{children}</SessionStoreContext.Provider>
+      <SessionStoreContext.Provider value={h.sessionStore}>
+        <CatalogPortContext.Provider value={h.catalog}>{children}</CatalogPortContext.Provider>
+      </SessionStoreContext.Provider>
     </QueryClientProvider>
   );
 }

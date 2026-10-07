@@ -65,33 +65,41 @@ export function cancelAllowed(role: Role, status: OrderStatus): boolean {
   return role === 'operator' && status === 'preparing';
 }
 
+type AdvanceTarget = Extract<OrderAction, { kind: 'advance' }>['to'];
+
+/** The one forward step an operator may take from each status (none from a terminal one). */
+const ADVANCE_TARGET: Readonly<Record<OrderStatus, AdvanceTarget | undefined>> = {
+  placed: 'preparing',
+  preparing: 'shipped',
+  shipped: 'delivered',
+  delivered: undefined,
+  cancelled: undefined,
+};
+
+/** `advance(preparing)` additionally requires payment `approved`. */
+export function advanceTarget(
+  orderStatus: OrderStatus,
+  paymentStatus: PaymentStatus,
+): AdvanceTarget | undefined {
+  const target = ADVANCE_TARGET[orderStatus];
+  if (target === 'preparing' && paymentStatus !== 'approved') return undefined;
+  return target;
+}
+
 /**
  * Actions to offer for (role, order status, payment status), data-model.md §3.3. `advance` is for
  * operators only; `advance(preparing)` additionally requires payment `approved`. Empty for
- * terminal statuses.
+ * terminal statuses (no advance target, and `cancelAllowed` is false there).
  */
 export function allowedActions(
   role: Role,
   orderStatus: OrderStatus,
   paymentStatus: PaymentStatus,
 ): readonly OrderAction[] {
-  if (OrderStatus.isTerminal(orderStatus)) return [];
   const actions: OrderAction[] = [];
   if (role === 'operator') {
-    switch (orderStatus) {
-      case 'placed':
-        if (paymentStatus === 'approved') actions.push({ kind: 'advance', to: 'preparing' });
-        break;
-      case 'preparing':
-        actions.push({ kind: 'advance', to: 'shipped' });
-        break;
-      case 'shipped':
-        actions.push({ kind: 'advance', to: 'delivered' });
-        break;
-      case 'delivered':
-      case 'cancelled':
-        break;
-    }
+    const to = advanceTarget(orderStatus, paymentStatus);
+    if (to !== undefined) actions.push({ kind: 'advance', to });
   }
   if (cancelAllowed(role, orderStatus)) actions.push({ kind: 'cancel' });
   return actions;

@@ -8,6 +8,7 @@ import {
 } from '@cucumber/cucumber';
 import type { Browser, BrowserContext, Page } from 'playwright';
 
+import { type CategoryRef, CatalogueFixtures, type ProductRef } from './catalogue.ts';
 import { MailpitClient } from './mailpit.ts';
 
 // One Playwright page per scenario against STOREFRONT_URL (the gateway origin), the Mailpit
@@ -58,6 +59,12 @@ export class StorefrontWorld extends World {
   readonly operator: Credentials;
   readonly shopper: Credentials;
   readonly viewport: ViewportMode;
+  /** Catalogue fixtures created through the API as the operator, by alias of the feature file. */
+  readonly catalogue: CatalogueFixtures;
+  readonly categories = new Map<string, CategoryRef>();
+  readonly products = new Map<string, ProductRef>();
+  /** The search term of the scenario, when one was coined. */
+  searchTerm: string | undefined;
   /** URLs already audited for accessibility in this scenario. */
   readonly audited = new Set<string>();
   context: BrowserContext | undefined;
@@ -71,6 +78,19 @@ export class StorefrontWorld extends World {
     this.operator = env.operator;
     this.shopper = randomShopper();
     this.viewport = env.viewport;
+    this.catalogue = new CatalogueFixtures(env.baseUrl, env.operator);
+  }
+
+  category(alias: string): CategoryRef {
+    const found = this.categories.get(alias);
+    if (found === undefined) throw new Error(`no category "${alias}" in this scenario`);
+    return found;
+  }
+
+  product(alias: string): ProductRef {
+    const found = this.products.get(alias);
+    if (found === undefined) throw new Error(`no product "${alias}" in this scenario`);
+    return found;
   }
 
   async open(browser: Browser): Promise<Page> {

@@ -16,8 +16,9 @@ export const EMAIL_MAX_LENGTH = 254;
 function hasValidShape(candidate: string): boolean {
   const at = candidate.indexOf('@');
   if (at <= 0 || at !== candidate.lastIndexOf('@')) return false;
+  if (/\s/.test(candidate)) return false;
+  // An empty domain has no dot, so the dot position alone decides.
   const domain = candidate.slice(at + 1);
-  if (domain.length === 0 || /\s/.test(candidate)) return false;
   const dot = domain.indexOf('.');
   return dot > 0 && dot < domain.length - 1;
 }

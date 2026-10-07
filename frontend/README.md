@@ -75,6 +75,28 @@ written as user behaviour.
 - **Vitest 5 / Vite 8 / Stryker 10 / Pact JS 17 / Cucumber.js 13 / Playwright 1.63** at their latest
   stable, pinned exactly in `package-lock.json` (`save-exact` in `.npmrc`, `engine-strict` for Node 24).
 
+## Browsing (US1, 2026-10-06)
+
+- **Catalogue port**: `src/app/catalog/catalogPort.ts` declares what browsing needs (`listProducts`,
+  `listCategories`, `getCategory`, `getProduct`, generated types only); `src/api/catalog.ts`
+  implements it and the composition root (`main.tsx`, the test harness) injects it through
+  `CatalogPortContext`, like the session port. A 404 on a detail lookup is `null` (unknown or
+  withdrawn), never an error state; the pages render `NotFoundPage` for it.
+- **URL state** (`src/app/catalog/browseParams.ts`): `page` zero-based as the API; `size` only
+  within 1..100 and only when it is not the default 20 (anything else is ignored, the platform's
+  default applies); `q` trimmed, cut at 100 characters and trimmed again. Query keys carry every
+  parameter (`['catalog', 'products', {page, size, q, categoryId}]`, absent ones as `null`).
+- **Category links** are `/categories/<slug>-<uuid>`; the route accepts a UUID with or without a
+  readable prefix (`catalogIdFromParam`), resolution is by id only; any other value renders
+  not-found without a request, as does a non-UUID product id.
+- **States**: `QueryBoundary` renders loading, throttled (countdown) and error (retry, support
+  details) for any query; `ProductListing` adds the empty states (first page: the page's own
+  message and one action; a page past the end: "back to the first page").
+- **Add to cart** on the product page is rendered (disabled with an explanation when out of stock)
+  and wired to a no-op `onAddToCart` prop until US2 lands.
+- **Acceptance fixtures** (`acceptance/support/catalogue.ts`) are created through the public API
+  as the seeded operator with a bearer token, like the JVM suite; names carry a random suffix.
+
 ## Vitest version pin
 
 Vitest is pinned to 4.1.x: with Vitest 5.0 the Stryker Vitest runner (10.0.0) records no per-test coverage, so every mutant survives with "0.00 tests per mutant" and the mutation score is 0. Upgrade Vitest only once a Stryker release declares support for it (verify with `npm run mutate`).

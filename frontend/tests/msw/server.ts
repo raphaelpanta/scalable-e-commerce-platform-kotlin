@@ -1,6 +1,9 @@
 import { setupServer } from 'msw/node';
 
-// One MSW server for the whole suite; tests add handlers with `server.use(...)`. Every request
-// that no handler answers fails the test (`onUnhandledRequest: 'error'`, see tests/setup.ts), so
+import { catalogHandlers } from './catalog.ts';
+
+// One MSW server for the whole suite, answering the catalogue from the fixtures of catalog.ts;
+// tests add or override handlers with `server.use(...)` (reset after each test). Every request
+// that no handler answers fails the test (`onUnhandledFrame: 'error'`, see tests/setup.ts), so
 // a component can never silently reach a real network.
-export const server = setupServer();
+export const server = setupServer(...catalogHandlers);
