@@ -2,7 +2,6 @@ package com.ecommerce.order.infrastructure
 
 import au.com.dius.pact.provider.MessageAndMetadata
 import au.com.dius.pact.provider.PactVerifyProvider
-import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.MessageTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
@@ -15,13 +14,13 @@ import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT
-import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.annotation.Import
 
 /**
- * Provider side of every pact whose provider is `order`: the health check of the platform probe over HTTP, and the
- * order events consumed by notification, catalog and payment (pact-interactions.md section 3.2), each produced from the
- * fixture orders by the outbox's own mapping. Shared by [OrderProviderVerificationTest] (pacts of `build/pacts`) and
+ * Provider side of every pact whose provider is `order`: the health check of the platform probe over HTTP, the
+ * storefront's order interactions (feature 005, states in [StorefrontOrderStates]) and the order events consumed by
+ * notification, catalog and payment (pact-interactions.md section 3.2), each produced from the fixture orders by the
+ * outbox's own mapping. Shared by [OrderProviderVerificationTest] (pacts of `build/pacts`) and
  * [OrderBrokerVerificationTest] (pacts of the Pact Broker), which only choose the pact source; both are tagged
  * `provider` and run in `contractVerify`.
  */
@@ -30,10 +29,7 @@ import org.springframework.context.annotation.Import
 // Abstract: JUnit runs only the subclasses, which choose the pact source (folder or broker); one producer method per
 // message row and one method per provider state.
 @Suppress("TooManyFunctions", "AbstractClassCanBeConcreteClass")
-abstract class OrderProviderStates {
-    @LocalServerPort
-    protected var port: Int = 0
-
+abstract class OrderProviderStates : StorefrontOrderStates() {
     @BeforeEach
     fun target(context: PactVerificationContext?) {
         context?.let {
@@ -41,7 +37,7 @@ abstract class OrderProviderStates {
                 if (it.interaction.isAsynchronousMessage()) {
                     MessageTestTarget(listOf(OrderProviderStates::class.java.packageName))
                 } else {
-                    HttpTestTarget("localhost", port)
+                    httpTarget()
                 }
         }
     }

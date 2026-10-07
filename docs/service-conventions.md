@@ -139,6 +139,17 @@ reached only through the gateway's `storefront` route (`STOREFRONT_URL`).
   `storefront-gateway.json` (browser-session and telemetry routes) in `./gradlew -q :services:gateway:contractVerify`, and the
   gateway pipeline's broker verification picks it up like any other consumer. Interactions and provider states:
   `specs/005-storefront-dev-bootstrap/contracts/pact-matrix.md`.
+- Storefront provider states of order and payment (`StorefrontOrderStates`, `PaymentProviderStates`): the storefront
+  pacts carry the placeholder bearer the gateway stands for, so the provider verification sends each replayed request
+  that has an `Authorization` header with a test token (`JwtFixture`) of the account the state signs in, through an
+  `HttpTestTarget` subclass (`BearerRewritingTarget`; a test-method `HttpRequest` parameter would break the message
+  interactions of the same pact source). The caller is `ana@example.com` (`7c1d4f3e-0a52-4c0b-8d3a-1e2f3a4b5c6d`, role
+  `shopper`) unless the state names the operator `ops@example.com`. State names are registered verbatim with the full
+  order id the storefront sends (`0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10` where the matrix abbreviates `0b9a3b0e-...`).
+  Every state empties the service schema and seeds through the service's own repository; order stubs cart, catalog,
+  identity and payment with WireMock, and the states `already placed an order with Idempotency-Key key-1` and
+  `cancelled while its payment was being processed` run a real checkout first, so the verifier's request is the
+  FR-008 replay of its stored answer.
 - Test layers follow the generator template (`services/catalog` before feature 004): `@SpringBootTest` with
   `@ServiceConnection` Testcontainers configs, WebTestClient, Kotest assertions, Cucumber JVM suites.
 - Mutation: `./gradlew -q :services:<ctx>:domain:pitest` and `:application:pitest` must reach 80 %. Keep use cases
