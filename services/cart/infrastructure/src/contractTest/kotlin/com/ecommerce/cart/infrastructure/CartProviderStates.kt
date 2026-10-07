@@ -1,29 +1,21 @@
 package com.ecommerce.cart.infrastructure
 
-import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
 import au.com.dius.pact.provider.junitsupport.State
 import com.ecommerce.platform.testing.InternalToken
 import com.ecommerce.platform.testing.KafkaTestConfig
 import com.ecommerce.platform.testing.PostgresTestConfig
-import com.github.tomakehurst.wiremock.WireMockServer
 import com.github.tomakehurst.wiremock.client.WireMock.aResponse
 import com.github.tomakehurst.wiremock.client.WireMock.post
 import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
-import com.github.tomakehurst.wiremock.core.WireMockConfiguration.options
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
-import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.annotation.Import
-import org.springframework.r2dbc.core.DatabaseClient
-import org.springframework.test.context.DynamicPropertyRegistry
-import org.springframework.test.context.DynamicPropertySource
-import tools.jackson.databind.json.JsonMapper
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -38,7 +30,8 @@ private const val PLENTY = 99
  * The provider states seed exactly the carts their parameters describe; the catalogue is a WireMock that prices every
  * seeded line at its price at add, so the service never depends on another one. Shared by
  * [CartProviderVerificationTest] (pacts of `build/pacts`) and [CartBrokerVerificationTest] (pacts of the Pact Broker),
- * which only choose the pact source; both are tagged `provider` and run in `contractVerify`.
+ * which only choose the pact source; both are tagged `provider` and run in `contractVerify`. The storefront's own
+ * states (`storefront-cart.json`) are inherited from [StorefrontCartStates], which also owns the catalogue stub.
  */
 @SpringBootTest(
     webEnvironment = RANDOM_PORT,
@@ -47,16 +40,13 @@ private const val PLENTY = 99
 @Import(PostgresTestConfig::class, KafkaTestConfig::class)
 // Abstract: JUnit runs only the subclasses, which choose the pact source (folder or broker).
 @Suppress("AbstractClassCanBeConcreteClass")
-abstract class CartProviderStates {
+abstract class CartProviderStates : StorefrontCartStates() {
     @LocalServerPort
     protected var port: Int = 0
 
-    @Autowired
-    protected lateinit var database: DatabaseClient
-
     @BeforeEach
     fun target(context: PactVerificationContext?) {
-        context?.target = HttpTestTarget("localhost", port)
+        context?.target = httpTarget(port)
     }
 
     @State("the cart service is running")
@@ -169,15 +159,6 @@ abstract class CartProviderStates {
     }
 
     companion object {
-        private val mapper = JsonMapper.builder().build()
-        val catalog: WireMockServer = WireMockServer(options().dynamicPort()).also { it.start() }
-
-        @JvmStatic
-        @DynamicPropertySource
-        fun properties(registry: DynamicPropertyRegistry) {
-            registry.add("cart.catalog-url") { catalog.baseUrl() }
-        }
-
         private fun uuid(
             parameters: Map<String, Any?>,
             name: String,
