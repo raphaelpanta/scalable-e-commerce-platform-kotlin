@@ -24,8 +24,8 @@ Run from any directory; the script resolves the repository root from its own loc
 | `check` | the checks only, in the order of the check table, then the summary line | write any file or setting; install; start or stop a container; contact the platform |
 | `status` | table of platform components (service, health), the public addresses, engine resources (memory, CPUs, free disk), then the checks and their summary | change anything; start anything |
 | `update` | `up -d --build` of the platform project: rebuilds and restarts only components whose build inputs changed (Compose build cache), keeps all volumes, waits for health, runs the smoke checks | `down`; remove a volume or a container that is unchanged; reseed; run installs or configuration |
-| `reset` | asks the data-loss confirmation, then `down -v` of the platform project only, `up -d --build`, waits for health (the `SEED=true` start-up reseeds), runs the checks and smoke checks | run without confirmation; delete `.env`, images, build cache or anything outside the platform project; run `docker system prune` or any command without the project name |
-| `down` | `down` of the platform project, keeping volumes; prints `data kept` | remove volumes unless `--volumes` and the confirmation; stop containers of other projects |
+| `reset` | prints, before the confirmation, `warning: containers outside the platform are running: <names>` (comma separated) when the engine lists running containers that do not belong to the `ecommerce-platform` Compose project (read through the project label of a read-only `ps`; they are never touched), asks the data-loss confirmation, then `down -v` of the platform project only, `up -d --build`, waits for health (the `SEED=true` start-up reseeds), runs the smoke checks and the checks | run without confirmation; delete `.env`, images, build cache or anything outside the platform project; run `docker system prune` or any command without the project name |
+| `down` | `down` of the platform project (all three profiles, so nothing of the platform stays), keeping volumes; prints `data kept`; with `--volumes`: the same foreign-container warning as `reset`, the confirmation, `down -v`, `data removed`; when the project has no container (and `--volumes` is not given) prints exactly `OK platform already down`, exit 0 | remove volumes unless `--volumes` and the confirmation; stop containers of other projects; stop the private registry of the `ci-runner` project (`--runner-host` prints a `note:` that it is left running, see `platform/ci-runner/README.md`, "Operations") |
 
 The platform project is the Compose project `ecommerce-platform` of `platform/compose/docker-compose.yml`, profiles `core` and
 `observability` (plus `ci` with `--runner-host`). Every Compose call names it explicitly; nothing is ever addressed by container
@@ -65,8 +65,9 @@ read-only parts (3 on a missing prerequisite); it never exits 4 because it start
 | `GATEWAY_PORT` | Host port of the gateway/storefront. Precedence: process environment, then `platform/compose/.env`, then `8080` |
 | `COMPOSE_CMD` | Compose provider command, word-split, for example `docker compose`, `docker-compose`, `podman compose`; overrides detection |
 | `CONTAINER_ENGINE` | `docker` or `podman`; overrides detection (otherwise the first of `docker`, `podman` that answers `info`) |
-| `DEV_ENV_NON_INTERACTIVE` | `1` behaves as having no terminal: no prompts, see Non-interactive behaviour |
+| `DEV_ENV_NON_INTERACTIVE` | `1` behaves as having no terminal: no prompts, see Non-interactive behaviour; `0` forces interactive mode, prompts read their answer from stdin even when it is not a terminal (the tests feed answers this way) |
 | `NO_COLOR` | any non-empty value disables ANSI colour (colour is also off when stdout is not a terminal) |
+| `DEV_ENV_WAIT_SECONDS`, `DEV_ENV_POLL_SECONDS` | health-wait budget per start (default 600) and poll interval (default 3); the tests shorten both so an unhealthy stub fails fast |
 
 `HOME` locates `~/.testcontainers.properties`. No other variable changes behaviour. Values of `*KEY*`, `*PASSWORD*` and `*TOKEN*`
 variables are never printed.
@@ -89,7 +90,7 @@ FAIL  jq         found none     expected installed
 | found | `found <value>`; `found none` when absent; longer values simply widen the column |
 | expected | `expected <value>` as in the table |
 | fix line | printed under every `FAIL`, indented by 6 spaces: `fix (macos): <command>` or `fix (linux): <command>` for the detected operating system only; several alternatives use a following `fix (...)` line each. A fix line is text; it is never executed except through `--install` |
-| `SKIP` | `SKIP  <name>      (<reason>)`, reasons: `(no network)` for `network`, `(engine is docker)` for `podman` |
+| `SKIP` | `SKIP  <name>      (<reason>)`, reasons: `(no network)` for `network`, `(engine is docker)` for `podman`, and `(no engine)` for `memory`, `cpus` and `podman` when no engine answers (the `engine` check already FAILs; `disk` then reports the repository filesystem alone) |
 | summary | last line of `check`, `status` and of the check phase of `init`: `checks: <n> total, <p> PASS, <f> FAIL, <s> SKIP` |
 
 ### Checks (16)
@@ -161,7 +162,10 @@ platform/compose/.env` and fails the `env` step (exit 3) when the file is not gi
 ## Smoke checks and addresses
 
 After a start (`init --start`, `update`, `reset`), after `wait_healthy` for every component (timeout 600 s per start; `core` and
-`observability` services must report healthy), these lines use the check-line format and any `FAIL` ends with exit 4:
+`observability` services must report healthy), these lines use the check-line format and any `FAIL` ends with exit 4.
+A failed `up` prints `FAIL  up         found exit <n>   expected compose up succeeds` (with the tail of the Compose output on
+stderr) and a timeout prints `FAIL  health     found not healthy: <service>(<state>) ...   expected all components healthy within
+<n>s`, each with a fix line, exit 4; the component states follow data-model.md section 5.4:
 
 | Name | Expected | PASS when |
 | --- | --- | --- |
@@ -191,7 +195,13 @@ Type 'yes' to continue, anything else aborts [yes/N]:
 ```
 
 Only the exact answer `yes` continues. Anything else prints `aborted: nothing was changed` and exits 0. `--yes` skips the prompt and
-prints `confirmed by --yes: deleting platform data`.
+prints `confirmed by --yes: deleting platform data`. With `--dry-run` nothing is deleted, so the prompt is not asked: the line
+`DRY-RUN: ask the data-loss confirmation (compose project 'ecommerce-platform')` stands in for it, followed by the
+`DRY-RUN: <compose> down -v` and `DRY-RUN: <compose> up -d --build` lines.
+
+`status` of a project without any container prints `  (no containers: the platform is down)` under the table header and exits
+0 when the checks pass (nothing is unhealthy, nothing was started); exit 4 is for a platform that runs with a core component
+not healthy.
 
 ## Non-interactive behaviour
 

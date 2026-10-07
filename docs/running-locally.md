@@ -1,7 +1,25 @@
 # Running the platform locally
 
-Everything is in `platform/compose`. Prerequisites: Docker (Compose v2) or a compatible engine such as Podman, `curl` and
-`jq`. Nothing else has to be installed: the images build the services themselves.
+## Bootstrap
+
+```bash
+scripts/dev-env.sh init --start
+```
+
+One command checks the machine (JDK 25, a container engine with Compose v2 and enough memory, CPUs and disk, Node 24
+and npm, `gitleaks`, `curl`, `jq`, `openssl`, `git`, a free gateway port), prepares the clone (`platform/compose/.env`
+from the example with freshly generated `IDENTITY_SIGNING_KEY` and `BROWSER_SESSION_KEY`, the secret-scanning hook,
+the Podman settings), builds and starts the `core` and `observability` profiles, waits until every component is
+healthy, runs the smoke checks and prints the addresses: the storefront and API on `http://localhost:8080`, Grafana on
+`:3000`, Mailpit on `:8025`. A missing prerequisite is reported with its found and expected values and the exact fix
+for your operating system, and nothing is changed (exit 3); `--install` installs the missing tools through the package
+manager after announcing each one. `scripts/dev-env.sh check` runs the checks alone, `--dry-run` prints every change
+without making it, and a second run changes nothing that is already correct. The whole command reference is
+[dev-environment.md](dev-environment.md).
+
+Everything below explains what the script does and how to do it by hand. Everything is in `platform/compose`.
+Prerequisites: Docker (Compose v2) or a compatible engine such as Podman, `curl` and `jq`. Nothing else has to be
+installed: the images build the services themselves.
 
 **Memory.** Give the container engine itself, not only the host, about **10 GiB**: the Docker Desktop VM or the Podman
 machine (`podman machine set --cpus 6 --memory 10240`). The `core` and `observability` profiles together run 20
@@ -15,16 +33,18 @@ container fails to start.
 image format drops the image `HEALTHCHECK`, so no service would ever report "healthy" and the stack would never finish
 starting.
 
-## One-command start
+## Manual start (what `init --start` does)
 
 ```bash
 cd platform/compose
 cp .env.example .env     # first time only
 export BUILDAH_FORMAT=docker   # Podman only (see above)
-# first time only: the identity signing key shared by every identity replica (required, FR-024)
+# first time only: the identity signing key shared by every identity replica (required, FR-024) and the
+# browser session key of the storefront
 sed -i.bak "s|^IDENTITY_SIGNING_KEY=.*|IDENTITY_SIGNING_KEY=$(openssl genpkey -algorithm ed25519 -outform DER | base64)|" .env
-docker compose --profile core --profile observability up -d --build
-docker compose ps        # every service must become "healthy" (first build: a few minutes)
+sed -i.bak "s|^BROWSER_SESSION_KEY=.*|BROWSER_SESSION_KEY=$(openssl rand -base64 32)|" .env
+docker compose -p ecommerce-platform --profile core --profile observability up -d --build
+docker compose -p ecommerce-platform ps        # every service must become "healthy" (first build: a few minutes)
 ```
 
 `.env.example` sets `COMPOSE_PARALLEL_LIMIT=1` (Compose reads `COMPOSE_*` variables from `.env`): the images are built one
@@ -32,8 +52,11 @@ at a time because they share one Gradle cache mount, and the cold-start measurem
 assumes it.
 
 `platform/compose/scripts/smoke.sh` creates `.env` from `.env.example` when it is missing, generates the
-`IDENTITY_SIGNING_KEY` the same way when it is empty, and runs the same start-up and checks the result automatically (health, gateway,
-unpublished ports) and tears the stack down again.
+`IDENTITY_SIGNING_KEY` and `BROWSER_SESSION_KEY` the same way when they are empty, and runs the same start-up and
+checks the result automatically (health, gateway, unpublished ports) and tears the stack down again.
+
+`scripts/dev-env.sh status` shows every component's state (healthy, starting, unhealthy, stopped), the addresses, the
+engine's memory, CPUs and free disk, and the prerequisite checks.
 
 ## Profiles
 
@@ -72,7 +95,9 @@ http://localhost:9292.
 
 ### Another program already uses port 8080
 
-Set `GATEWAY_PORT` in `.env` (the example file has `GATEWAY_PORT=8080`) or in the shell, then use that port everywhere:
+`scripts/dev-env.sh init` detects the conflict, records the next free port as `GATEWAY_PORT` in `.env` and prints every
+address with it (a port you set yourself is never changed). By hand: set `GATEWAY_PORT` in `.env` (the example file
+has `GATEWAY_PORT=8080`) or in the shell, then use that port everywhere:
 
 ```bash
 GATEWAY_PORT=18080 docker compose --profile core up -d
@@ -105,21 +130,42 @@ when the gateway refused a client value) are structured metadata, so no `| json`
 to a few seconds after the request (batched export). Per-service request rate, error rate and p95 latency are on the
 **Service RED** dashboard. Container logs of one service (ECS JSON): `docker compose logs -f <service>`.
 
-## Rebuild one service
+## Rebuild after pulling changes
 
 ```bash
-docker compose --profile core up -d --build order
+scripts/dev-env.sh update
 ```
+
+`update` runs `up -d --build` of the platform project: Compose rebuilds only the images whose inputs changed and
+recreates only those containers, data volumes are kept, then it waits for health and runs the smoke checks. One
+service by hand: `docker compose -p ecommerce-platform --profile core up -d --build order`.
+
+## Reset to a clean seeded platform
+
+```bash
+scripts/dev-env.sh reset          # asks you to type 'yes' (--yes for scripts); warns about containers of other projects
+```
+
+`reset` removes the platform's containers and data volumes (`down -v` of the `ecommerce-platform` project only, never
+anything else running on the engine), rebuilds what changed, restarts, reseeds (`SEED=true`) and runs the checks.
 
 ## Teardown
 
 ```bash
-docker compose --profile core --profile observability --profile ci down       # keep data
-docker compose --profile core --profile observability --profile ci down -v    # delete data volumes too
+scripts/dev-env.sh down                    # keep data: prints "data kept"
+scripts/dev-env.sh down --volumes          # delete the data volumes too, after confirmation: prints "data removed"
+```
+
+By hand, from `platform/compose`:
+
+```bash
+docker compose -p ecommerce-platform --profile core --profile observability --profile ci down       # keep data
+docker compose -p ecommerce-platform --profile core --profile observability --profile ci down -v    # delete data volumes too
 ```
 
 ## More
 
+- The bootstrap and maintenance command, flags, exit codes and checks: [dev-environment.md](dev-environment.md).
 - Full validation journey with expected results: `specs/004-ecommerce-platform-mvp/quickstart.md`.
 - Compose details, environment and observability data flow: `platform/compose/README.md`.
 - Image recipe: `platform/docker/README.md`. Conventions (ports, variables): `docs/service-conventions.md`.
