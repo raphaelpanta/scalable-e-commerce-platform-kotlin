@@ -100,9 +100,16 @@ fetch_headers() {
 
 smoke_fix() { fix_line "$OS" "scripts/dev-env.sh status; $(pc_describe logs "$1")"; }
 
+# The first API request after a (re)start can outlast one probe while the JVMs warm up, so the entry check is
+# retried for DEV_ENV_SMOKE_SECONDS (default 60) before it fails.
 smoke_entry() {
-  local status
-  status="$(http_status "http://localhost:$GATEWAY_PORT_EFFECTIVE$CATALOG_PATH")"
+  local status deadline=$((SECONDS + ${DEV_ENV_SMOKE_SECONDS:-60}))
+  while :; do
+    status="$(http_status "http://localhost:$GATEWAY_PORT_EFFECTIVE$CATALOG_PATH")"
+    [ "$status" = 200 ] && break
+    [ "$SECONDS" -lt "$deadline" ] || break
+    sleep "${DEV_ENV_POLL_SECONDS:-3}"
+  done
   if [ "$status" = 200 ]; then
     check_line PASS entry "$status" "200 from gateway"
   else

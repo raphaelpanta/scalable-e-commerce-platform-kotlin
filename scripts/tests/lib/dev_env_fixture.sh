@@ -46,7 +46,7 @@ dev_env_fixture() {
   : >"$STUB_LOG"
   unset_stub_vars
   export STUB_LOG STUB_STATE="$S" STUB_REAL_JQ="$REAL_JQ" STUB_REAL_GIT="$REAL_GIT"
-  export HOME="$H" NO_COLOR=1 DEV_ENV_NON_INTERACTIVE=1 DEV_ENV_WAIT_SECONDS=1 DEV_ENV_POLL_SECONDS=1
+  export HOME="$H" NO_COLOR=1 DEV_ENV_NON_INTERACTIVE=1 DEV_ENV_WAIT_SECONDS=1 DEV_ENV_POLL_SECONDS=1 DEV_ENV_SMOKE_SECONDS=1
   export DEV_ENV_JAVA_HOME_TOOL="$H/no-java_home" # the real macOS java_home must not leak into the jdk check
   export PATH="$STUBS_DIR:/usr/bin:/bin:/usr/sbin:/sbin"
 }

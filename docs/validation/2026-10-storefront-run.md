@@ -137,3 +137,25 @@ the bundle:
 SC-004 (p95 content within 2 s, actions within 1 s) is read from the dashboard's page-load and action panels over real
 sessions; on this machine, during the acceptance runs, the 24-scenario suites completed in about 85 s each, which
 bounds every page load and action well under those limits, and no span exceeded the thresholds drawn on the panels.
+
+## 6. Maintenance commands live (T083; US5) and cold start (T104; SC-009)
+
+Run on 2026-10-07 after the acceptance suites, while two builder agents and a full `verify` loaded the machine
+(worst case for timings):
+
+| Command | Result | Wall time |
+|---------|--------|-----------|
+| `update` | rebuilt every image whose inputs changed since the first start (frontend, gateway and services had new commits), recreated the changed containers, kept the volumes; `isolation` and `storefront` smoke checks PASS; `entry` FAIL with status 000 and exit 4 | 18 min 30 s |
+| `reset --yes` | printed `confirmed by --yes: deleting platform data`, removed the project's containers and volumes, rebuilt and restarted, all 21 components healthy, smoke checks PASS, 16 checks PASS; the catalogue was reseeded (3 categories instead of the 191 the suites had created) | 5 min 32 s |
+| `status` | 21 components `healthy`, addresses, engine resources, 16 checks PASS | seconds |
+| `down` | stopped the platform, printed `data kept`, volumes untouched | 1 min 33 s |
+| `down --volumes --yes` | printed `warning: containers outside the platform are running: elastic_mahavira, modest_colden` (two containers of the developer, never touched), `confirmed by --yes: deleting platform data`, `data removed`; no project container or volume left | 1.3 s |
+
+The `update` failure was a defect of the smoke check, not of the platform: the first catalogue request after the
+recreate exceeded curl's 10-second limit while the JVMs warmed up (the `storefront` check a moment later answered
+200 through the same gateway). The `entry` check now retries for up to 60 s (`DEV_ENV_SMOKE_SECONDS`), recorded in
+the command contract; `reset` and `down` behaved exactly as specified.
+
+Cold start (T104, SC-009): section 2's `init --start` built every image from a cold image cache and reached a usable
+storefront in 3 min 55 s, within the 5-minute limit the feature 004 measurement (3 min 58 s without the storefront)
+already met; the storefront image adds about 30 s of build (28.7 s cold, 6 s warm, `platform/docker/README.md`).

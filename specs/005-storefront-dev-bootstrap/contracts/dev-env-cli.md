@@ -68,6 +68,7 @@ read-only parts (3 on a missing prerequisite); it never exits 4 because it start
 | `DEV_ENV_NON_INTERACTIVE` | `1` behaves as having no terminal: no prompts, see Non-interactive behaviour; `0` forces interactive mode, prompts read their answer from stdin even when it is not a terminal (the tests feed answers this way) |
 | `NO_COLOR` | any non-empty value disables ANSI colour (colour is also off when stdout is not a terminal) |
 | `DEV_ENV_WAIT_SECONDS`, `DEV_ENV_POLL_SECONDS` | health-wait budget per start (default 600) and poll interval (default 3); the tests shorten both so an unhealthy stub fails fast |
+| `DEV_ENV_SMOKE_SECONDS` | retry budget of the `entry` smoke check after a start (default 60); the tests set it to 1 |
 
 `HOME` locates `~/.testcontainers.properties`. No other variable changes behaviour. Values of `*KEY*`, `*PASSWORD*` and `*TOKEN*`
 variables are never printed.
@@ -169,7 +170,7 @@ stderr) and a timeout prints `FAIL  health     found not healthy: <service>(<sta
 
 | Name | Expected | PASS when |
 | --- | --- | --- |
-| `entry` | `200 from gateway` | `GET http://localhost:<GATEWAY_PORT>/api/v1/catalog/products` returns 200 |
+| `entry` | `200 from gateway` | `GET http://localhost:<GATEWAY_PORT>/api/v1/catalog/products` returns 200, retried for up to `DEV_ENV_SMOKE_SECONDS` (default 60) because the first request after a (re)start can outlast one probe while the JVMs warm up |
 | `isolation` | `only gateway published` | `compose ps` publishes ports only for `gateway`, `grafana`, `mailpit` (and `pact-broker` with `--runner-host`) |
 | `storefront` | `GET / serves the app` | `GET /` returns 200 with `text/html` and a `Content-Security-Policy` header without `unsafe-inline` |
 
