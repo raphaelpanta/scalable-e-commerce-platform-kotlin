@@ -1,6 +1,8 @@
 // The closed list of route templates (data-model.md §2.2 and contracts/storefront-routes.md). A
 // pathname is reduced to a template by matching, never by regex-stripping a URL, so no id, token
-// or query string can survive. The router registers exactly this list.
+// or query string can survive. The router registers exactly this list. `/verify` is the path the
+// notification service puts in verification messages (`LinkPaths.VERIFY`); it renders the same
+// page as the route table's `/verify-email`.
 export const ROUTE_TEMPLATES = [
   '/',
   '/categories/:id',
@@ -10,6 +12,7 @@ export const ROUTE_TEMPLATES = [
   '/sign-in',
   '/register',
   '/verify-email',
+  '/verify',
   '/reset-password',
   '/forgot-password',
   '/checkout',
@@ -33,6 +36,7 @@ export const AUTH_ROUTE_TEMPLATES: ReadonlySet<RouteTemplate> = new Set<RouteTem
   '/sign-in',
   '/register',
   '/verify-email',
+  '/verify',
   '/forgot-password',
   '/reset-password',
 ]);

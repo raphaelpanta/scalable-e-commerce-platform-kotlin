@@ -3,6 +3,10 @@ import { cleanup } from '@testing-library/react';
 import * as fc from 'fast-check';
 import { afterAll, afterEach, beforeAll } from 'vitest';
 
+import { cartServer } from './msw/cart.ts';
+import { identityServer } from './msw/identity.ts';
+import { orderServer } from './msw/order.ts';
+import { paymentServer } from './msw/payment.ts';
 import { server } from './msw/server.ts';
 
 // Reproducible property tests: FC_SEED pins the seed (the failure output prints it), otherwise
@@ -22,6 +26,10 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   server.resetHandlers();
+  cartServer.reset();
+  identityServer.reset();
+  orderServer.reset();
+  paymentServer.reset();
   window.sessionStorage.clear();
 });
 

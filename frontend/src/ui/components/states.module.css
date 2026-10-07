@@ -76,3 +76,8 @@
   object-fit: cover;
   border-radius: var(--radius-md);
 }
+
+.inert {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

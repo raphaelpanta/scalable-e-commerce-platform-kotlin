@@ -3,8 +3,14 @@ import { render, type RenderResult } from '@testing-library/react';
 import type { JSX, ReactNode } from 'react';
 import { RouterProvider } from 'react-router';
 
+import { createCartApi } from '@api/cart';
 import { createCatalogApi } from '@api/catalog';
+import { createIdentityApi } from '@api/identity';
+import { createOrderApi } from '@api/order';
+import { createPaymentApi } from '@api/payment';
+import { createSessionPort } from '@api/session';
 import { type CatalogPort, CatalogPortContext } from '@app/catalog/catalogPort';
+import { type Ports, PortsContext } from '@app/ports';
 import { createQueryClient } from '@app/queryClient';
 import {
   createSessionStore,
@@ -61,14 +67,36 @@ export type Harness = {
   readonly sessionStore: SessionStore;
   /** The real catalogue adapter over MSW (tests/msw/catalog.ts). */
   readonly catalog: CatalogPort;
+  /** The real cart, identity, order and payment adapters over MSW (tests/msw/*). */
+  readonly ports: Ports;
 };
 
-export function harness(initial: ProbeResult = { kind: 'anonymous' }): Harness {
+export type HarnessOptions = {
+  /**
+   * Sign in through the real session port over MSW (tests/msw/identity.ts) instead of the fake,
+   * so the sign-in states (401, 403, 429) and the probe come from the fake identity.
+   */
+  readonly realSession?: boolean;
+};
+
+export function harness(
+  initial: ProbeResult = { kind: 'anonymous' },
+  { realSession = false }: HarnessOptions = {},
+): Harness {
   const queryClient = createQueryClient();
   const port = fakeSessionPort(initial);
-  const sessionStore = createSessionStore(queryClient, port);
+  const ports: Ports = {
+    cart: createCartApi({ baseUrl: API }),
+    identity: createIdentityApi({ baseUrl: API }),
+    order: createOrderApi({ baseUrl: API }),
+    payment: createPaymentApi({ baseUrl: API }),
+  };
+  const sessionStore = createSessionStore(
+    queryClient,
+    realSession ? createSessionPort({ baseUrl: API }, ports.identity) : port,
+  );
   const catalog = createCatalogApi({ baseUrl: API });
-  return { queryClient, port, sessionStore, catalog };
+  return { queryClient, port, sessionStore, catalog, ports };
 }
 
 export function Providers({
@@ -81,7 +109,9 @@ export function Providers({
   return (
     <QueryClientProvider client={h.queryClient}>
       <SessionStoreContext.Provider value={h.sessionStore}>
-        <CatalogPortContext.Provider value={h.catalog}>{children}</CatalogPortContext.Provider>
+        <CatalogPortContext.Provider value={h.catalog}>
+          <PortsContext.Provider value={h.ports}>{children}</PortsContext.Provider>
+        </CatalogPortContext.Provider>
       </SessionStoreContext.Provider>
     </QueryClientProvider>
   );
@@ -91,8 +121,9 @@ export function Providers({
 export function renderApp(
   path: string,
   initial: ProbeResult = { kind: 'anonymous' },
+  options: HarnessOptions = {},
 ): RenderResult & { harness: Harness; router: ReturnType<typeof createTestRouter> } {
-  const h = harness(initial);
+  const h = harness(initial, options);
   const router = createTestRouter(h, [path]);
   const result = render(
     <Providers harness={h}>

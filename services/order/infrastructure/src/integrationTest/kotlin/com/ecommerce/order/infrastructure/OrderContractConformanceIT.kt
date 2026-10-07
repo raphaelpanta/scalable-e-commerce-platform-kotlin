@@ -4,11 +4,13 @@ import com.ecommerce.conformance.OpenApiContract
 import io.kotest.matchers.shouldBe
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpMethod.GET
 import org.springframework.http.HttpMethod.POST
 import org.springframework.test.web.reactive.server.WebTestClient
 import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -34,7 +36,9 @@ private val ORDER_WAIT: Duration = Duration.ofSeconds(30)
  * `order-cancelled` one included (a cancellation winning the race against the charge). Statuses the service cannot
  * produce on its own are deferred with the reason.
  */
-class OrderContractConformanceIT : OrderIntegrationTest() {
+class OrderContractConformanceIT(
+    @param:Autowired private val properties: OrderProperties,
+) : OrderIntegrationTest() {
     private val contract = OpenApiContract.of("order")
     private val operatorId: UUID = UUID.randomUUID()
 
@@ -52,11 +56,15 @@ class OrderContractConformanceIT : OrderIntegrationTest() {
     /** The checkout outcomes; returns the ids of a paid and of a pending order of [shopper]. */
     private fun checkout(shopper: Shopper): Pair<String, String> {
         val key = UUID.randomUUID()
-        val paid = contract.check(placeOrder(shopper, key = key), CREATED)["id"].toString()
+        val paidOrder = contract.check(placeOrder(shopper, key = key), CREATED)
+        val paid = paidOrder["id"].toString()
+        paidOrder["paymentExpiresAt"] shouldBe null
         contract.check(placeOrder(shopper, key = key), CREATED)
         contract.check(placeOrder(shopper, DECLINED_TOKEN, key), UNPROCESSABLE)
         contract.check(placeOrder(shopper, DECLINED_TOKEN), UNPROCESSABLE)
-        val pending = contract.check(placeOrder(shopper, UNREACHABLE_TOKEN), ACCEPTED)["id"].toString()
+        val pendingOrder = contract.check(placeOrder(shopper, UNREACHABLE_TOKEN), ACCEPTED)
+        val pending = pendingOrder["id"].toString()
+        paymentDeadline(shopper, pendingOrder)
 
         val changed = stubs.checkoutOf(Shopper(priceMinor = CHANGED_PRICE), priceAtAdd = Shopper().priceMinor)
         contract.check(placeOrder(changed, revision = "rev-seen-before"), CONFLICT)
@@ -102,6 +110,22 @@ class OrderContractConformanceIT : OrderIntegrationTest() {
         } finally {
             executor.shutdownNow()
         }
+    }
+
+    /**
+     * The additive `paymentExpiresAt` (feature 005): while the payment is pending it is the placement time plus the
+     * configured window (`order.payment-window`), and `getOwnOrder` reports the same instant.
+     */
+    private fun paymentDeadline(
+        shopper: Shopper,
+        pendingOrder: Map<String, Any?>,
+    ) {
+        val createdAt = Instant.parse(pendingOrder["createdAt"].toString())
+        val expiresAt = Instant.parse(checkNotNull(pendingOrder["paymentExpiresAt"]).toString())
+        expiresAt shouldBe createdAt.plus(properties.paymentWindow)
+        pendingOrder["paymentStatus"] shouldBe "pending"
+        val read = contract.check(getOrder(pendingOrder["id"].toString(), shopper.accountId), OK)
+        read["paymentExpiresAt"] shouldBe pendingOrder["paymentExpiresAt"]
     }
 
     private fun reads(

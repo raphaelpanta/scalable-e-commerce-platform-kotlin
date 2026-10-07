@@ -38,7 +38,10 @@ data class StatusChangeView(
     val by: String,
 )
 
-/** `Order` of order.yaml, plus the additive `orderNumber` (service conventions section 8). */
+/**
+ * `Order` of order.yaml, plus the additive `orderNumber` (service conventions section 8). `paymentExpiresAt` is the end
+ * of the configured payment window: non-null exactly while the payment is `pending` (feature 005, FR-009 countdown).
+ */
 data class OrderView(
     val id: UUID,
     val orderNumber: String,
@@ -51,6 +54,7 @@ data class OrderView(
     val statusHistory: List<StatusChangeView>,
     val createdAt: Instant,
     val paymentAttemptId: UUID?,
+    val paymentExpiresAt: Instant?,
 ) {
     companion object {
         fun of(order: Order): OrderView =
@@ -78,6 +82,7 @@ data class OrderView(
                 statusHistory = order.history.map { StatusChangeView(it.kind.wire, it.status, it.at, it.by) },
                 createdAt = order.placedAt,
                 paymentAttemptId = order.paymentAttemptId?.value,
+                paymentExpiresAt = order.paymentExpiresAt,
             )
     }
 }

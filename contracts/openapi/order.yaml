@@ -87,6 +87,7 @@ paths:
                   - {kind: payment, status: approved, at: '2026-10-02T10:15:01Z', by: system}
                 createdAt: '2026-10-02T10:15:00Z'
                 paymentAttemptId: c2f1d0a9-5b3e-4e7a-9a60-8d1b2c3e4f50
+                paymentExpiresAt: null
         '202':
           description: |
             Payment provider unreachable. The order is created with `orderStatus` placed and
@@ -115,6 +116,7 @@ paths:
                   - {kind: payment, status: pending, at: '2026-10-02T10:20:00Z', by: system}
                 createdAt: '2026-10-02T10:20:00Z'
                 paymentAttemptId: null
+                paymentExpiresAt: '2026-10-02T10:50:00Z'
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
@@ -564,6 +566,7 @@ components:
         statusHistory: {type: array, items: {$ref: '#/components/schemas/StatusChange'}}
         createdAt: {type: string, format: date-time}
         paymentAttemptId: {type: [string, 'null'], format: uuid, description: Latest payment attempt; null while none reached the provider.}
+        paymentExpiresAt: {type: [string, 'null'], format: date-time, description: 'End of the payment window configured by the order service (placement time plus the window): present (non-null) if and only if `paymentStatus` is `pending`; null once the payment is approved or failed. Additive (feature 005): clients show the remaining time from it and never recompute the window.'}
     OrderPage:
       type: object
       required: [items, page, size, totalItems]

@@ -12,12 +12,26 @@ export type ProductRef = {
   readonly description: string;
   readonly priceMinor: number;
   readonly categoryId: string;
+  /** Units in stock when the product was created. */
+  readonly stock: number;
 };
 
 export type CategoryRef = { readonly alias: string; readonly id: string; readonly name: string };
 
 export const DEFAULT_PRICE_MINOR = 1000;
 export const DEFAULT_STOCK = 5;
+
+/** Amounts as the storefront renders them for the acceptance browser (en-US, BRL). */
+export function formatPrice(priceMinor: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'BRL' }).format(
+    priceMinor / 100,
+  );
+}
+
+/** `25.00` of a feature file as minor units. */
+export function minorUnits(major: number): number {
+  return Math.round(major * 100);
+}
 
 export function suffix(): string {
   return randomUUID().slice(0, 8);
@@ -67,6 +81,7 @@ export class CatalogueFixtures {
     const description = options.description ?? `The ${alias.toLowerCase()} every garden needs.`;
     const priceMinor = options.priceMinor ?? DEFAULT_PRICE_MINOR;
     const categoryId = options.categoryId ?? (await this.#scenarioCategoryId());
+    const stock = options.stock ?? DEFAULT_STOCK;
     const body = await this.#post(
       '/api/v1/catalog/products',
       {
@@ -74,7 +89,7 @@ export class CatalogueFixtures {
         description,
         price: { amountMinor: priceMinor, currency: 'BRL' },
         categoryId,
-        initialStock: options.stock ?? DEFAULT_STOCK,
+        initialStock: stock,
       },
       201,
     );
@@ -84,11 +99,36 @@ export class CatalogueFixtures {
       { url: `https://cdn.example.test/${id}.jpg`, altText: alias, primary: true },
       201,
     );
-    return { alias, id, name, description, priceMinor, categoryId };
+    return { alias, id, name, description, priceMinor, categoryId, stock };
   }
 
   async withdraw(productId: string): Promise<void> {
     await this.#post(`/api/v1/catalog/products/${productId}/withdrawal`, undefined, 200);
+  }
+
+  /** An operator changes the price (`updateProduct`); the cart then reports `priceChanged`. */
+  async updatePrice(product: ProductRef, priceMinor: number): Promise<ProductRef> {
+    await this.#send(
+      'PUT',
+      `/api/v1/catalog/products/${product.id}`,
+      {
+        name: product.name,
+        description: product.description,
+        price: { amountMinor: priceMinor, currency: 'BRL' },
+        categoryId: product.categoryId,
+      },
+      200,
+    );
+    return { ...product, priceMinor };
+  }
+
+  /** An operator removes every unit (`adjustStock` with a negative delta). */
+  async removeStock(product: ProductRef): Promise<void> {
+    await this.#post(
+      `/api/v1/catalog/products/${product.id}/stock-adjustments`,
+      { delta: -product.stock, reason: 'acceptance: product went out of stock' },
+      201,
+    );
   }
 
   async #scenarioCategoryId(): Promise<string> {
@@ -112,9 +152,18 @@ export class CatalogueFixtures {
   }
 
   async #post(path: string, body: unknown, expectedStatus: number): Promise<JsonRecord> {
+    return this.#send('POST', path, body, expectedStatus);
+  }
+
+  async #send(
+    method: 'POST' | 'PUT',
+    path: string,
+    body: unknown,
+    expectedStatus: number,
+  ): Promise<JsonRecord> {
     const token = await this.#bearer();
     const response = await fetch(`${this.#baseUrl}${path}`, {
-      method: 'POST',
+      method,
       headers: {
         Authorization: `Bearer ${token}`,
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
@@ -122,7 +171,7 @@ export class CatalogueFixtures {
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     if (response.status !== expectedStatus) {
-      throw new Error(`POST ${path} answered ${response.status}, expected ${expectedStatus}`);
+      throw new Error(`${method} ${path} answered ${response.status}, expected ${expectedStatus}`);
     }
     const text = await response.text();
     return text === '' ? {} : (JSON.parse(text) as JsonRecord);

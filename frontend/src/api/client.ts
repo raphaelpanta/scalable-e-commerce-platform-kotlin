@@ -72,6 +72,19 @@ function browserSessionMiddleware(correlation: CorrelationSource): Middleware {
   };
 }
 
+/** The typed body of a 2xx answer; a 2xx without a body where one is required is an outage. */
+export function requireBody<T>(data: T | undefined, response: Response): T {
+  if (data === undefined) {
+    throw new UnavailableError(response.headers.get(CORRELATION_HEADER) ?? undefined, 'empty body');
+  }
+  return data;
+}
+
+/** True when `error` is a typed API error whose problem status is one of `statuses`. */
+export function hasStatus(error: unknown, ...statuses: readonly number[]): boolean {
+  return error instanceof ApiError && statuses.includes(error.problem.status);
+}
+
 /**
  * A typed client over the `paths` of one generated contract (src/api/generated, never
  * hand-written). Calls resolve with the typed `data` or reject with an `ApiError` subclass.

@@ -1,8 +1,7 @@
 import type { CatalogPort, CategoryListParams, ProductListParams } from '@app/catalog/catalogPort';
 
-import { type ApiClientOptions, createApiClient } from './client.ts';
+import { type ApiClientOptions, createApiClient, hasStatus, requireBody } from './client.ts';
 import type { paths as CatalogPaths } from './generated/catalog';
-import { ApiError, UnavailableError } from './problem.ts';
 
 // Adapter of the catalogue port over the generated catalog contract (`listProducts`,
 // `listCategories`, `getCategory`, `getProduct`). Only the parameters the storefront sets are sent;
@@ -29,17 +28,6 @@ function productQuery(params: ProductListParams): ProductQuery {
   };
 }
 
-function required<T>(data: T | undefined, response: Response): T {
-  if (data === undefined) {
-    throw new UnavailableError(response.headers.get('X-Correlation-Id') ?? undefined, 'empty body');
-  }
-  return data;
-}
-
-function isNotFound(error: unknown): boolean {
-  return error instanceof ApiError && error.problem.status === 404;
-}
-
 export function createCatalogApi(options: ApiClientOptions = {}): CatalogPort {
   const client = createApiClient<CatalogPaths>(options);
   return {
@@ -47,22 +35,22 @@ export function createCatalogApi(options: ApiClientOptions = {}): CatalogPort {
       const { data, response } = await client.GET('/api/v1/catalog/products', {
         params: { query: productQuery(params) },
       });
-      return required(data, response);
+      return requireBody(data, response);
     },
     async listCategories(params) {
       const { data, response } = await client.GET('/api/v1/catalog/categories', {
         params: { query: listingQuery(params) },
       });
-      return required(data, response);
+      return requireBody(data, response);
     },
     async getCategory(id) {
       try {
         const { data, response } = await client.GET('/api/v1/catalog/categories/{categoryId}', {
           params: { path: { categoryId: id } },
         });
-        return required(data, response);
+        return requireBody(data, response);
       } catch (error) {
-        if (isNotFound(error)) return null;
+        if (hasStatus(error, 404)) return null;
         throw error;
       }
     },
@@ -71,9 +59,9 @@ export function createCatalogApi(options: ApiClientOptions = {}): CatalogPort {
         const { data, response } = await client.GET('/api/v1/catalog/products/{productId}', {
           params: { path: { productId: id } },
         });
-        return required(data, response);
+        return requireBody(data, response);
       } catch (error) {
-        if (isNotFound(error)) return null;
+        if (hasStatus(error, 404)) return null;
         throw error;
       }
     },

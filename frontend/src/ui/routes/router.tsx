@@ -16,13 +16,19 @@ import { type KnownRouteTemplate, ROUTE_TEMPLATES } from '@domain/routeTemplate'
 
 import { Layout } from '../components/Layout.tsx';
 import { Loading } from '../components/Loading.tsx';
+import { CartPage } from '../pages/CartPage.tsx';
 import { CategoryPage } from '../pages/CategoryPage.tsx';
+import { CheckoutPage } from '../pages/CheckoutPage.tsx';
+import { ConfirmationPage } from '../pages/ConfirmationPage.tsx';
 import { HomePage } from '../pages/HomePage.tsx';
 import { NotAllowedPage } from '../pages/NotAllowedPage.tsx';
 import { NotFoundPage } from '../pages/NotFoundPage.tsx';
 import { PlaceholderPage } from '../pages/PlaceholderPage.tsx';
 import { ProductPage } from '../pages/ProductPage.tsx';
+import { RegisterPage } from '../pages/RegisterPage.tsx';
 import { SearchPage } from '../pages/SearchPage.tsx';
+import { SignInPage } from '../pages/SignInPage.tsx';
+import { VerifyEmailPage } from '../pages/VerifyEmailPage.tsx';
 
 export type RouterDependencies = {
   readonly queryClient: QueryClient;
@@ -41,6 +47,7 @@ export const ROUTE_ACCESS: Readonly<Record<KnownRouteTemplate, Access>> = {
   '/sign-in': 'anonymous',
   '/register': 'anonymous',
   '/verify-email': 'anonymous',
+  '/verify': 'anonymous',
   '/reset-password': 'anonymous',
   '/forgot-password': 'anonymous',
   '/checkout': 'shopper',
@@ -62,6 +69,14 @@ const PAGES: Partial<Readonly<Record<KnownRouteTemplate, JSX.Element>>> = {
   '/categories/:id': <CategoryPage />,
   '/search': <SearchPage />,
   '/products/:id': <ProductPage />,
+  '/cart': <CartPage />,
+  '/sign-in': <SignInPage />,
+  '/register': <RegisterPage />,
+  // The route table's path and the path of the emailed link render the same page.
+  '/verify-email': <VerifyEmailPage />,
+  '/verify': <VerifyEmailPage />,
+  '/checkout': <CheckoutPage />,
+  '/orders/:id/confirmation': <ConfirmationPage />,
 };
 
 const PLACEHOLDER_TITLES: Readonly<Record<KnownRouteTemplate, string>> = {
@@ -73,6 +88,7 @@ const PLACEHOLDER_TITLES: Readonly<Record<KnownRouteTemplate, string>> = {
   '/sign-in': 'Sign in',
   '/register': 'Create an account',
   '/verify-email': 'Verify your email',
+  '/verify': 'Verify your email',
   '/reset-password': 'Choose a new password',
   '/forgot-password': 'Forgot your password?',
   '/checkout': 'Checkout',

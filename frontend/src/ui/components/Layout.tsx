@@ -1,6 +1,7 @@
 import { type JSX, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 
+import { useCart } from '@app/cart/useCart';
 import { correlation } from '@app/correlation';
 import { signInLocationFor } from '@app/navigation/safeNext';
 import { hasRole } from '@app/session/sessionStore';
@@ -11,18 +12,16 @@ import styles from './Layout.module.css';
 
 export const MAIN_CONTENT_ID = 'main';
 
-export type LayoutProps = {
-  /** Number of cart lines shown in the header badge (the cart feature wires the real count). */
-  readonly cartCount?: number;
-};
-
 /**
- * The storefront shell: skip link, banner with navigation and session controls, the main
- * landmark where routes render, and the footer. The console link exists only for operators;
+ * The storefront shell: skip link, banner with navigation (the cart badge counts the units of the
+ * cart the platform reports) and session controls, the merge notice shown once after sign-in, the
+ * main landmark where routes render, and the footer. The console link exists only for operators;
  * services still authorise (FR-012).
  */
-export function Layout({ cartCount = 0 }: LayoutProps): JSX.Element {
+export function Layout(): JSX.Element {
   const { summary, endsSoon, signOut } = useSession();
+  const { view: cart, actions: cartActions } = useCart();
+  const cartCount = cart.itemCount;
   const location = useLocation();
   const navigate = useNavigate();
   const [signingOut, setSigningOut] = useState(false);
@@ -102,6 +101,32 @@ export function Layout({ cartCount = 0 }: LayoutProps): JSX.Element {
             Your session is about to end. Any action keeps you signed in.
           </p>
         ) : null}
+        {cart.mergeNotice === undefined ? null : (
+          <div className={styles.notice} role="status">
+            <p>
+              Your cart was merged with the items you had before signing in. Some quantities were
+              capped at the available stock:
+            </p>
+            <ul className={styles.noticeList}>
+              {cart.mergeNotice.map((capped) => (
+                <li key={capped.productId}>
+                  {cart.lines.find((line) => line.productId === capped.productId)?.productName ??
+                    'An item'}
+                  : requested {capped.requestedQuantity}, kept {capped.appliedQuantity}
+                </li>
+              ))}
+            </ul>
+            <button
+              className={styles.textButton}
+              type="button"
+              onClick={() => {
+                cartActions.dismissMergeNotice();
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
       </header>
       <main id={MAIN_CONTENT_ID} className={styles.main} tabIndex={-1}>
         <Outlet />

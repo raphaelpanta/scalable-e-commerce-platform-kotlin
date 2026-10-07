@@ -6,7 +6,14 @@ import { ROUTE_TEMPLATES } from '@domain/routeTemplate';
 
 const PROTECTED_OR_PUBLIC = ROUTE_TEMPLATES.filter(
   (t) =>
-    !['/sign-in', '/register', '/verify-email', '/forgot-password', '/reset-password'].includes(t),
+    ![
+      '/sign-in',
+      '/register',
+      '/verify-email',
+      '/verify',
+      '/forgot-password',
+      '/reset-password',
+    ].includes(t),
 );
 const uuid = fc.uuid({ version: 4 });
 
