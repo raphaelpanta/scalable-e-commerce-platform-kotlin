@@ -74,3 +74,7 @@ written as user behaviour.
   `/account/addresses`, `/account/notifications`); the router registers exactly this list.
 - **Vitest 5 / Vite 8 / Stryker 10 / Pact JS 17 / Cucumber.js 13 / Playwright 1.63** at their latest
   stable, pinned exactly in `package-lock.json` (`save-exact` in `.npmrc`, `engine-strict` for Node 24).
+
+## Vitest version pin
+
+Vitest is pinned to 4.1.x: with Vitest 5.0 the Stryker Vitest runner (10.0.0) records no per-test coverage, so every mutant survives with "0.00 tests per mutant" and the mutation score is 0. Upgrade Vitest only once a Stryker release declares support for it (verify with `npm run mutate`).
