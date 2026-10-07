@@ -58,7 +58,8 @@ detect_engine() {
   [ -n "$ENGINE_BIN" ] || return 1
   ENGINE="$ENGINE_BIN"
   if [ "$ENGINE_BIN" = docker ]; then
-    server="$(with_timeout "$PROBE_TIMEOUT" docker version --format '{{json .Server}}' 2>/dev/null || true)"
+    # Podman behind a Docker socket (server) or a `docker` command that is Podman's own CLI (client).
+    server="$(with_timeout "$PROBE_TIMEOUT" docker version 2>/dev/null || true)"
     case "$server" in *[Pp]odman*) ENGINE=podman; ENGINE_SHIM=1 ;; esac
   fi
   ENGINE_VERSION="$(with_timeout "$PROBE_TIMEOUT" "$ENGINE_BIN" version --format '{{.Server.Version}}' 2>/dev/null || true)"
@@ -72,7 +73,13 @@ ENGINE_INFO=""
 engine_info_field() {
   [ -n "$ENGINE_BIN" ] || return 1
   if [ -z "$ENGINE_INFO" ]; then
-    ENGINE_INFO="$(with_timeout "$PROBE_TIMEOUT" "$ENGINE_BIN" info --format '{{.MemTotal}} {{.NCPU}} {{.DockerRootDir}}' 2>/dev/null || true)"
+    # JSON first: Docker reports MemTotal/NCPU/DockerRootDir, Podman host.memTotal/host.cpus/store.graphRoot.
+    local json
+    json="$(with_timeout "$PROBE_TIMEOUT" "$ENGINE_BIN" info --format json 2>/dev/null || true)"
+    ENGINE_INFO="$(printf '%s' "$json" | jq -r '[(.MemTotal // .host.memTotal // ""), (.NCPU // .host.cpus // ""), (.DockerRootDir // .store.graphRoot // "")] | map(tostring) | join(" ")' 2>/dev/null || true)"
+    case "$ENGINE_INFO" in *[0-9]*) ;; *) ENGINE_INFO="" ;; esac
+    [ -n "$ENGINE_INFO" ] ||
+      ENGINE_INFO="$(with_timeout "$PROBE_TIMEOUT" "$ENGINE_BIN" info --format '{{.MemTotal}} {{.NCPU}} {{.DockerRootDir}}' 2>/dev/null || true)"
     [ -n "$ENGINE_INFO" ] || return 1
   fi
   printf '%s\n' "$ENGINE_INFO" | awk -v n="$1" '{ print $n }'

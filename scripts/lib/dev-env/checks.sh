@@ -34,11 +34,37 @@ tool_version() {
   if out="$(with_timeout "$PROBE_TIMEOUT" "$@" 2>&1)"; then printf '%s\n' "$out"; fi
 }
 
+# provisioned_jdk PIN: a JDK of the pinned major that the build can use although it is not the default `java`:
+# a toolchain Gradle provisioned (~/.gradle/jdks), an SDKMAN candidate, or (macOS) the one `java_home -v PIN`
+# resolves. Prints "<version> via <source>" for the first match; DEV_ENV_JAVA_HOME_TOOL overrides the java_home path.
+provisioned_jdk() {
+  local pin="$1" rel ver d tool home
+  # Gradle unpacks a toolchain as <id>/release, <id>/jdk-x/release or <id>/jdk-x/Contents/Home/release (macOS).
+  for rel in $(find "$HOME/.gradle/jdks" -maxdepth 5 -name release -type f 2>/dev/null | sort); do
+    ver="$(sed -n 's/^JAVA_VERSION="\([^"]*\)".*/\1/p' "$rel" | head -n1)"
+    if [ "$(java_major_of "$ver")" = "$pin" ]; then printf '%s via Gradle toolchain\n' "$ver"; return 0; fi
+  done
+  for d in "$HOME"/.sdkman/candidates/java/"$pin"*; do
+    [ -d "$d" ] || continue
+    printf '%s via SDKMAN\n' "$(basename "$d")"
+    return 0
+  done
+  tool="${DEV_ENV_JAVA_HOME_TOOL:-/usr/libexec/java_home}"
+  if [ -x "$tool" ] && home="$(with_timeout "$PROBE_TIMEOUT" "$tool" -v "$pin" 2>/dev/null)" && [ -f "$home/release" ]; then
+    ver="$(sed -n 's/^JAVA_VERSION="\([^"]*\)".*/\1/p' "$home/release" | head -n1)"
+    if [ "$(java_major_of "$ver")" = "$pin" ]; then printf '%s via java_home\n' "$ver"; return 0; fi
+  fi
+  return 1
+}
+
 check_jdk() {
-  local ver
+  local ver other
   ver="$(tool_version java -version | sed -n 's/.*version "\([^"]*\)".*/\1/p' | head -n1)"
   if [ -n "$ver" ] && [ "$(java_major_of "$ver")" = "$JDK_PIN" ]; then
     check_line PASS jdk "$ver" "$JDK_PIN"
+  elif [ -n "$ver" ] && other="$(provisioned_jdk "$JDK_PIN")"; then
+    # Gradle runs on the pinned toolchain even when the default java differs (docs/build.md).
+    check_line PASS jdk "$ver (default), $other" "$JDK_PIN"
   else
     check_line FAIL jdk "$ver" "$JDK_PIN"
     fixes "sdk env install" "sdk env install"

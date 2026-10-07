@@ -100,7 +100,7 @@ kind C = configuration (evaluated after the configuration step in `init`, so tha
 
 | # | Name | Kind | Expected | PASS when | Fix (macos / linux) |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `jdk` | P | `25` (major of `.java-version`; `.sdkmanrc` pins `25.0.4-tem`) | `java -version` major equals the pin; found shows the full version | `sdk env install` / same |
+| 1 | `jdk` | P | `25` (major of `.java-version`; `.sdkmanrc` pins `25.0.4-tem`) | `java -version` major equals the pin, or the default differs but a JDK of the pinned major is available to the build: a toolchain Gradle provisioned under `~/.gradle/jdks`, an SDKMAN candidate, or (macOS) the one `java_home -v <pin>` resolves; found shows `<default> (default), <version> via <source>` in that case | `sdk env install` / same |
 | 2 | `engine` | P | `docker or podman reachable` | `<engine> info` succeeds; found shows engine and version | print the decision, never install a cask: `install Docker Desktop, or brew install podman && podman machine init && podman machine start` / `install podman or docker engine, start the service` |
 | 3 | `compose` | P | `v2` | the Compose provider reports major version 2 or higher (`docker compose version`, `docker-compose version`, or `COMPOSE_CMD`) | `brew install docker-compose` or enable it in Docker Desktop / `sudo apt-get install docker-compose-plugin` or `sudo dnf install docker-compose-plugin` (or `podman-compose` as the provider) |
 | 4 | `memory` | P | `>= 10 GiB` | engine memory (VM or host) at least 10 GiB | `podman machine set --memory 10240` or Docker Desktop resources / free memory or add swap-free RAM |

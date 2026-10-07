@@ -41,6 +41,13 @@ assert_contains "$LAST_OUT" "FAIL  jdk        found 21.0.3   expected 25" "jdk f
 assert_contains "$LAST_OUT" "      fix (macos): sdk env install" "jdk fix (macos)"
 assert_contains "$LAST_OUT" "checks: 16 total, 14 PASS, 1 FAIL, 1 SKIP" "summary counts the FAIL"
 
+test_case "jdk PASSes through a Gradle-provisioned toolchain when the default java differs"
+dev_env_fixture
+mkdir -p "$H/.gradle/jdks/eclipse_adoptium-25-aarch64-os_x.2"
+printf 'JAVA_VERSION="25.0.4"\nIMPLEMENTOR="Eclipse Adoptium"\n' >"$H/.gradle/jdks/eclipse_adoptium-25-aarch64-os_x.2/release"
+STUB_JAVA_VERSION=27 assert_exit_code 0 dev_env check
+assert_contains "$LAST_OUT" "PASS  jdk        found 27 (default), 25.0.4 via Gradle toolchain   expected 25" "jdk via toolchain"
+
 test_case "a missing jdk prints found none"
 dev_env_fixture
 STUB_ABSENT=java assert_exit_code 3 dev_env check
