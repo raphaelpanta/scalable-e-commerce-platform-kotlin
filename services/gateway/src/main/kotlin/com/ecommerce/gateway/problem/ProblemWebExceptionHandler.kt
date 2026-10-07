@@ -63,6 +63,7 @@ class ProblemWebExceptionHandler(
             response.headers.set(HttpHeaders.WWW_AUTHENTICATE, WWW_AUTHENTICATE_BEARER)
         }
         failure.headers.forEach(response.headers::set)
+        failure.cookies.forEach { cookie -> response.headers.add(HttpHeaders.SET_COOKIE, cookie) }
         return response.writeWith(Mono.fromSupplier { response.bufferFactory().wrap(bytes) })
     }
 

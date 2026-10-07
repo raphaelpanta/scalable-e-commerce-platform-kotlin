@@ -137,15 +137,18 @@ class GatewayRoutingIT(
 
     @Test
     fun `internal, JWKS and actuator paths are not routed`() {
-        listOf(
-            "/internal/x",
-            "/internal/accounts/$ORDER_ID/contact",
-            JWKS_PATH,
-            "/actuator/health",
-            "/actuator/prometheus",
-        ).forEach { path ->
+        listOf(JWKS_PATH, "/actuator/health", "/actuator/prometheus", "/.well-known/openid-configuration").forEach { path ->
             client
                 .get()
+                .uri(path)
+                .exchange()
+                .expectProblem(HttpStatus.NOT_FOUND, "not-found")
+        }
+        // Since feature 005 a GET outside /api, /actuator and /.well-known is the storefront's (StorefrontRouteIT);
+        // every other method stays unrouted.
+        listOf("/internal/x", "/internal/accounts/$ORDER_ID/contact").forEach { path ->
+            client
+                .post()
                 .uri(path)
                 .exchange()
                 .expectProblem(HttpStatus.NOT_FOUND, "not-found")
@@ -352,7 +355,7 @@ class GatewayRoutingIT(
         val problem =
             client
                 .get()
-                .uri("/nowhere")
+                .uri("/api/v1/nowhere")
                 .header(CORRELATION, valid)
                 .exchange()
                 .expectProblem(HttpStatus.NOT_FOUND, "not-found")
@@ -430,7 +433,7 @@ class GatewayRoutingIT(
         val error =
             client
                 .get()
-                .uri("/nowhere")
+                .uri("/api/v1/nowhere")
                 .exchange()
                 .expectProblem(HttpStatus.NOT_FOUND, "not-found")
                 .headers

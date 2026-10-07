@@ -65,10 +65,14 @@ enum class GatewayProblem(
     val type: String = PROBLEM_TYPE_BASE + slug
 }
 
-/** Raised by gateway filters and rendered by [ProblemWebExceptionHandler]; [headers] are added to the response. */
+/**
+ * Raised by gateway filters and rendered by [ProblemWebExceptionHandler]; [headers] are added to the response and
+ * [cookies] are its `Set-Cookie` values (the browser-session filters delete cookies on 401 this way).
+ */
 class GatewayProblemException(
     val problem: GatewayProblem,
     val detail: String = problem.defaultDetail,
     val headers: Map<String, String> = emptyMap(),
+    val cookies: List<String> = emptyList(),
     cause: Throwable? = null,
 ) : RuntimeException(detail, cause)

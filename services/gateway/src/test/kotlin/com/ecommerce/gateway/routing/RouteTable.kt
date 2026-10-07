@@ -16,11 +16,14 @@ class RouteTable private constructor(
 ) {
     val routes: List<RouteDefinition> get() = properties.routes
 
-    /** The first route whose `Path` and `Method` predicates accept the request, as the gateway evaluates them. */
+    /**
+     * The first route, in `order` then definition order, whose `Path`, `NotPath` and `Method` predicates accept the
+     * request, as the gateway evaluates them.
+     */
     fun match(
         method: String,
         path: String,
-    ): RouteDefinition? = routes.firstOrNull { accepts(it, method, path) }
+    ): RouteDefinition? = routes.sortedBy { it.order }.firstOrNull { accepts(it, method, path) }
 
     private fun accepts(
         route: RouteDefinition,
@@ -28,9 +31,12 @@ class RouteTable private constructor(
         path: String,
     ): Boolean {
         val patterns = argumentsOf(route, "Path")
+        val excluded = argumentsOf(route, "NotPath")
         val methods = argumentsOf(route, "Method")
         val container = PathContainer.parsePath(path)
-        return method in methods && patterns.any { parser.parse(it).matches(container) }
+        return method in methods &&
+            patterns.any { parser.parse(it).matches(container) } &&
+            excluded.none { parser.parse(it).matches(container) }
     }
 
     private fun argumentsOf(

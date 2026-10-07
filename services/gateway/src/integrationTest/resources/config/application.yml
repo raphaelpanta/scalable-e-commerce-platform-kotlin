@@ -1,5 +1,11 @@
 # Test-only overrides, loaded on top of the main application.yml: no OTLP collector runs in this layer, and
 # Spring's test context cache closes the application in a JVM shutdown hook, after Gradle stops capturing output.
+spring:
+  profiles:
+    # No BROWSER_SESSION_KEY in tests that do not set one; the profile `test` lets the gateway generate a throw-away
+    # key (BrowserSessionKeys), as identity does for IDENTITY_SIGNING_KEY.
+    include: test
+
 management:
   tracing:
     export:

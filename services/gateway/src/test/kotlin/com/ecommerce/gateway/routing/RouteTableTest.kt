@@ -15,6 +15,7 @@ import java.io.File
 import java.net.URI
 
 private const val ID = "a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+private const val TELEMETRY_BODY_KIB = 256L
 
 /** One public operation and the route policy the gateway must apply to it. */
 private data class Expected(
@@ -127,13 +128,20 @@ private val expectations =
 /** Requests that must match no route (deny by default: 404, nothing forwarded). */
 private val unrouted =
     listOf(
-        "GET" to "/internal/accounts/$ID/contact",
-        "GET" to "/internal/catalog/products",
         "POST" to "/internal/payments/charges",
+        "DELETE" to "/internal/accounts/$ID/contact",
+        "GET" to "/api",
         "GET" to "/.well-known/jwks.json",
         "GET" to "/actuator/health",
         "GET" to "/actuator/prometheus",
-        "GET" to "/",
+        "GET" to "/actuator/health/readiness",
+        "HEAD" to "/.well-known/openid-configuration",
+        "POST" to "/",
+        "POST" to "/products/1",
+        "PUT" to "/assets/app-3f9c.js",
+        "GET" to "/api/v1/telemetry/v1/traces",
+        "PUT" to "/api/v1/telemetry/v1/logs",
+        "POST" to "/api/v1/telemetry/v1/metrics",
         "GET" to "/api/v1/unknown",
         "GET" to "/api/v2/catalog/products",
         "DELETE" to "/api/v1/catalog/products/$ID",
@@ -231,14 +239,78 @@ class RouteTableTest :
             }
         }
 
-        test("only the image registration raises the body limit, to 5 MiB") {
+        test("only the image registration raises the body limit (5 MiB) and only telemetry lowers it (256 KiB)") {
             table.routes
                 .mapNotNull { route ->
-                    RoutePolicy.from(route.id.orEmpty(), route.metadata).maxBodySize?.let {
-                        route.id to
-                            it
+                    RoutePolicy.from(route.id.orEmpty(), route.metadata).maxBodySize?.let { route.id to it }
+                }.shouldBe(
+                    listOf(
+                        "catalog-image-registration" to DataSize.ofMegabytes(5),
+                        "telemetry-traces" to DataSize.ofKilobytes(TELEMETRY_BODY_KIB),
+                        "telemetry-logs" to DataSize.ofKilobytes(TELEMETRY_BODY_KIB),
+                    ),
+                )
+        }
+
+        test(
+            "telemetry routes are anonymous browse-tier POSTs to the collector, rewritten and stripped, never retried",
+        ) {
+            listOf("traces", "logs").forEach { signal ->
+                val route = table.match("POST", "/api/v1/telemetry/v1/$signal").shouldNotBeNull()
+                withClue(signal) {
+                    route.id shouldBe "telemetry-$signal"
+                    route.uri shouldBe URI("http://localhost:4318")
+                    val policy = RoutePolicy.from(route.id.orEmpty(), route.metadata)
+                    policy.auth shouldBe ANON
+                    policy.tier shouldBe Tier.BROWSE
+                    route.filters.map { it.name } shouldBe
+                        listOf("RewritePath", "RemoveRequestHeader", "RemoveRequestHeader")
+                    route.filters.filter { it.name == "RemoveRequestHeader" }.flatMap { it.args.values } shouldBe
+                        listOf("Cookie", "Authorization")
+                    route.filters
+                        .single { it.name == "RewritePath" }
+                        .args.values
+                        .toList() shouldBe
+                        listOf("/api/v1/telemetry/(?<segment>.*)", "/$\\{segment}")
+                }
+            }
+            RouteTable
+                .load(mapOf("OTEL_COLLECTOR_URL" to "http://otel-collector:4318"))
+                .match("POST", "/api/v1/telemetry/v1/traces")
+                .shouldNotBeNull()
+                .uri shouldBe URI("http://otel-collector:4318")
+        }
+
+        test("the storefront catch-all takes every GET and HEAD outside /api, /actuator and /.well-known, last") {
+            val shell =
+                listOf("/", "/products/$ID", "/assets/app-3f9c.js", "/cart", "/apix/y", "/sign-in", "/internal/x")
+            shell.forEach { path ->
+                listOf("GET", "HEAD").forEach { method ->
+                    withClue("$method $path") {
+                        val route = table.match(method, path).shouldNotBeNull()
+                        route.id shouldBe "storefront"
+                        route.uri shouldBe URI("http://localhost:8082")
+                        val policy = RoutePolicy.from(route.id.orEmpty(), route.metadata)
+                        policy.auth shouldBe ANON
+                        policy.tier shouldBe Tier.BROWSE
                     }
-                }.shouldBe(listOf("catalog-image-registration" to DataSize.ofMegabytes(5)))
+                }
+            }
+            val storefront = table.routes.single { it.id == "storefront" }
+            storefront.order shouldBe 1
+            table.routes.filter { it.id != "storefront" }.forEach { it.order shouldBe 0 }
+            table.routes.last().id shouldBe "storefront"
+            storefront.predicates.map { it.name } shouldBe listOf("Path", "NotPath", "Method")
+            storefront.predicates
+                .single { it.name == "NotPath" }
+                .args.values
+                .toList() shouldBe
+                listOf("/api/**", "/actuator/**", "/.well-known/**")
+            RouteTable
+                .load(mapOf("STOREFRONT_URL" to "http://storefront:8080"))
+                .match("GET", "/")
+                .shouldNotBeNull()
+                .uri shouldBe URI("http://storefront:8080")
         }
 
         test("only connection errors are retried: reads everywhere, POST on the identity routes, never checkout") {
