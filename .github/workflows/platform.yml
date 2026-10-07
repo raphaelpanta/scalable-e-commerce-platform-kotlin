@@ -2,7 +2,7 @@
 # the cross-service acceptance suite against a `core` stack built on the runner. Required status check, through the
 # path-neutral `services-aggregate` (docs/ci-cd.md): `platform`.
 #
-# Triggers: pull requests that touch the platform, the acceptance suite or the contracts (`paths:`), EVERY push to `main`
+# Triggers: pull requests that touch the platform, the acceptance suites (JVM or storefront) or the contracts (`paths:`), EVERY push to `main`
 # except documentation-only ones (post-merge: a service change is exercised against the whole stack), a nightly schedule
 # and a manual run. The `platform` job (fast suite) runs for all of them; `acceptance-slow` (the `@slow` scenarios, then
 # `@chaos`) runs after it for everything except pull requests, with its own, longer timeout.
@@ -12,7 +12,9 @@
 # --build and the rate-limit override platform/perf/compose.perf.yml (the suite signs in from ONE source address, so the
 # gateway's per-address limits would turn the run into a test of the limiter; docs/acceptance.md), smoke.sh --keep
 # (health, gateway 200, ports not published), `./gradlew -q :acceptance:test` for the scenarios that are neither `@slow`
-# nor `@chaos`, and an always-run teardown (down -v). Cucumber reports and, on failure, the container logs are uploaded.
+# nor `@chaos`, the storefront acceptance suite (feature 005: Node 24, `npm ci`, Playwright Chromium, `npm run acceptance`
+# against the gateway, then the `@us1` scenarios again at the 360 px viewport), and an always-run teardown (down -v).
+# Cucumber reports and, on failure, the container logs are uploaded.
 #
 # Runner: ephemeral container with the Docker socket, host network (so http://localhost:8080 reaches the gateway
 # published by Compose on the host) and the work directory mounted at the same path inside and outside the container
@@ -37,6 +39,7 @@ on:
     paths:
       - 'platform/**'
       - 'acceptance/**'
+      - 'frontend/**'
       - 'contracts/**'
       - '.github/workflows/platform.yml'
   # Nightly: dependencies, base images and flakiness drift without a push (UTC).
@@ -148,6 +151,49 @@ jobs:
       # that breaks Mailpit on purpose (@chaos); those run in `acceptance-slow`.
       - name: Acceptance suite (fast scenarios)
         run: ./gradlew -q :acceptance:test -Dcucumber.filter.tags="not @slow and not @chaos"
+
+      # Storefront acceptance (feature 005, research section 10): Cucumber.js + Playwright against the same stack, after
+      # the JVM suite. The storefront is served by the gateway, so STOREFRONT_URL is GATEWAY_URL; Mailpit is read the way
+      # the JVM suite reads it (published on the host, docs/acceptance.md). Node 24 as frontend/.nvmrc.
+      - name: Set up Node from frontend/.nvmrc
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install the frontend dependencies
+        run: npm ci --prefix frontend --silent --no-audit --no-fund
+
+      # --with-deps installs the shared libraries of Chromium through apt, which needs root or passwordless sudo in the
+      # runner container (the usual runner image has both); without either, the browser is installed alone and the
+      # libraries must be part of the runner image (platform/ci-runner/README.md "Host requirements").
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          if [ "$(id -u)" = 0 ] || sudo -n true 2>/dev/null; then
+            npx playwright install --with-deps chromium
+          else
+            echo "::notice::no root or passwordless sudo: installing Chromium without its system libraries"
+            npx playwright install chromium
+          fi
+
+      - name: Storefront acceptance suite (desktop, every scenario)
+        env:
+          STOREFRONT_URL: ${{ env.GATEWAY_URL }}
+          MAILPIT_URL: http://localhost:8025
+        run: npm --prefix frontend run acceptance
+
+      # FR-017: the 360 px baseline. The harness runs every scenario at 360x780 with STOREFRONT_VIEWPORT=mobile; the
+      # browsing and cart journeys (@us1) are enough to catch layout regressions, so the run stays short.
+      - name: Storefront acceptance suite (mobile viewport, @us1 only)
+        env:
+          STOREFRONT_URL: ${{ env.GATEWAY_URL }}
+          MAILPIT_URL: http://localhost:8025
+          STOREFRONT_VIEWPORT: mobile
+          CUCUMBER_TAGS: "@us1"
+        run: npm --prefix frontend run acceptance
 
       - name: Collect the container logs
         if: failure()

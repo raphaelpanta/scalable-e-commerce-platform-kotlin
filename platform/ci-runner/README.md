@@ -22,6 +22,15 @@ and 16 GB of memory (Gradle, Testcontainers, the platform workflow's stack of ab
 Maven Central, the Gradle Plugin Portal, `api.osv.dev` and the registries of the tool images, and `gh` (logged in) if you
 use `scripts/run-ephemeral.sh`.
 
+The storefront (feature 005) adds two needs on the runner. The storefront pipeline and the browser acceptance steps of
+`platform.yml` install Node 24 with `actions/setup-node` and need outbound access to the npm registry (`registry.npmjs.org`)
+and, for Chromium, to the Playwright download hosts (`cdn.playwright.dev`, `playwright.download.prss.microsoft.com`).
+`npx playwright install --with-deps chromium` also installs the browser's system libraries through `apt`, so the runner
+container needs root or passwordless sudo (the `myoung34/github-runner` image has the latter); `platform.yml` checks for
+it and falls back to `npx playwright install chromium`, in which case the libraries (`libnss3`, `libgbm1`, `libasound2t64`
+and the other packages `npx playwright install-deps chromium` lists) must already be part of the runner image. Allow about
+1 GB of free disk for the Chromium download and the npm cache of a cache-cold run.
+
 ## Setup
 
 ```bash
@@ -56,7 +65,7 @@ gh secret set PACT_BROKER_PASSWORD         # PACT_BROKER_BASIC_AUTH_PASSWORD of 
 
 | Name | Kind | Used by | Meaning |
 | --- | --- | --- | --- |
-| `REGISTRY_HOST` | variable | `service-ci.yml` image and publish jobs | `host:port` that Docker on the runner host uses for the registry |
+| `REGISTRY_HOST` | variable | `service-ci.yml` and `storefront.yml` image and publish jobs | `host:port` that Docker on the runner host uses for the registry |
 | `REGISTRY_USERNAME`, `REGISTRY_PASSWORD` | secrets | push step only | registry basic-auth credentials |
 | `PACT_BROKER_URL` | secret | contract steps | base URL of the broker; unset skips every broker step |
 | `PACT_BROKER_USERNAME`, `PACT_BROKER_PASSWORD` | secrets | contract steps | broker basic-auth credentials |

@@ -7,7 +7,7 @@
 #
 #   1. The changed files of the pull request (GitHub API) go through .github/scripts/path-filter-check.sh, which
 #      lists the path-filtered workflows the change triggers. Each maps to a check name: <ctx>.yml to
-#      `service-ci / <ctx>`, platform.yml to `platform`. Workflows that are not listed were "not triggered":
+#      `service-ci / <ctx>` (storefront.yml included), platform.yml to `platform`. Workflows that are not listed were "not triggered":
 #      that counts as success.
 #   2. The check runs of the head commit (`gh api repos/<repo>/commits/<sha>/check-runs`) are polled until every
 #      expected check has been reported (AGG_APPEAR_TIMEOUT seconds) and has completed (AGG_COMPLETE_TIMEOUT).
@@ -26,7 +26,8 @@ GH="${GH_BIN:-gh}"
 INTERVAL="${AGG_INTERVAL:-20}"
 APPEAR_TIMEOUT="${AGG_APPEAR_TIMEOUT:-600}"
 COMPLETE_TIMEOUT="${AGG_COMPLETE_TIMEOUT:-2400}"
-SERVICES="gateway identity catalog cart order payment notification"
+# `storefront` (feature 005) is not a Gradle service, but storefront.yml reports the check `service-ci / storefront` too.
+SERVICES="gateway identity catalog cart order payment notification storefront"
 
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 : "${PR_NUMBER:?PR_NUMBER is required}"
