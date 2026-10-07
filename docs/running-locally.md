@@ -22,9 +22,10 @@ Prerequisites: Docker (Compose v2) or a compatible engine such as Podman, `curl`
 installed: the images build the services themselves.
 
 **Memory.** Give the container engine itself, not only the host, about **10 GiB**: the Docker Desktop VM or the Podman
-machine (`podman machine set --cpus 6 --memory 10240`). The `core` and `observability` profiles together run 20
-containers: seven JVMs bounded at 768 MB each (`SERVICE_MEM_LIMIT`), Kafka at 1 GiB (`KAFKA_MEM_LIMIT`), six PostgreSQL
-databases at 256 MB (`DB_MEM_LIMIT`) and the observability tools at 512 MB each (`OBS_MEM_LIMIT`). An 8 GiB engine ran out
+machine (`podman machine set --cpus 6 --memory 10240`). The `core` and `observability` profiles together run 21
+containers: seven JVMs bounded at 768 MB each (`SERVICE_MEM_LIMIT`), the storefront static server at 64 MB
+(`STOREFRONT_MEM_LIMIT`), Kafka at 1 GiB (`KAFKA_MEM_LIMIT`), six PostgreSQL databases at 256 MB (`DB_MEM_LIMIT`) and
+the observability tools at 512 MB each (`OBS_MEM_LIMIT`). An 8 GiB engine ran out
 of memory; the limits can be lowered in `.env`. Rootless Podman also caps the number of concurrent containers through the
 kernel keyring quota (`kernel.keys.maxkeys`): raise it in the machine, or stop unrelated containers, when the 20th
 container fails to start.
