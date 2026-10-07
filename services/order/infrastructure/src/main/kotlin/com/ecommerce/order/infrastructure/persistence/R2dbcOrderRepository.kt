@@ -84,6 +84,7 @@ class R2dbcOrderRepository(
                 "order_status = :orderStatus".takeIf { status != null },
             )
         val where = if (conditions.isEmpty()) "" else " WHERE " + conditions.joinToString(" AND ")
+
         fun DatabaseClient.GenericExecuteSpec.filtered(): DatabaseClient.GenericExecuteSpec {
             val withAccount = if (accountId == null) this else bind("accountId", accountId.value)
             return if (status == null) withAccount else withAccount.bind("orderStatus", status.wire)

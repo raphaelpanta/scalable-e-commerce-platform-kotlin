@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type { MailpitClient } from './mailpit.ts';
 import type { Credentials } from './world.ts';
 
@@ -63,6 +65,38 @@ export class ShopperFixtures {
   async orders(token: string): Promise<JsonRecord[]> {
     const body = await this.#request('GET', '/api/v1/orders?size=50', undefined, 200, token);
     return Array.isArray(body['items']) ? (body['items'] as JsonRecord[]) : [];
+  }
+
+  /** Places an order with the approving simulated card for the account cart; returns the order id. */
+  async placeApprovedOrder(token: string, addressId: string): Promise<string> {
+    const cart = await this.#request('GET', '/api/v1/cart', undefined, 200, token);
+    const revision = cart['revision'];
+    if (typeof revision !== 'string') throw new Error('the cart has no revision');
+    const response = await fetch(`${this.#baseUrl}/api/v1/orders`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': randomUUID(),
+      },
+      body: JSON.stringify({
+        addressId,
+        cartRevision: revision,
+        paymentMethod: { type: 'card', token: 'tok_sim_approve_4242' },
+      }),
+    });
+    if (response.status !== 201) throw new Error(`placing the order answered ${response.status}`);
+    const id = ((await response.json()) as JsonRecord)['id'];
+    if (typeof id !== 'string') throw new Error('the order has no id');
+    return id;
+  }
+
+  /** The `orderStatus` of an order as its owner (or an operator) reads it. */
+  async orderStatus(token: string, orderId: string): Promise<string> {
+    const order = await this.#request('GET', `/api/v1/orders/${orderId}`, undefined, 200, token);
+    const status = order['orderStatus'];
+    if (typeof status !== 'string') throw new Error('the order has no status');
+    return status;
   }
 
   async #request(
