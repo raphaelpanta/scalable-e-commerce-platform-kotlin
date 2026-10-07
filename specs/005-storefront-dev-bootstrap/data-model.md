@@ -255,7 +255,7 @@ request host.
 | 1 | no | no | any | n/a | **pass through** unchanged (anonymous; services decide) |
 | 2 | no | yes | any | n/a | **pass through** unchanged (API client keeps bearer tokens, behaviour as before) |
 | 3 | yes | yes | any | n/a | **400** `validation` (cookie and own `Authorization` are mutually exclusive) |
-| 4 | yes | no | non-GET (anything except GET, HEAD, OPTIONS) | not OK (cross-site, same-site, absent `Sec-Fetch-Site`, or `Origin` mismatch) | **403** `forbidden`, cookie untouched |
+| 4 | yes | no | non-GET (anything except GET, HEAD, OPTIONS) | not OK (cross-site, same-site, `Origin` mismatch, or `Sec-Fetch-Site` absent without a matching `Origin`; an absent `Sec-Fetch-Site` is accepted only when `Origin` matches the request host) | **403** `forbidden`, cookie untouched |
 | 5 | yes | no | any | OK, or method is GET/HEAD/OPTIONS | unseal and check idle: failure or idle -> **401** `unauthorized` plus cookie deletion |
 | 6 | yes | no | any | OK, session valid | refresh first if the access token expires within 60 s; then **inject** `Authorization: Bearer <access>`, forward, re-set the cookie with a new `lastSeenAt` |
 

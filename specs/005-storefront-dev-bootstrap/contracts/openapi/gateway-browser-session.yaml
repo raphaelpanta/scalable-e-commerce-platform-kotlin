@@ -28,7 +28,8 @@ info:
     All other attributes are identical for both names. The gateway accepts whichever of the two
     names is present on a request and never sets both: when it sets one name it also deletes the
     other. A request that carries both names is treated as an unsealable session (401
-    `unauthorized`, both cookies deleted). Everywhere below, "the session cookie" and "the cart
+    `unauthorized`, both cookies deleted); a request carrying both cart cookie names has both ignored
+    and deleted and proceeds without a cart token. Everywhere below, "the session cookie" and "the cart
     cookie" mean whichever name applies.
 
     | Cookie | Attributes |
@@ -285,9 +286,10 @@ paths:
         without any header or token of its own: the gateway injects the bearer from the session
         cookie and `X-Cart-Token` from the cart cookie. On a 200 from the cart service the gateway
         deletes the cart cookie (the anonymous cart and its token are consumed). On any other
-        status the cookie is kept (a 409 merge in progress or a failure can be retried; a 404
-        means the token was already consumed and the cookie is deleted as well). Without a cart
-        cookie and without `X-Cart-Token` the cart contract's 400 applies.
+        status, 404 included, the cookie is kept (a 409 merge in progress or a failure can be
+        retried; a stale token is reported by the next cart read and the storefront then starts a
+        new anonymous cart). Without a cart cookie and without `X-Cart-Token` the cart contract's
+        400 applies.
       parameters:
         - $ref: '#/components/parameters/BrowserSessionHeader'
         - $ref: '#/components/parameters/CorrelationId'
