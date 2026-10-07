@@ -1,5 +1,6 @@
 package com.ecommerce.build
 
+import io.kotest.assertions.withClue
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.file.shouldNotExist
 import io.kotest.matchers.shouldBe
@@ -49,7 +50,10 @@ class NewServiceTaskTest :
             fixture.file("services/orders/infrastructure/src/main/kotlin/com/ecommerce/orders/infrastructure")
                 .resolve("OrdersApplication.kt")
                 .readText() shouldContain "class OrdersApplication"
-            fixture.run("verify").output.lines().count { it.isNotBlank() } shouldBe 0
+            val verifyOutput = fixture.run("verify").output
+            withClue("verify printed:\n$verifyOutput") {
+                verifyOutput.lines().count { it.isNotBlank() } shouldBe 0
+            }
         }
 
         test("an invalid name is refused and nothing is written") {
