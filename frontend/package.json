@@ -19,12 +19,26 @@
     "pact": "npm run --silent ensure-generated && node scripts/quiet.mjs vitest run --reporter=dot --silent=passed-only --config pact/vitest.pact.config.ts"
   },
   "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/api-logs": "0.223.0",
+    "@opentelemetry/context-zone": "2.12.0",
+    "@opentelemetry/core": "2.12.0",
+    "@opentelemetry/instrumentation": "0.223.0",
+    "@opentelemetry/instrumentation-document-load": "0.68.0",
+    "@opentelemetry/instrumentation-fetch": "0.223.0",
+    "@opentelemetry/instrumentation-user-interaction": "0.67.0",
+    "@opentelemetry/otlp-transformer": "0.223.0",
+    "@opentelemetry/resources": "2.12.0",
+    "@opentelemetry/sdk-logs": "0.223.0",
+    "@opentelemetry/sdk-trace": "2.12.0",
+    "@opentelemetry/sdk-trace-web": "2.12.0",
     "@tanstack/react-query": "5.104.1",
     "openapi-fetch": "0.17.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-hook-form": "7.89.0",
-    "react-router": "8.4.0"
+    "react-router": "8.4.0",
+    "zone.js": "0.16.3"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.13.0",

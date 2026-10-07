@@ -1,3 +1,4 @@
+import { type ExportResult, ExportResultCode } from '@opentelemetry/core';
 import { MatchersV3 } from '@pact-foundation/pact';
 import { describe, expect, it } from 'vitest';
 
@@ -9,8 +10,19 @@ import { ProblemError, ThrottledError, UnauthorizedError } from '@api/problem';
 import { createSessionPort } from '@api/session';
 import { Email } from '@domain/email';
 import { Password } from '@domain/password';
+import { createLogExporter, createSpanExporter, type DeliveryConfig } from '@telemetry/exporter';
+import { createPauseGate, sanitizeLogRecord, sanitizeSpan } from '@telemetry/policy';
 
 import { pactFor } from './pact.config.ts';
+import {
+  CORRELATION_ID,
+  fakeLog,
+  fakeSpan,
+  ORIGIN,
+  POLICY,
+  serializeLogs,
+  serializeSpans,
+} from '../tests/telemetry/support.ts';
 
 // Storefront → gateway consumer pact: interactions G1–G19 of contracts/pact-matrix.md ("Storefront
 // to gateway"), provider states verbatim from the gateway's StorefrontProviderStates. Cookie names
@@ -691,35 +703,43 @@ describe('storefront → gateway pact, page shell and deny by default (G18, G19)
   });
 });
 
-// The storefront telemetry module (src/telemetry) is implemented in a later task; until then the
-// typed generated client of the telemetry contract plays the exporter. The throttled interaction
-// comes last: it exhausts the `browse` budget of the replaying client for the rest of the minute.
-// The generated OTLP request type is a loose index signature; the payloads below are real OTLP/JSON.
+// T096: G16 and G17 are driven through the real telemetry exporter (src/telemetry/exporter.ts): one
+// span and one log record pass the privacy policy and leave as the OTLP/HTTP JSON the browser sends,
+// so the pact records the exact wire payload (route templates, allow-listed attributes) and the
+// delivery rules of FR-032 are asserted on the consumer side (a 503 is dropped without a retry, a 429
+// pauses the exporter for Retry-After). The exporter takes the `fetch` of the page, here pointed at
+// the mock server; a wrapper keeps the answers it receives, which the exporter itself never exposes.
+// The 413 interaction keeps the generated client: the real exporter never sends more than 256 KiB, so
+// that answer is the gateway's backstop for a sender that does not follow the policy. The throttled
+// interaction comes last: it exhausts the `browse` budget of the replaying client for the rest of
+// the minute. The generated OTLP request type is a loose index signature.
 type OtlpBody = NonNullable<
   TelemetryPaths[typeof TRACES]['post']['requestBody']
 >['content']['application/json'];
 const otlp = (body: object) => body as OtlpBody;
 
-const spans = otlp({
-  resourceSpans: [
-    {
-      resource: {
-        attributes: [{ key: 'service.name', value: { stringValue: 'storefront' } }],
-      },
-      scopeSpans: [],
+const exportedSpan = (origin: string = ORIGIN) => [
+  fakeSpan({
+    name: 'HTTP GET',
+    attributes: {
+      'http.method': 'GET',
+      'http.url': `${origin}/api/v1/catalog/products/0b4e6d1c-2a57-4c83-9f10-6d8a3e5b7c21?q=shoes`,
+      'http.status_code': 200,
+      'correlation.id': CORRELATION_ID,
     },
-  ],
-});
-const logs = otlp({
-  resourceLogs: [
-    {
-      resource: {
-        attributes: [{ key: 'service.name', value: { stringValue: 'storefront' } }],
-      },
-      scopeLogs: [],
-    },
-  ],
-});
+  }),
+];
+const exportedLog = () => [
+  fakeLog({ 'error.name': 'TypeError', 'http.route': '/cart', 'correlation.id': CORRELATION_ID }),
+];
+
+// What the browser puts on the wire for those items: the policy applied, then OTLP/HTTP JSON.
+const SPAN_BATCH = serializeSpans(
+  exportedSpan().flatMap((span) => sanitizeSpan(span, POLICY) ?? []),
+).json;
+const LOG_BATCH = serializeLogs(
+  exportedLog().map((record) => sanitizeLogRecord(record, POLICY)),
+).json;
 const oversized = otlp({
   resourceLogs: [
     {
@@ -727,6 +747,41 @@ const oversized = otlp({
     },
   ],
 });
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
+
+type Exchange = { path: string; status: number; body: unknown };
+
+// The page's exporters, delivering to `baseUrl` and keeping what the gateway answered.
+function exportersAt(baseUrl: string) {
+  const exchanges: Exchange[] = [];
+  const gate = createPauseGate();
+  const config: DeliveryConfig = {
+    policy: { origin: baseUrl },
+    gate,
+    fetch: () => async (path, init) => {
+      const answer = await fetch(`${baseUrl}${path}`, init);
+      exchanges.push({
+        path,
+        status: answer.status,
+        body: await answer
+          .clone()
+          .json()
+          .catch(() => undefined),
+      });
+      return answer;
+    },
+  };
+  return { exchanges, gate, spans: createSpanExporter(config), logs: createLogExporter(config) };
+}
+
+function exportOnce<T>(
+  exporter: { export(items: T[], callback: (result: ExportResult) => void): void },
+  items: T[],
+): Promise<ExportResult> {
+  return new Promise((resolve) => {
+    exporter.export(items, resolve);
+  });
+}
 
 describe('storefront → gateway pact, telemetry (G16, G17)', () => {
   it('G16 forwards traces and returns the collector body', async () => {
@@ -735,14 +790,16 @@ describe('storefront → gateway pact, telemetry (G16, G17)', () => {
       .given(STATE_COLLECTOR)
       .uponReceiving('an anonymous export of browser traces')
       .withRequest('POST', TRACES, (request) => {
-        request.jsonBody(spans);
+        request.headers(JSON_HEADERS).jsonBody(SPAN_BATCH);
       })
       .willRespondWith(200, (response) => {
         response.jsonBody({});
       })
       .executeTest(async (mockServer) => {
-        const { response } = await telemetryClient(mockServer.url).POST(TRACES, { body: spans });
-        expect(response.status).toBe(200);
+        const { exchanges, spans } = exportersAt(mockServer.url);
+        const result = await exportOnce(spans, exportedSpan(mockServer.url));
+        expect(result.code).toBe(ExportResultCode.SUCCESS);
+        expect(exchanges).toEqual([{ path: TRACES, status: 200, body: {} }]);
       });
   });
 
@@ -752,14 +809,17 @@ describe('storefront → gateway pact, telemetry (G16, G17)', () => {
       .given(STATE_COLLECTOR)
       .uponReceiving('an anonymous export of browser logs')
       .withRequest('POST', LOGS, (request) => {
-        request.jsonBody(logs);
+        request.headers(JSON_HEADERS).jsonBody(LOG_BATCH);
       })
       .willRespondWith(200, (response) => {
         response.jsonBody({ partialSuccess: { rejectedLogRecords: integer(0) } });
       })
       .executeTest(async (mockServer) => {
-        const { data } = await telemetryClient(mockServer.url).POST(LOGS, { body: logs });
-        expect(data?.partialSuccess?.rejectedLogRecords).toBe(0);
+        const { exchanges, logs } = exportersAt(mockServer.url);
+        await exportOnce(logs, exportedLog());
+        expect(exchanges).toEqual([
+          { path: LOGS, status: 200, body: { partialSuccess: { rejectedLogRecords: 0 } } },
+        ]);
       });
   });
 
@@ -785,33 +845,35 @@ describe('storefront → gateway pact, telemetry (G16, G17)', () => {
       });
   });
 
-  it('G17 answers 503 unavailable when the collector is not running', async () => {
+  it('G17 answers 503 unavailable when the collector is not running, and the export is dropped', async () => {
     await provider
       .addInteraction()
       .given('the telemetry collector is not running')
       .uponReceiving('an export of browser traces while the collector is down')
       .withRequest('POST', TRACES, (request) => {
-        request.jsonBody(spans);
+        request.headers(JSON_HEADERS).jsonBody(SPAN_BATCH);
       })
       .willRespondWith(503, (response) => {
         response.headers({ 'Content-Type': PROBLEM }).jsonBody(problem('unavailable', 503, 'x'));
       })
       .executeTest(async (mockServer) => {
-        const failure = await telemetryClient(mockServer.url)
-          .POST(TRACES, { body: spans })
-          .catch((error: unknown) => error);
-        expect(failure).toBeInstanceOf(ProblemError);
-        expect((failure as ProblemError).problem.type).toBe('unavailable');
+        const { exchanges, gate, spans } = exportersAt(mockServer.url);
+        const result = await exportOnce(spans, exportedSpan(mockServer.url));
+        // dropped silently: the SDK sees a success, there is no retry and no pause
+        expect(result.code).toBe(ExportResultCode.SUCCESS);
+        expect(exchanges).toHaveLength(1);
+        expect(exchanges[0]?.status).toBe(503);
+        expect(gate.isPaused()).toBe(false);
       });
   });
 
-  it('G17 answers 429 throttled with Retry-After once the browse budget is exhausted', async () => {
+  it('G17 answers 429 throttled with Retry-After once the browse budget is exhausted, and the exporter pauses', async () => {
     await provider
       .addInteraction()
       .given('the browse budget of the client is exhausted')
       .uponReceiving('throttled export of browser logs once the browse budget is exhausted')
       .withRequest('POST', LOGS, (request) => {
-        request.jsonBody(logs);
+        request.headers(JSON_HEADERS).jsonBody(LOG_BATCH);
       })
       .willRespondWith(429, (response) => {
         response
@@ -819,11 +881,15 @@ describe('storefront → gateway pact, telemetry (G16, G17)', () => {
           .jsonBody(problem('throttled', 429, 'x'));
       })
       .executeTest(async (mockServer) => {
-        const failure = await telemetryClient(mockServer.url)
-          .POST(LOGS, { body: logs })
-          .catch((error: unknown) => error);
-        expect(failure).toBeInstanceOf(ThrottledError);
-        expect((failure as ThrottledError).retryAfterSeconds).toBe(30);
+        const { exchanges, gate, logs, spans } = exportersAt(mockServer.url);
+        await exportOnce(logs, exportedLog());
+        expect(exchanges).toHaveLength(1);
+        expect(exchanges[0]?.status).toBe(429);
+        // the pause covers both signals: nothing more is sent, the batches are dropped
+        expect(gate.isPaused()).toBe(true);
+        await exportOnce(logs, exportedLog());
+        await exportOnce(spans, exportedSpan(mockServer.url));
+        expect(exchanges).toHaveLength(1);
       });
   });
 });

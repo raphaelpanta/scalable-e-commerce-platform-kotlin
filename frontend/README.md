@@ -12,7 +12,7 @@ HttpOnly cookie, `X-Browser-Session: cookie` on every request).
 | `src/domain`    | Pure value objects and rules (`Email`, `Password`, `Quantity`, `Money`, `Address`, `CartRevision`, `CorrelationId`, `IdempotencyKey`, `OrderStatus`/`PaymentStatus` transitions, `RouteTemplate`, `Result`) | nothing else; no browser globals              |
 | `src/app`       | Use cases: session store and hook, correlation ids, `safeNext` redirect rule, query client defaults                                                                                                         | `domain` (the API edge is injected as a port) |
 | `src/api`       | The HTTP edge: `openapi-fetch` client over the generated contract types, problem mapping, the session port adapter                                                                                          | `domain`, `app` ports, `generated/`           |
-| `src/telemetry` | Browser telemetry (placeholder until phase 9)                                                                                                                                                               | `domain`                                      |
+| `src/telemetry` | Browser telemetry: the OpenTelemetry web SDK wiring, the allow-list policy, the one exporter (T093)                                                                                                         | `domain` (the correlation source is injected) |
 | `src/ui`        | React: `routes/` (data router), `pages/`, `components/`, `styles/` (tokens + CSS Modules)                                                                                                                   | everything                                    |
 
 ESLint `no-restricted-imports` and `no-restricted-globals` enforce the table (`eslint.config.js`).
@@ -147,3 +147,32 @@ declined for token tok_sim_decline_01`; the empty-cart read of K1 reuses `no ano
 ## Vitest version pin
 
 Vitest is pinned to 4.1.x: with Vitest 5.0 the Stryker Vitest runner (10.0.0) records no per-test coverage, so every mutant survives with "0.00 tests per mutant" and the mutation score is 0. Upgrade Vitest only once a Stryker release declares support for it (verify with `npm run mutate`).
+
+## Browser telemetry (phase 9, 2026-10-07)
+
+- **One exporter, one policy** (`src/telemetry`): `setup.ts` wires `@opentelemetry/sdk-trace-web` (zone context
+  manager), the document-load, fetch (`traceparent` on same-origin requests, `correlation.id` from the request's
+  `X-Correlation-Id`) and user-interaction (click, submit, Enter; `element.role` and the static `element.id` only)
+  instrumentations and the logs SDK (`client.error` records from window `error`, `unhandledrejection` and failed
+  queries/mutations reported by `main.tsx`). Everything leaves through `exporter.ts`, which runs `policy.ts` first:
+  the allow-list is exactly `http.route`, `http.request.method`, `http.response.status_code`, `element.role`,
+  `element.id`, `duration.ms`, `error.name`, `correlation.id`, `session.id` (resource: `service.name`,
+  `service.version`, `session.id`). URLs become route templates (`routeTemplates.ts`: the storefront routes plus a
+  closed list of API paths), span names come from a closed vocabulary (anything else is dropped), events, links,
+  status messages and trace state are never copied, `error.name` is a class name, `element.id` an identifier.
+- **Why not the stock OTLP exporters**: `@opentelemetry/exporter-*-otlp-http` retry up to five times with a back-off;
+  FR-032 requires drop, never retry. `exporter.ts` serialises with `@opentelemetry/otlp-transformer` (JSON), posts to
+  `/api/v1/telemetry/v1/{traces,logs}` with `credentials: 'omit'`, and always reports success to the SDK. A 429 pauses
+  both signals for `Retry-After` (1 s to 1 h, one minute when absent or not in seconds); a batch above 256 KiB is not sent.
+- **Session id**: `sessionId.ts`, a random UUID v4 under `sessionStorage['storefront.telemetry.sessionId']`; nothing
+  reads `localStorage` or the cookie.
+- **Switches and wiring**: `main.tsx` starts telemetry before anything else; `VITE_TELEMETRY=off` disables it (dev
+  server without a gateway). `service.version` comes from `package.json` through Vite's `define`
+  (`__APP_VERSION__`). `src/telemetry` imports `domain` only (the correlation source is passed in by `main.tsx`).
+- **Two spans per click** are avoided by the interaction filter in `setup.ts` (React listens in capture and bubble;
+  a repeat of the same event type on the same element within 50 ms is ignored). The Enter filter works because a
+  window capture listener records the key before the instrumentation decides.
+- **Tests**: `tests/telemetry` (property tests with fast-check for the policy, example tests for the exporter, session
+  id, elements and the SDK wiring; `navigation.test.ts` owns its file because the interaction instrumentation's
+  history patch outlives a shutdown). Pact G16/G17 (`pact/gateway.pact.test.ts`) drive the real exporter against the
+  mock server; the 413 interaction keeps the generated client because the exporter never sends more than 256 KiB.
