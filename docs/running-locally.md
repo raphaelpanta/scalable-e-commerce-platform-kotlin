@@ -127,8 +127,12 @@ the Loki data source: `{service=~".+"} | correlationId="<id>"`. Every service an
 as OpenTelemetry log records (Logback `OTEL` appender, `logback-spring.xml`) through the collector to Loki: the body
 is the message, `service` and `level` are labels, `correlationId`, `traceId`, `spanId` (and `originalCorrelationId`
 when the gateway refused a client value) are structured metadata, so no `| json` stage is needed. Lines can arrive up
-to a few seconds after the request (batched export). Per-service request rate, error rate and p95 latency are on the
-**Service RED** dashboard. Container logs of one service (ECS JSON): `docker compose logs -f <service>`.
+to a few seconds after the request (batched export). The storefront's browser spans and client-error records arrive
+the same way (through the gateway's telemetry route) under `service="storefront"`, with `correlation.id` and
+`session.id` as resource attributes, so a page view and the service lines it caused share one correlation id and one
+trace; the **Storefront RUM** dashboard lists recent browser spans and links each to this one. Per-service request
+rate, error rate and p95 latency are on the **Service RED** dashboard. Container logs of one service (ECS JSON):
+`docker compose logs -f <service>`.
 
 ## Rebuild after pulling changes
 
