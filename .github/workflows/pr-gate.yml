@@ -54,7 +54,8 @@ jobs:
       - name: Unpack the Pitest reports
         run: tar -xf pitest-reports.tar && rm -f pitest-reports.tar
 
-      # Stryker is deferred until a frontend package with a stryker.config.* exists (docs/harness.md).
+      # Stryker runs for every frontend package with a stryker.config.*: since feature 005 that is frontend/
+      # (docs/harness.md). The step stays conditional so that a checkout without a frontend still passes.
       - name: Install frontend dependencies for Stryker
         if: hashFiles('frontend/stryker.config.*', 'frontend/*/stryker.config.*') != ''
         run: for p in frontend frontend/*/; do [ -f "$p/package-lock.json" ] && npm ci --prefix "$p"; done; true

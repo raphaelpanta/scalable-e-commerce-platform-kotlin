@@ -68,7 +68,7 @@ else step verify ./gradlew -q verify; fi
 step mutation-gate "$SCRIPTS/mutation-gate.sh" ${BASE_ARGS[@]+"${BASE_ARGS[@]}"}
 step surviving-mutants "$SCRIPTS/surviving-mutants.sh" ${BASE_ARGS[@]+"${BASE_ARGS[@]}"} ${SURV_ARGS[@]+"${SURV_ARGS[@]}"}
 
-# Stryker (frontend mutation testing) only where configured; inert until a frontend package has a config.
+# Stryker (frontend mutation testing) only where configured: frontend/ since feature 005 (docs/harness.md).
 while IFS= read -r pkgjson; do
   [ -n "$pkgjson" ] || continue
   pkg="$(dirname "$pkgjson")"

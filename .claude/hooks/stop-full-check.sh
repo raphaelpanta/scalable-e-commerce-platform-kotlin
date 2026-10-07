@@ -4,8 +4,8 @@
 #    tests, every module's ktlint/detekt/test layers/architecture rules/full Pitest, frontend/ lint and test);
 #    only when the build has no `verify` task, incremental Pitest on the changed domain/application classes;
 #    and, per frontend package, lint/test
-#    (+ Stryker incremental when a stryker.config.* exists; inert until a frontend does). The root package
-#    frontend/package.json is left to `verify`, which already runs its lint and test scripts.
+#    (+ Stryker incremental when a stryker.config.* exists: frontend/stryker.config.json since feature 005).
+#    The root package frontend/package.json is left to `verify`, which already runs its lint and test scripts.
 #  - Skipped when there is no build yet, or when nothing relevant changed since the last green run
 #    (marker .claude/.cache/last-full-check, replaced only after every check passed).
 #  - A Gradle "Task '...' not found" (no `verify`/`pitest` task yet) is a silent skip, not a failure.
@@ -155,7 +155,7 @@ while IFS= read -r pkgjson; do
       run_in "$pkg" "${pkg##*/}:$script" "$pm" run -s "$script"
     fi
   done
-  # Stryker: deferred until a frontend exists; runs only when a stryker.config.* is present.
+  # Stryker (incremental) runs only when a stryker.config.* is present: the storefront's frontend/stryker.config.json.
   if any_glob "$pkg"/stryker.config.* "$pkg"/stryker.conf.*; then
     run_in "$pkg" "${pkg##*/}:stryker" npx --no-install stryker run --incremental
   fi
