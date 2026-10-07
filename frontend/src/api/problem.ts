@@ -10,7 +10,19 @@ export type Problem = {
   readonly status: number;
   readonly correlationId?: string;
   readonly errors: readonly FieldError[];
+  /** Extension members (`changedLines`, `unavailableLines`, `declineReason`, ...); absent when there are none. */
+  readonly extensions?: Readonly<Record<string, unknown>>;
 };
+
+const STANDARD_MEMBERS: ReadonlySet<string> = new Set([
+  'type',
+  'title',
+  'status',
+  'detail',
+  'instance',
+  'errors',
+  'correlationId',
+]);
 
 export class ApiError extends Error {
   readonly problem: Problem;
@@ -93,6 +105,9 @@ export function problemFromBody(
   const record = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
   const detail = stringOrUndefined(record['detail']);
   const rawErrors = record['errors'];
+  const extensions = Object.fromEntries(
+    Object.entries(record).filter(([member]) => !STANDARD_MEMBERS.has(member)),
+  );
   return {
     type: problemSlug(stringOrUndefined(record['type'])),
     title: stringOrUndefined(record['title']) ?? `Request failed with status ${status}`,
@@ -100,6 +115,7 @@ export function problemFromBody(
     status: typeof record['status'] === 'number' ? record['status'] : status,
     ...(correlationId === undefined ? {} : { correlationId }),
     errors: Array.isArray(rawErrors) ? rawErrors.filter(isFieldError) : [],
+    ...(Object.keys(extensions).length === 0 ? {} : { extensions }),
   };
 }
 

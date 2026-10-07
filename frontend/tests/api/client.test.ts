@@ -6,6 +6,7 @@ import { createApiClient, subscribeUnauthorized } from '@api/client';
 import type { paths as GatewayPaths } from '@api/generated/gateway-browser-session';
 import {
   ProblemError,
+  problemFromBody,
   problemSlug,
   retryAfterSeconds,
   ThrottledError,
@@ -216,6 +217,29 @@ describe('problem helpers', () => {
     );
     expect(problemSlug(undefined)).toBe('unknown');
     expect(problemSlug('about:blank')).toBe('unknown');
+  });
+
+  it('problemFromBody keeps the extension members apart and omits them when there are none', () => {
+    const refused = problemFromBody(
+      {
+        type: 'https://ecommerce.example/problems/price-changed',
+        title: 'Price changed',
+        status: 409,
+        instance: '/api/v1/orders',
+        changedLines: [{ lineId: 'l1' }],
+        currentCartRevision: 'rev-2',
+      },
+      409,
+      undefined,
+    );
+    expect(refused.extensions).toEqual({
+      changedLines: [{ lineId: 'l1' }],
+      currentCartRevision: 'rev-2',
+    });
+    expect(refused).not.toHaveProperty('instance');
+    expect(problemFromBody({ title: 'Plain', status: 400 }, 400, undefined)).not.toHaveProperty(
+      'extensions',
+    );
   });
 
   it('retryAfterSeconds reads delta seconds and HTTP dates, never below one second', () => {
