@@ -25,7 +25,7 @@ import {
 } from './gateway.ts';
 import { pactFor } from './pact.config.ts';
 
-// Storefront → order consumer pact: interactions O1–O5 and O7 of contracts/pact-matrix.md,
+// Storefront → order consumer pact: interactions O1–O8 of contracts/pact-matrix.md,
 // provider states verbatim, driving the real src/api/order.ts with the bearer the gateway injects.
 // `paymentExpiresAt` (the additive field of the order contract) is asserted while the payment is
 // pending (O5, O7) and null once it is approved (O1); a pending checkout is the contract's 202.
@@ -108,7 +108,7 @@ const provider = pactFor('order');
 const shopper = (url: string) =>
   createOrderApi({ baseUrl: url, fetch: asGateway({ bearer: true }) });
 
-describe('storefront → order pact (O1–O5, O7)', () => {
+describe('storefront → order pact (O1–O8)', () => {
   describe('O1 placeOrder', () => {
     it('places an order with an approved payment under a mandatory Idempotency-Key', async () => {
       await provider
@@ -428,6 +428,111 @@ describe('storefront → order pact (O1–O5, O7)', () => {
         })
         .executeTest(async (mockServer) => {
           expect(await shopper(mockServer.url).getOwnOrder(ORDER_1)).toBeNull();
+        });
+    });
+  });
+
+  describe('O6 listOwnOrders', () => {
+    it('lists a page of the own orders, newest first', async () => {
+      await provider
+        .addInteraction()
+        .given('ana@example.com has 3 orders')
+        .uponReceiving('a read of the orders of ana@example.com')
+        .withRequest('GET', ORDERS, (builder) => {
+          builder.headers({ Authorization: bearer() });
+        })
+        .willRespondWith(200, (response) => {
+          response.jsonBody({
+            items: eachLike(order('approved'), 3),
+            page: integer(0),
+            size: integer(20),
+            totalItems: integer(3),
+          });
+        })
+        .executeTest(async (mockServer) => {
+          const page = await shopper(mockServer.url).listOwnOrders();
+          expect(page.totalItems).toBe(3);
+          expect(page.items).toHaveLength(3);
+          expect(page.items[0]?.orderStatus).toBe('placed');
+          expect(page.items[0]?.paymentStatus).toBe('approved');
+        });
+    });
+
+    it('answers an empty page when the shopper has no order', async () => {
+      await provider
+        .addInteraction()
+        .given('ana@example.com has no orders')
+        .uponReceiving('a read of the orders of ana@example.com when there are none')
+        .withRequest('GET', ORDERS, (builder) => {
+          builder.headers({ Authorization: bearer() });
+        })
+        .willRespondWith(200, (response) => {
+          response.jsonBody({
+            items: [],
+            page: integer(0),
+            size: integer(20),
+            totalItems: integer(0),
+          });
+        })
+        .executeTest(async (mockServer) => {
+          const page = await shopper(mockServer.url).listOwnOrders();
+          expect(page.items).toEqual([]);
+        });
+    });
+  });
+
+  describe('O8 cancelOwnOrder', () => {
+    it('cancels a placed order at the shopper request', async () => {
+      await provider
+        .addInteraction()
+        .given(`ana@example.com owns a placed order ${ORDER_1}`)
+        .uponReceiving(`a cancellation of the placed order ${ORDER_1}`)
+        .withRequest('POST', `${ORDERS}/${ORDER_1}/cancellation`, (builder) => {
+          builder.headers({ Authorization: bearer() });
+        })
+        .willRespondWith(200, (response) => {
+          response.jsonBody({
+            ...order('approved'),
+            orderStatus: 'cancelled',
+            paymentStatus: regex('^(approved|pending|failed)$', 'approved'),
+            cancellationReason: 'SHOPPER_REQUEST',
+            paymentAttemptId: like('c2f1d0a9-5b3e-4e7a-9a60-8d1b2c3e4f50'),
+          });
+        })
+        .executeTest(async (mockServer) => {
+          const result = await shopper(mockServer.url).cancelOwnOrder(ORDER_1);
+          expect(result.kind).toBe('cancelled');
+          if (result.kind !== 'cancelled') return;
+          expect(result.order.orderStatus).toBe('cancelled');
+          expect(result.order.cancellationReason).toBe('SHOPPER_REQUEST');
+        });
+    });
+
+    it('refuses a shipped order with 409 order-not-cancellable and the reason', async () => {
+      await provider
+        .addInteraction()
+        .given(`ana@example.com owns a shipped order ${ORDER_1}`)
+        .uponReceiving(`a cancellation of the shipped order ${ORDER_1}`)
+        .withRequest('POST', `${ORDERS}/${ORDER_1}/cancellation`, (builder) => {
+          builder.headers({ Authorization: bearer() });
+        })
+        .willRespondWith(409, (response) => {
+          response
+            .headers({ 'Content-Type': PROBLEM })
+            .jsonBody(
+              problem(
+                'order-not-cancellable',
+                409,
+                'Order cannot be cancelled',
+                'Shoppers can only cancel an order while it is placed; this order is shipped.',
+              ),
+            );
+        })
+        .executeTest(async (mockServer) => {
+          const result = await shopper(mockServer.url).cancelOwnOrder(ORDER_1);
+          expect(result.kind).toBe('notCancellable');
+          if (result.kind !== 'notCancellable') return;
+          expect(result.message).toContain('shipped');
         });
     });
   });

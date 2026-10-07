@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
 import { renderApp } from './render.tsx';
+import { identityServer } from '../msw/identity.ts';
 
 describe('Layout', () => {
   it('exposes the landmarks, the skip link and the cart badge', async () => {
@@ -50,6 +51,7 @@ describe('Layout', () => {
 
   it('signs out through the store and returns to the home page', async () => {
     const user = userEvent.setup();
+    identityServer.signedIn = true;
     const { harness } = renderApp('/account', { kind: 'signedIn', roles: ['shopper'] });
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Your account' }),
@@ -57,7 +59,7 @@ describe('Layout', () => {
     await user.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(await screen.findByRole('link', { name: 'Sign in' })).toBeInTheDocument();
     expect(harness.port.calls).toContain('signOut');
-    expect(screen.getByRole('heading', { level: 1, name: 'Products' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Products' })).toBeInTheDocument();
     expect(harness.sessionStore.current().state).toBe('anonymous');
   });
 
