@@ -60,10 +60,10 @@ function stripQueryAndHash(pathname: string): string {
 
 function matches(templateSegments: readonly string[], pathSegments: readonly string[]): boolean {
   if (templateSegments.length !== pathSegments.length) return false;
-  return templateSegments.every((segment, index) => {
-    const actual = pathSegments[index];
-    return actual !== undefined && (segment === ':id' || segment === actual);
-  });
+  // Same length, so every index has a segment.
+  return templateSegments.every(
+    (segment, index) => segment === ':id' || segment === pathSegments[index],
+  );
 }
 
 export const RouteTemplate = {

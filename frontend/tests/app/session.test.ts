@@ -202,6 +202,22 @@ describe('"session about to end" warning', () => {
       ),
     );
   });
+
+  it('is already on at the exact warning instant and off one millisecond before', () => {
+    const expiresAt = new Date('2026-10-04T10:30:00Z');
+    const signedIn: SessionSummary = { state: 'signedIn', expiresAt, roles: ['shopper'] };
+    expect(sessionEndsSoon(signedIn, warningAt(expiresAt))).toBe(true);
+    expect(sessionEndsSoon(signedIn, new Date(warningAt(expiresAt).getTime() - 1))).toBe(false);
+  });
+
+  it('the page-load probe never retries (a 401 is an answer, not a failure)', () => {
+    const { store } = storeFor(newClient());
+    const options = store.probeQuery();
+    expect(options.retry).toBe(false);
+    expect(options.staleTime).toBe(Infinity);
+    expect(options.gcTime).toBe(Infinity);
+    expect(options.queryKey).toEqual(SESSION_QUERY_KEY);
+  });
 });
 
 describe('session store over the gateway (MSW)', () => {

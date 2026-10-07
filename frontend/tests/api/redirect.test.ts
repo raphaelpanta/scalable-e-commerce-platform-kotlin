@@ -35,6 +35,12 @@ describe('safeNext (contracts/storefront-routes.md redirect rule)', () => {
       '/orders/javascript:x',
       '/%zz',
       'cart',
+      // The raw value must start with `/` even when its decoded form does.
+      '%2Fcart',
+      // Control characters in the query (not whitespace, so the path check alone would pass).
+      '/cart?x=%01',
+      '/cart?x=%7F',
+      '/cart?x=\u0001',
     ];
     for (const candidate of rejected) {
       expect(isSafeNext(candidate), candidate).toBe(false);

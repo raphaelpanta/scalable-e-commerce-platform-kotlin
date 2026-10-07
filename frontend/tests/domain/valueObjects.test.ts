@@ -77,6 +77,10 @@ describe('Email', () => {
   it('rejects empty, too long and malformed addresses', () => {
     expect(Email.parse('   ')).toEqual(err('empty'));
     expect(Email.parse(`${'a'.repeat(EMAIL_MAX_LENGTH)}@x.io`)).toEqual(err('too-long'));
+    for (const malformed of ['a@', 'a@.', 'a@.io', 'a@io.', 'a@b.io c', '@b.io', 'a@@b.io']) {
+      expect(Email.parse(malformed), malformed).toEqual(err('invalid-format'));
+    }
+    expect(Email.parse(`a@${'b'.repeat(EMAIL_MAX_LENGTH - 7)}.io`).ok).toBe(true);
     fc.assert(
       fc.property(
         fc.oneof(
@@ -272,6 +276,29 @@ describe('Address', () => {
         }
       }),
     );
+  });
+
+  it('accepts every bounded field at exactly its maximum length', () => {
+    const atMax = Address.parse({
+      recipientName: 'a'.repeat(ADDRESS_BOUNDS.recipientName.max),
+      line1: 'b'.repeat(ADDRESS_BOUNDS.line1.max),
+      line2: 'c'.repeat(ADDRESS_BOUNDS.line2.max),
+      city: 'd'.repeat(ADDRESS_BOUNDS.city.max),
+      region: 'e'.repeat(ADDRESS_BOUNDS.region.max),
+      postalCode: 'f'.repeat(ADDRESS_BOUNDS.postalCode.max),
+      countryCode: 'BR',
+      label: 'g'.repeat(ADDRESS_BOUNDS.label.max),
+    });
+    expect(atMax.ok).toBe(true);
+    if (atMax.ok) expect(atMax.value.label).toBe('g'.repeat(ADDRESS_BOUNDS.label.max));
+    const oneOver = Address.parse({
+      recipientName: 'a',
+      line1: 'b'.repeat(ADDRESS_BOUNDS.line1.max + 1),
+      city: 'd',
+      postalCode: 'f',
+      countryCode: 'BR',
+    });
+    expect(oneOver).toEqual(err([{ field: 'line1', reason: 'too-long' }]));
   });
 
   it('rejects out-of-bound fields naming each field once', () => {
