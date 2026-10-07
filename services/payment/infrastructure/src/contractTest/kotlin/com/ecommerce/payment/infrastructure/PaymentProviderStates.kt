@@ -2,7 +2,6 @@ package com.ecommerce.payment.infrastructure
 
 import au.com.dius.pact.provider.MessageAndMetadata
 import au.com.dius.pact.provider.PactVerifyProvider
-import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.MessageTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
@@ -15,6 +14,7 @@ import com.ecommerce.payment.infrastructure.messaging.PaymentEnvelopes
 import com.ecommerce.platform.messaging.envelope.EnvelopeFactory
 import com.ecommerce.platform.messaging.envelope.EnvelopeJson
 import com.ecommerce.platform.messaging.envelope.Topic
+import com.ecommerce.platform.testing.JwtFixture
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
@@ -23,19 +23,38 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.annotation.Import
+import org.springframework.test.context.DynamicPropertyRegistry
+import org.springframework.test.context.DynamicPropertySource
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.UUID
 
 private const val APPROVED_AT = "2026-10-02T10:15:01Z"
+
+/** The account a storefront provider state signs in: the subject and role of the bearer the verifier sends. */
+private data class StorefrontCaller(
+    val accountId: UUID,
+    val role: String,
+) {
+    companion object {
+        /** ana@example.com, the shopper of the storefront interactions. */
+        val ANA = StorefrontCaller(UUID.fromString(PactFixtures.ADA), "shopper")
+
+        /** ops@example.com, the operator who reads the simulator rules. */
+        val OPERATOR = StorefrontCaller(UUID.fromString(PactFixtures.OPERATOR), "operator")
+    }
+}
 
 /**
  * Provider side of every pact whose provider is `payment`: the platform probe's health check, the four charge calls of
  * the order service (pact-interactions.md section 2.4) replayed against the running service over HTTP with
- * parameterised provider states, and the payment events consumed by order and notification (section 3.2), each produced
- * from the fixture payments by the outbox's own mapping. Shared by [PaymentProviderVerificationTest] (pacts of
- * `build/pacts`) and [PaymentBrokerVerificationTest] (pacts of the Pact Broker), which only choose the pact source;
- * both are tagged `provider` and run in `contractVerify`.
+ * parameterised provider states, the storefront's reads of payment.yaml (feature 005 pact-matrix.md P1 and P2, the
+ * placeholder bearer replaced by a test token of the signed-in caller, [BearerRewritingTarget]), and the payment events
+ * consumed by order and notification (section 3.2), each produced from the fixture payments by the outbox's own
+ * mapping. Shared by [PaymentProviderVerificationTest] (pacts of `build/pacts`) and [PaymentBrokerVerificationTest]
+ * (pacts of the Pact Broker), which only choose the pact source; both are tagged `provider` and run in
+ * `contractVerify`.
  */
 @SpringBootTest(webEnvironment = RANDOM_PORT, properties = ["management.server.port="])
 @Import(PostgresContainerConfig::class, ContractTestConfig::class)
@@ -49,14 +68,17 @@ abstract class PaymentProviderStates {
     @Autowired
     lateinit var harness: PaymentHarness
 
+    private var caller: StorefrontCaller = StorefrontCaller.ANA
+
     @BeforeEach
     fun target(context: PactVerificationContext?) {
+        caller = StorefrontCaller.ANA
         context?.let {
             it.target =
                 if (it.interaction.isAsynchronousMessage()) {
                     MessageTestTarget(listOf(PaymentProviderStates::class.java.packageName))
                 } else {
-                    HttpTestTarget("localhost", port)
+                    BearerRewritingTarget(port) { "Bearer " + jwt.tokenFor(caller.accountId, listOf(caller.role)) }
                 }
         }
     }
@@ -94,6 +116,31 @@ abstract class PaymentProviderStates {
                 paymentMethodRef = parameters.text("paymentMethodRef"),
             ),
         )
+    }
+
+    // The storefront states of pact-matrix.md "Storefront to payment", named verbatim with the full order id the
+    // storefront sends; the caller is ana@example.com (a shopper) unless the state signs in the operator.
+
+    @State("order 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10 has a declined payment attempt")
+    fun order1HasDeclinedAttempt() {
+        harness.reset()
+        harness.store(PactFixtures.declinedChargeOfOrder1)
+    }
+
+    @State("order 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10 has no payment attempts")
+    fun order1HasNoAttempts() {
+        harness.reset()
+    }
+
+    @State("the simulator rules document version 2 is active")
+    fun simulatorRulesActive() {
+        // The rule document is code (SimulatedPaymentRules.DOCUMENT); only an operator may read it.
+        caller = StorefrontCaller.OPERATOR
+    }
+
+    @State("a shopper ana@example.com is signed in")
+    fun shopperSignedIn() {
+        caller = StorefrontCaller.ANA
     }
 
     // The message states name the fixture payments of pact-interactions.md; the events are built from those
@@ -136,12 +183,21 @@ abstract class PaymentProviderStates {
         )
     }
 
-    private companion object {
-        val ENVELOPES = EnvelopeFactory("payment", Clock.fixed(Instant.parse(APPROVED_AT), ZoneOffset.UTC))
+    companion object {
+        private val ENVELOPES = EnvelopeFactory("payment", Clock.fixed(Instant.parse(APPROVED_AT), ZoneOffset.UTC))
 
-        fun Map<String, Any>.text(name: String): String =
+        /** Signs the bearers of the replayed storefront requests; serves the JWKS the service validates them with. */
+        private val jwt: JwtFixture = JwtFixture().also { it.startJwks() }
+
+        @JvmStatic
+        @DynamicPropertySource
+        fun security(registry: DynamicPropertyRegistry) {
+            registry.add("platform.security.jwks-uri") { jwt.jwksUri }
+        }
+
+        private fun Map<String, Any>.text(name: String): String =
             checkNotNull(this[name]) { "state parameter $name" }.toString()
 
-        fun Map<String, Any>.amount(): Long = (checkNotNull(this["amountMinor"]) as Number).toLong()
+        private fun Map<String, Any>.amount(): Long = (checkNotNull(this["amountMinor"]) as Number).toLong()
     }
 }
