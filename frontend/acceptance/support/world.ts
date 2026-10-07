@@ -10,6 +10,7 @@ import type { Browser, BrowserContext, Page } from 'playwright';
 
 import { type CategoryRef, CatalogueFixtures, type ProductRef } from './catalogue.ts';
 import { MailpitClient } from './mailpit.ts';
+import { ShopperFixtures } from './shopper.ts';
 
 // One Playwright page per scenario against STOREFRONT_URL (the gateway origin), the Mailpit
 // inbox for verification and reset links, the seeded operator of feature 004 and a fresh shopper
@@ -61,12 +62,19 @@ export class StorefrontWorld extends World {
   readonly viewport: ViewportMode;
   /** Catalogue fixtures created through the API as the operator, by alias of the feature file. */
   readonly catalogue: CatalogueFixtures;
+  /** Account fixtures of the scenario's shopper, created through the API (register, verify, cart). */
+  readonly shoppers: ShopperFixtures;
   readonly categories = new Map<string, CategoryRef>();
   readonly products = new Map<string, ProductRef>();
   /** The search term of the scenario, when one was coined. */
   searchTerm: string | undefined;
+  /** A bearer token of the scenario's shopper for API-side fixtures and checks (never the page's). */
+  shopperToken: string | undefined;
+  /** Mailpit message ids seen before the step that awaits a new message. */
+  knownMessages = new Set<string>();
   /** URLs already audited for accessibility in this scenario. */
   readonly audited = new Set<string>();
+  browser: Browser | undefined;
   context: BrowserContext | undefined;
   page: Page | undefined;
 
@@ -79,6 +87,7 @@ export class StorefrontWorld extends World {
     this.shopper = randomShopper();
     this.viewport = env.viewport;
     this.catalogue = new CatalogueFixtures(env.baseUrl, env.operator);
+    this.shoppers = new ShopperFixtures(env.baseUrl, this.mailpit);
   }
 
   category(alias: string): CategoryRef {
@@ -94,13 +103,43 @@ export class StorefrontWorld extends World {
   }
 
   async open(browser: Browser): Promise<Page> {
-    this.context = await browser.newContext({
-      viewport: VIEWPORTS[this.viewport],
-      locale: 'en-US',
-      ...(this.viewport === 'mobile' ? { isMobile: true, hasTouch: true } : {}),
+    this.browser = browser;
+    this.context = await browser.newContext(this.#contextOptions());
+    this.page = await this.context.newPage();
+    return this.page;
+  }
+
+  /**
+   * Closes the browser context and opens a new one with the same cookies (a browser restart on
+   * the same device, US2 scenario 1): the cart cookie survives, the session cookie, without a
+   * `Max-Age`, is dropped like a browser would.
+   */
+  async reopen(): Promise<Page> {
+    if (this.browser === undefined || this.context === undefined) {
+      throw new Error('no browser is open for this scenario');
+    }
+    const state = await this.context.storageState();
+    const kept = state.cookies.filter((cookie) => cookie.expires !== -1);
+    await this.context.close();
+    this.context = await this.browser.newContext({
+      ...this.#contextOptions(),
+      storageState: { cookies: kept, origins: [] },
     });
     this.page = await this.context.newPage();
     return this.page;
+  }
+
+  /** Drops the session cookie (idle expiry, revocation): the next protected call answers 401. */
+  async endSession(): Promise<void> {
+    await this.context?.clearCookies({ name: /^(__Host-)?session$/ });
+  }
+
+  #contextOptions(): Parameters<Browser['newContext']>[0] {
+    return {
+      viewport: VIEWPORTS[this.viewport],
+      locale: 'en-US',
+      ...(this.viewport === 'mobile' ? { isMobile: true, hasTouch: true } : {}),
+    };
   }
 
   /** The current page; every step runs after the Before hook opened it. */
