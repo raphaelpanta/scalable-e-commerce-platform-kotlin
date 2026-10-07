@@ -15,6 +15,21 @@ import java.io.File
 import java.net.URI
 
 private const val ID = "a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
+private const val TELEMETRY_BODY_KIB = 256L
+private const val SESSION_COOKIE_SCHEME = "sessionCookie"
+
+/** The feature 005 telemetry operations (contracts/openapi/telemetry.yaml): not service routes, so listed apart. */
+private val telemetryExpectations =
+    listOf("traces", "logs").map { signal ->
+        Expected(
+            "POST",
+            "/api/v1/telemetry/v1/$signal",
+            "telemetry-$signal",
+            AuthRequirement.ANONYMOUS,
+            Tier.BROWSE,
+            "otel-collector",
+        )
+    }
 
 /** One public operation and the route policy the gateway must apply to it. */
 private data class Expected(
@@ -127,13 +142,20 @@ private val expectations =
 /** Requests that must match no route (deny by default: 404, nothing forwarded). */
 private val unrouted =
     listOf(
-        "GET" to "/internal/accounts/$ID/contact",
-        "GET" to "/internal/catalog/products",
         "POST" to "/internal/payments/charges",
+        "DELETE" to "/internal/accounts/$ID/contact",
+        "GET" to "/api",
         "GET" to "/.well-known/jwks.json",
         "GET" to "/actuator/health",
         "GET" to "/actuator/prometheus",
-        "GET" to "/",
+        "GET" to "/actuator/health/readiness",
+        "HEAD" to "/.well-known/openid-configuration",
+        "POST" to "/",
+        "POST" to "/products/1",
+        "PUT" to "/assets/app-3f9c.js",
+        "GET" to "/api/v1/telemetry/v1/traces",
+        "PUT" to "/api/v1/telemetry/v1/logs",
+        "POST" to "/api/v1/telemetry/v1/metrics",
         "GET" to "/api/v1/unknown",
         "GET" to "/api/v2/catalog/products",
         "DELETE" to "/api/v1/catalog/products/$ID",
@@ -157,9 +179,13 @@ private val unrouted =
 private val repositoryRoot: File =
     generateSequence(File("").absoluteFile) { it.parentFile }.first { File(it, "contracts/openapi").isDirectory }
 
-/** Every (method, path template, anonymous allowed) of the public OpenAPI files. */
+/**
+ * Every (method, path template, anonymous allowed) of the public OpenAPI files. "Anonymous allowed" is null for an
+ * operation secured only by the browser `sessionCookie` scheme (gateway-browser-session.yaml): the cookie stands for
+ * the bearer of the owning contract, so the route's requirement is that contract's, not the cookie file's.
+ */
 @Suppress("UNCHECKED_CAST")
-private fun openApiOperations(): List<Triple<String, String, Boolean>> =
+private fun openApiOperations(): List<Triple<String, String, Boolean?>> =
     File(repositoryRoot, "contracts/openapi").listFiles { file -> file.extension == "yaml" }.orEmpty().flatMap { file ->
         val document = Yaml().load<Map<String, Any?>>(file.readText())
         val defaultSecurity = document["security"] as List<Map<String, Any?>>?
@@ -169,9 +195,16 @@ private fun openApiOperations(): List<Triple<String, String, Boolean>> =
                 .map { (method, operation) ->
                     val security =
                         (operation as Map<String, Any?>)["security"] as List<Map<String, Any?>>? ?: defaultSecurity
-                    Triple(method.uppercase(), path, security.isNullOrEmpty() || security.any { it.isEmpty() })
+                    Triple(method.uppercase(), path, anonymousAllowed(security))
                 }
         }
+    }
+
+private fun anonymousAllowed(security: List<Map<String, Any?>>?): Boolean? =
+    when {
+        security.isNullOrEmpty() || security.any { it.isEmpty() } -> true
+        security.all { it.keys == setOf(SESSION_COOKIE_SCHEME) } -> null
+        else -> false
     }
 
 class RouteTableTest :
@@ -216,29 +249,97 @@ class RouteTableTest :
 
         test("the expectations cover every operation of the public OpenAPI files and their security") {
             val operations = openApiOperations()
+            val covered = expectations + telemetryExpectations
             val missing =
                 operations.filter { (method, template, _) ->
                     val path = template.replace(Regex("\\{[^}]+}"), ID)
-                    expectations.none { it.method == method && it.path == path }
+                    covered.none { it.method == method && it.path == path }
                 }
             missing.shouldBeEmpty()
             operations.forEach { (method, template, anonymousAllowed) ->
                 val path = template.replace(Regex("\\{[^}]+}"), ID)
                 val route = table.match(method, path).shouldNotBeNull()
                 withClue("$method $template") {
-                    (RoutePolicy.from(route.id.orEmpty(), route.metadata).auth == ANON) shouldBe anonymousAllowed
+                    anonymousAllowed?.let {
+                        (RoutePolicy.from(route.id.orEmpty(), route.metadata).auth == ANON) shouldBe
+                            it
+                    }
                 }
             }
         }
 
-        test("only the image registration raises the body limit, to 5 MiB") {
+        test("only the image registration raises the body limit (5 MiB) and only telemetry lowers it (256 KiB)") {
             table.routes
                 .mapNotNull { route ->
-                    RoutePolicy.from(route.id.orEmpty(), route.metadata).maxBodySize?.let {
-                        route.id to
-                            it
+                    RoutePolicy.from(route.id.orEmpty(), route.metadata).maxBodySize?.let { route.id to it }
+                }.shouldBe(
+                    listOf(
+                        "catalog-image-registration" to DataSize.ofMegabytes(5),
+                        "telemetry-traces" to DataSize.ofKilobytes(TELEMETRY_BODY_KIB),
+                        "telemetry-logs" to DataSize.ofKilobytes(TELEMETRY_BODY_KIB),
+                    ),
+                )
+        }
+
+        test(
+            "telemetry routes are anonymous browse-tier POSTs to the collector, rewritten and stripped, never retried",
+        ) {
+            listOf("traces", "logs").forEach { signal ->
+                val route = table.match("POST", "/api/v1/telemetry/v1/$signal").shouldNotBeNull()
+                withClue(signal) {
+                    route.id shouldBe "telemetry-$signal"
+                    route.uri shouldBe URI("http://localhost:4318")
+                    val policy = RoutePolicy.from(route.id.orEmpty(), route.metadata)
+                    policy.auth shouldBe ANON
+                    policy.tier shouldBe Tier.BROWSE
+                    route.filters.map { it.name } shouldBe
+                        listOf("RewritePath", "RemoveRequestHeader", "RemoveRequestHeader")
+                    route.filters.filter { it.name == "RemoveRequestHeader" }.flatMap { it.args.values } shouldBe
+                        listOf("Cookie", "Authorization")
+                    route.filters
+                        .single { it.name == "RewritePath" }
+                        .args.values
+                        .toList() shouldBe
+                        listOf("/api/v1/telemetry/(?<segment>.*)", "/$\\{segment}")
+                }
+            }
+            RouteTable
+                .load(mapOf("OTEL_COLLECTOR_URL" to "http://otel-collector:4318"))
+                .match("POST", "/api/v1/telemetry/v1/traces")
+                .shouldNotBeNull()
+                .uri shouldBe URI("http://otel-collector:4318")
+        }
+
+        test("the storefront catch-all takes every GET and HEAD outside /api, /actuator and /.well-known, last") {
+            val shell =
+                listOf("/", "/products/$ID", "/assets/app-3f9c.js", "/cart", "/apix/y", "/sign-in", "/internal/x")
+            shell.forEach { path ->
+                listOf("GET", "HEAD").forEach { method ->
+                    withClue("$method $path") {
+                        val route = table.match(method, path).shouldNotBeNull()
+                        route.id shouldBe "storefront"
+                        route.uri shouldBe URI("http://localhost:8082")
+                        val policy = RoutePolicy.from(route.id.orEmpty(), route.metadata)
+                        policy.auth shouldBe ANON
+                        policy.tier shouldBe Tier.BROWSE
                     }
-                }.shouldBe(listOf("catalog-image-registration" to DataSize.ofMegabytes(5)))
+                }
+            }
+            val storefront = table.routes.single { it.id == "storefront" }
+            storefront.order shouldBe 1
+            table.routes.filter { it.id != "storefront" }.forEach { it.order shouldBe 0 }
+            table.routes.last().id shouldBe "storefront"
+            storefront.predicates.map { it.name } shouldBe listOf("Path", "NotPath", "Method")
+            storefront.predicates
+                .single { it.name == "NotPath" }
+                .args.values
+                .toList() shouldBe
+                listOf("/api/**", "/actuator/**", "/.well-known/**")
+            RouteTable
+                .load(mapOf("STOREFRONT_URL" to "http://storefront:8080"))
+                .match("GET", "/")
+                .shouldNotBeNull()
+                .uri shouldBe URI("http://storefront:8080")
         }
 
         test("only connection errors are retried: reads everywhere, POST on the identity routes, never checkout") {

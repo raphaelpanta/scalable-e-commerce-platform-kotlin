@@ -1,0 +1,25 @@
+# Test-only overrides for the contract layer, loaded on top of the main application.yml: no OTLP collector runs here,
+# and the Spring context closes in a JVM shutdown hook after Gradle stops capturing output.
+spring:
+  profiles:
+    # The provider verification sets a fixed BROWSER_SESSION_KEY; the profile `test` keeps any other context bootable
+    # without one (BrowserSessionKeys).
+    include: test
+
+management:
+  tracing:
+    export:
+      otlp:
+        enabled: false
+  logging:
+    export:
+      otlp:
+        enabled: false
+  otlp:
+    metrics:
+      export:
+        enabled: false
+
+logging:
+  level:
+    org.springframework.boot.reactor.netty.GracefulShutdown: warn

@@ -145,6 +145,42 @@ class EdgeHttpHandlerDecoratorTest :
             forwarded.getFirst(HttpHeaders.ACCEPT) shouldBe "application/json"
         }
 
+        test("X-Forwarded-Proto https becomes the request scheme before the header is dropped") {
+            val forwarded =
+                handle(
+                    MockServerHttpRequest
+                        .get(
+                            "http://shop.example:8080/api/v1/cart",
+                        ).header("X-Forwarded-Proto", "https")
+                        .build(),
+                ).first.request
+                    .shouldNotBeNull()
+            forwarded.uri.scheme shouldBe "https"
+            forwarded.uri.host shouldBe "shop.example"
+            forwarded.uri.port shouldBe 8080
+            forwarded.uri.path shouldBe "/api/v1/cart"
+            forwarded.headers.getFirst("X-Forwarded-Proto").shouldBeNull()
+
+            handle(
+                MockServerHttpRequest
+                    .get(
+                        "http://shop.example/api/v1/cart",
+                    ).header("X-Forwarded-Proto", "http")
+                    .build(),
+            ).first.request
+                .shouldNotBeNull()
+                .uri.scheme shouldBe "http"
+            handle(MockServerHttpRequest.get("https://shop.example/api/v1/cart").build())
+                .first.request
+                .shouldNotBeNull()
+                .uri.scheme shouldBe "https"
+            handle(MockServerHttpRequest.get("http://shop.example/api/v1/cart?x=1").build())
+                .first.request
+                .shouldNotBeNull()
+                .uri
+                .toString() shouldBe "http://shop.example/api/v1/cart?x=1"
+        }
+
         test("responses carry the security headers and lose server details and internal headers") {
             val headers = handle(MockServerHttpRequest.get("/api/v1/cart").build()).second.headers
             EdgeHeaders.SECURITY.forEach { (name, value) -> headers.getFirst(name) shouldBe value }

@@ -1,5 +1,6 @@
 package com.ecommerce.gateway.web
 
+import com.ecommerce.gateway.browser.Transport
 import com.ecommerce.gateway.correlation.CorrelationIds
 import io.micrometer.context.ContextRegistry
 import org.slf4j.Logger
@@ -10,6 +11,7 @@ import org.springframework.http.server.reactive.HttpHandlerDecoratorFactory
 import org.springframework.http.server.reactive.ServerHttpRequest
 import org.springframework.http.server.reactive.ServerHttpResponse
 import org.springframework.stereotype.Component
+import org.springframework.web.util.UriComponentsBuilder
 import reactor.core.publisher.Mono
 import reactor.util.context.Context
 import java.util.concurrent.TimeUnit
@@ -40,12 +42,27 @@ class EdgeHttpHandlerDecorator : HttpHandlerDecoratorFactory {
         val started = System.nanoTime()
         val correlation = CorrelationIds.resolve(request.headers.getFirst(CorrelationIds.HEADER))
         val trace = RequestTrace()
+        val transport = Transport.of(request.uri.scheme, request.headers.getFirst(Transport.FORWARDED_PROTO))
         val sanitised =
             request
                 .mutate()
                 .headers { headers ->
                     EdgeHeaders.stripClientSupplied(headers)
                     headers.set(CorrelationIds.HEADER, correlation.id)
+                }.apply {
+                    // `X-Forwarded-Proto: https` (a TLS terminator in front) is kept as the request scheme, so the
+                    // browser-session filters pick the `__Host-` cookie names after the header itself is dropped.
+                    if (transport == Transport.HTTPS &&
+                        !request.uri.scheme.equals(Transport.HTTPS_SCHEME, ignoreCase = true)
+                    ) {
+                        uri(
+                            UriComponentsBuilder
+                                .fromUri(request.uri)
+                                .scheme(Transport.HTTPS_SCHEME)
+                                .build(true)
+                                .toUri(),
+                        )
+                    }
                 }.build()
         response.headers.set(CorrelationIds.HEADER, correlation.id)
         response.beforeCommit {

@@ -47,6 +47,20 @@ class RouteAccessFilterTest :
             forwardedBy(exchange) shouldBeSameInstanceAs exchange
         }
 
+        test("a bearer unsealed from the session cookie counts as the caller, before the resource server's principal") {
+            val exchange = exchange(route = shopperRoute)
+            exchange.attributes[BROWSER_AUTHENTICATION_ATTRIBUTE] = authenticated(ACCOUNT, listOf("shopper"))
+            val forwarded = forwardedBy(exchange)
+            forwarded.request.headers.getFirst(EdgeHeaders.ACCOUNT_ID) shouldBe ACCOUNT
+            forwarded.request.headers.getFirst(EdgeHeaders.ROLES) shouldBe "shopper"
+            exchange.getAttribute<Caller>(CALLER_ATTRIBUTE) shouldBe Caller(ACCOUNT, setOf("shopper"))
+            committedHeaders(exchange).getFirst(HttpHeaders.CACHE_CONTROL) shouldBe EdgeHeaders.NO_STORE
+
+            val anonymous = exchange(route = shopperRoute, principal = authenticated(ACCOUNT, listOf("shopper")))
+            anonymous.attributes[BROWSER_AUTHENTICATION_ATTRIBUTE] = Principal { "cookie-user" }
+            refusal(anonymous) shouldBe GatewayProblem.UNAUTHORIZED
+        }
+
         test("an anonymous call on an anonymous route passes unchanged and stays cacheable") {
             val exchange = exchange(route = anonymous)
             exchange.response.headers.set(HttpHeaders.EXPIRES, "0")

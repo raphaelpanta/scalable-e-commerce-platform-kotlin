@@ -168,6 +168,21 @@ class ProblemWebExceptionHandlerTest :
             exchange.response.headers.getFirst(HttpHeaders.WWW_AUTHENTICATE) shouldBe "Bearer"
         }
 
+        test("a problem's cookies become Set-Cookie headers, one each, after the earlier headers were dropped") {
+            val exchange = exchange()
+            exchange.response.headers.add(HttpHeaders.SET_COOKIE, "session=stale; Path=/")
+            val deletions =
+                listOf(
+                    "__Host-session=; Max-Age=0; HttpOnly; Secure; SameSite=Strict; Path=/",
+                    "session=; Max-Age=0; HttpOnly; SameSite=Strict; Path=/",
+                )
+            val error = GatewayProblemException(GatewayProblem.UNAUTHORIZED, cookies = deletions)
+            error.cookies shouldBe deletions
+            handler.handle(exchange, error).block()
+            exchange.response.headers[HttpHeaders.SET_COOKIE] shouldBe deletions
+            GatewayProblemException(GatewayProblem.THROTTLED).cookies shouldBe emptyList()
+        }
+
         test("a request without correlation header still gets the field, empty") {
             val exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/x"))
             handler.handle(exchange, ResponseStatusException(HttpStatus.NOT_FOUND)).block()

@@ -38,18 +38,31 @@ object RfcKey {
             .getInstance(Ed25519.ALGORITHM)
             .generatePrivate(PKCS8EncodedKeySpec(PKCS8_PREFIX + Base64URL(D).decode()))
 
-    /** A 15-minute shopper token with the claims of the shared token contract, signed under [kid]. */
-    fun token(kid: String): String {
-        val now = Instant.now()
+    /** The public half of the key, `x` of RFC 8037 A.1 (the first JWKS example of pact-interactions.md). */
+    const val PUBLIC_X = "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"
+
+    /** The JWK Set identity would publish for this key under [kid]. */
+    fun jwks(kid: String): String =
+        """{"keys":[{"kty":"OKP","crv":"Ed25519","kid":"$kid","x":"$PUBLIC_X","use":"sig","alg":"EdDSA"}]}"""
+
+    /**
+     * A 15-minute token with the claims of the shared token contract, signed under [kid]; [issuedAt] moves the
+     * lifetime (an access token about to expire for the refresh-ahead states).
+     */
+    fun token(
+        kid: String,
+        issuedAt: Instant = Instant.now(),
+        roles: List<String> = listOf("shopper"),
+    ): String {
         val claims =
             JWTClaimsSet
                 .Builder()
                 .subject(SUBJECT)
-                .claim("roles", listOf("shopper"))
+                .claim("roles", roles)
                 .issuer(ISSUER)
                 .audience(AUDIENCE)
-                .issueTime(Date.from(now))
-                .expirationTime(Date.from(now.plus(LIFETIME)))
+                .issueTime(Date.from(issuedAt))
+                .expirationTime(Date.from(issuedAt.plus(LIFETIME)))
                 .jwtID(UUID.randomUUID().toString())
                 .build()
         val header =

@@ -17,6 +17,13 @@ import java.security.Principal
 const val CALLER_ATTRIBUTE = "com.ecommerce.gateway.caller"
 
 /**
+ * Exchange attribute holding the [JwtAuthenticationToken] of a bearer the browser-session filter unsealed from the
+ * session cookie and verified; it replaces the (anonymous) principal the resource server saw before the cookie was
+ * read.
+ */
+const val BROWSER_AUTHENTICATION_ATTRIBUTE = "com.ecommerce.gateway.browserAuthentication"
+
+/**
  * Applies the auth requirement the matched route declares (401 without a token, 403 without the role), then
  * forwards the validated identity as `X-Account-Id` and `X-Roles` (client copies were dropped at the edge) and marks
  * responses of authenticated calls `Cache-Control: no-store`. The bearer token itself is forwarded too: every
@@ -35,8 +42,9 @@ class RouteAccessFilter(
         chain: GatewayFilterChain,
     ): Mono<Void> {
         val policy = policies.of(exchange) ?: return chain.filter(exchange)
-        return exchange
-            .getPrincipal<Principal>()
+        val fromCookie = exchange.getAttribute<Principal>(BROWSER_AUTHENTICATION_ATTRIBUTE)
+        val principal = fromCookie?.let { Mono.just(it) } ?: exchange.getPrincipal()
+        return principal
             .mapNotNull { principal -> (principal as? JwtAuthenticationToken)?.let(::callerOf) }
             .map { listOf(it) }
             .defaultIfEmpty(emptyList())

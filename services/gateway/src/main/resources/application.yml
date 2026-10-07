@@ -231,6 +231,39 @@ spring:
                 - Path=/api/v1/notifications
                 - Method=GET
               metadata: { auth: shopper, tier: standard, response-timeout: 10000 }
+            # --- browser telemetry (feature 005, contracts/openapi/telemetry.yaml) -------------------------------
+            # Anonymous OTLP/HTTP JSON from the storefront to the collector's receiver: `POST` only, 256 KiB bodies,
+            # cookies and tokens stripped, path prefix /api/v1/telemetry rewritten away, never retried (a missing
+            # collector answers 503 and the browser drops the batch).
+            - id: telemetry-traces
+              uri: ${OTEL_COLLECTOR_URL:http://localhost:4318}
+              predicates:
+                - Path=/api/v1/telemetry/v1/traces
+                - Method=POST
+              filters: &telemetry-filters
+                - RewritePath=/api/v1/telemetry/(?<segment>.*), /$\{segment}
+                - RemoveRequestHeader=Cookie
+                - RemoveRequestHeader=Authorization
+              metadata: { auth: anonymous, tier: browse, max-body-size: 256KB, response-timeout: 5000 }
+            - id: telemetry-logs
+              uri: ${OTEL_COLLECTOR_URL:http://localhost:4318}
+              predicates:
+                - Path=/api/v1/telemetry/v1/logs
+                - Method=POST
+              filters: *telemetry-filters
+              metadata: { auth: anonymous, tier: browse, max-body-size: 256KB, response-timeout: 5000 }
+            # --- storefront shell (feature 005, contracts/gateway-routes.md) ------------------------------------
+            # Every GET/HEAD outside /api/, /actuator/ and /.well-known/ goes to the static container (SPA shell and
+            # hashed assets); ordered after every API route. Unknown paths under those prefixes, and every non-GET
+            # elsewhere, keep answering 404. No session cookie processing; the storefront CSP replaces the API one.
+            - id: storefront
+              uri: ${STOREFRONT_URL:http://localhost:8082}
+              order: 1
+              predicates:
+                - Path=/**
+                - NotPath=/api/**,/actuator/**,/.well-known/**
+                - Method=GET,HEAD
+              metadata: { auth: anonymous, tier: browse, response-timeout: 5000 }
 
 gateway:
   jwt:
@@ -249,6 +282,15 @@ gateway:
       checkout: 20
       operator: 300
   max-body-size: 1MB
+  # Browser session of the storefront (feature 005, docs/gateway.md "Browser session"): the sealing key is required
+  # outside the dev/test profiles (BrowserSessionKeys), identity rotates the refresh tokens.
+  browser-session:
+    key: ${BROWSER_SESSION_KEY:}
+    identity-url: ${IDENTITY_URL:http://localhost:8080}
+    idle-timeout: 30m
+    refresh-ahead: 60s
+    cart-cookie-max-age: 30d
+    refresh-timeout: 5s
 
 server:
   port: 8080
