@@ -122,8 +122,8 @@
 
 ### Provider change (order) for User Story 2
 
-- [ ] T045 [P] [US2] Add `paymentExpiresAt` (date-time, present iff `paymentStatus` is `pending`) to the `Order` schema in `specs/004-ecommerce-platform-mvp/contracts/openapi/order.yaml` and `contracts/openapi/order.yaml` (additive; description: "end of the payment window configured by the order service"), and to the order's own provider state fixtures
-- [ ] T046 [US2] Implement `paymentExpiresAt` in the order service: expose the existing payment window deadline (`Order.place(placement, paymentWindow)` already computes it; add it to the order read model and HTTP response in `services/order/infrastructure/src/main/kotlin/.../web/OrderResponses.kt` or equivalent), property test in `services/order/domain/src/test/...` that the value equals placement time plus the configured window and is absent once payment is final, contract conformance check in `services/order/infrastructure/src/integrationTest/.../OrderContractConformanceIT.kt`; `./gradlew -q :services:order:infrastructure:integrationTest`
+- [X] T045 [P] [US2] Add `paymentExpiresAt` (date-time, present iff `paymentStatus` is `pending`) to the `Order` schema in `specs/004-ecommerce-platform-mvp/contracts/openapi/order.yaml` and `contracts/openapi/order.yaml` (additive; description: "end of the payment window configured by the order service"), and to the order's own provider state fixtures
+- [X] T046 [US2] Implement `paymentExpiresAt` in the order service: expose the existing payment window deadline (`Order.place(placement, paymentWindow)` already computes it; add it to the order read model and HTTP response in `services/order/infrastructure/src/main/kotlin/.../web/OrderResponses.kt` or equivalent), property test in `services/order/domain/src/test/...` that the value equals placement time plus the configured window and is absent once payment is final, contract conformance check in `services/order/infrastructure/src/integrationTest/.../OrderContractConformanceIT.kt`; `./gradlew -q :services:order:infrastructure:integrationTest`
 
 ### Tests for User Story 2
 

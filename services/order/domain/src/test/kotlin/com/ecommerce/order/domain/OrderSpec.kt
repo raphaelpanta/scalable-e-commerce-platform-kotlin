@@ -236,6 +236,17 @@ class OrderSpec :
             }
         }
 
+        test("the payment deadline is placement plus the window exactly while the payment is pending") {
+            checkAll(Arb.long(1L..7_200L), Arb.list(arbStep, 0..12)) { seconds, steps ->
+                val window = Duration.ofSeconds(seconds)
+                val placed = checkNotNull(Order.place(placement(), window).getOrNull()).order
+                val order = steps.fold(placed) { current, step -> step(current) }
+
+                (order.paymentExpiresAt != null) shouldBe (order.paymentStatus == PaymentStatus.PENDING)
+                order.paymentExpiresAt?.let { it shouldBe order.placedAt.plus(window) }
+            }
+        }
+
         test("every sequence of commands keeps the invariants and an append-only history") {
             checkAll(Arb.list(arbStep, 1..12)) { steps ->
                 steps.fold(placed()) { order, step ->
