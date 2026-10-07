@@ -18,14 +18,22 @@ pitest {
     // - SecurityConfiguration: the Spring Security DSL (GatewayRoutingIT: 401/403/503 answers);
     // - OpenTelemetryAppenderInstaller: hands the OpenTelemetry bean to the Logback appender;
     // - JwksClient: WebClient fetch and Reactor cache of the JWK Set (JwksClientIT, JwksUnavailableIT against
-    //   WireMock; IdentityJwksPactTest against the identity contract).
+    //   WireMock; IdentityJwksPactTest against the identity contract);
+    // - BrowserSessionConfiguration: the browser-session beans (feature 005), booted by BrowserSessionIT;
+    // - IdentityRefreshClient: the WebClient call that rotates refresh tokens (BrowserSessionIT against WireMock).
     excludedClasses.addAll(
         "com.ecommerce.gateway.GatewayApplication*",
         "com.ecommerce.gateway.security.SecurityConfiguration*",
         "com.ecommerce.gateway.observability.OpenTelemetryAppenderInstaller*",
         "com.ecommerce.gateway.security.JwksClient*",
+        "com.ecommerce.gateway.browser.BrowserSessionConfiguration*",
+        "com.ecommerce.gateway.browser.IdentityRefreshClient*",
     )
 }
+
+// Contract layer (feature 005, T024): besides the consumer test of identity's JWKS, the gateway is the provider of
+// the storefront pact (`build/pacts/storefront-gateway.json`): StorefrontGatewayProviderIT, tagged `provider`, runs in
+// `contractVerify` after every consumer, as the services' provider verifications do (pact convention plugin).
 
 dependencies {
     implementation(platform(libs.spring.cloud.bom))

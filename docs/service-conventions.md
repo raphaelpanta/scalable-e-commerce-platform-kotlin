@@ -50,6 +50,9 @@ clients read only `status`. The image `HEALTHCHECK`, the Compose health check, t
 | `JWT_AUDIENCE` | identity, gateway, services | default `ecommerce-api` |
 | `IDENTITY_URL`, `CATALOG_URL`, `CART_URL`, `ORDER_URL`, `PAYMENT_URL`, `NOTIFICATION_URL` | internal HTTP clients, gateway routes | default `http://localhost:8080`; Compose `http://<ctx>:8080` |
 | `IDENTITY_SIGNING_KEY` | identity | Ed25519 PKCS#8 private key (DER, base64) shared by every identity replica; **required** outside the `dev`/`test` profiles; generated into `.env` by the compose scripts |
+| `BROWSER_SESSION_KEY` | gateway | AES-256-GCM key sealing the storefront's session and cart cookies (feature 005): 32 random bytes, Base64 (`openssl rand -base64 32`), shared by every gateway replica (rotating it signs every browser out); **required** outside the `dev`/`test` profiles, which generate a per-process key; the gateway refuses to start with a value that does not decode to exactly 32 bytes; generated into `platform/compose/.env` by `scripts/dev-env.sh`, never committed, logged or echoed (`docs/gateway.md`, "Browser session") |
+| `STOREFRONT_URL` | gateway | upstream of the `storefront` catch-all route (the static container); default `http://localhost:8082` outside Compose, Compose `http://storefront:8080` |
+| `OTEL_COLLECTOR_URL` | gateway | upstream of the browser telemetry routes `telemetry-traces`/`telemetry-logs` (the collector's OTLP/HTTP receiver, no path); default `http://localhost:4318`, Compose `http://otel-collector:4318` |
 | `INTERNAL_API_TOKEN` | services with `/internal/**` endpoints and their clients | shared secret sent as `X-Internal-Token`; **no committed default** |
 | `PLATFORM_CURRENCY` | all | `BRL` |
 | `PUBLIC_BASE_URL` | notification | base of links in messages, default `http://localhost:8080` |

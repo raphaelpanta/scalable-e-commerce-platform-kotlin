@@ -41,6 +41,7 @@ class CartCookieFilterTest :
         val merge = route("cart-merge", metadata("authenticated", "standard"))
         val storefront = route("storefront", metadata("anonymous", "browse"))
 
+        @Suppress("LongParameterList") // one optional knob per request part the cart rules read
         fun request(
             method: String = "GET",
             path: String = "/api/v1/cart",

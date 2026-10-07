@@ -141,14 +141,36 @@ class SealedSessionSpec :
                     SealedSession("a", "r", "id", setOf("shopper"), Instant.EPOCH, Instant.EPOCH),
                 )
             SessionCodec.decode(valid).shouldNotBeNull()
+            val epoch = "\"1970-01-01T00:00:00Z\""
+            val complete =
+                mapOf(
+                    "accessToken" to "\"a\"",
+                    "refreshToken" to "\"r\"",
+                    "accountId" to "\"id\"",
+                    "roles" to "[\"shopper\"]",
+                    "lastSeenAt" to epoch,
+                    "issuedAt" to epoch,
+                )
+
+            /** The complete payload with [overrides] replacing members (an empty value removes one). */
+            fun payload(vararg overrides: Pair<String, String>): String =
+                (complete + overrides)
+                    .filterValues(String::isNotEmpty)
+                    .entries
+                    .joinToString(",", "{", "}") { (name, value) -> "\"$name\":$value" }
+            SessionCodec.decode(payload().toByteArray()).shouldNotBeNull()
             listOf(
                 "[]",
                 "{",
                 "{}",
-                """{"accessToken":"a","refreshToken":"r","accountId":"id","roles":["shopper"],"lastSeenAt":"x","issuedAt":"1970-01-01T00:00:00Z"}""",
-                """{"accessToken":"a","refreshToken":"r","accountId":"id","roles":[1],"lastSeenAt":"1970-01-01T00:00:00Z","issuedAt":"1970-01-01T00:00:00Z"}""",
-                """{"accessToken":"a","refreshToken":"r","accountId":"id","roles":"shopper","lastSeenAt":"1970-01-01T00:00:00Z","issuedAt":"1970-01-01T00:00:00Z"}""",
-                """{"accessToken":1,"refreshToken":"r","accountId":"id","roles":[],"lastSeenAt":"1970-01-01T00:00:00Z","issuedAt":"1970-01-01T00:00:00Z"}""",
+                payload("lastSeenAt" to "\"x\""),
+                payload("issuedAt" to "null"),
+                payload("roles" to "[1]"),
+                payload("roles" to "\"shopper\""),
+                payload("roles" to ""),
+                payload("accessToken" to "1"),
+                payload("refreshToken" to ""),
+                payload("accountId" to "{}"),
             ).forEach { json -> SessionCodec.decode(json.toByteArray()).shouldBeNull() }
         }
 

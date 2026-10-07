@@ -126,6 +126,7 @@ class BrowserSessionFilterTest :
             lastSeenAt: Instant = NOW,
         ) = SealedSession(access, "refresh-1", ACCOUNT, setOf("shopper"), lastSeenAt, NOW.minus(IDLE))
 
+        @Suppress("LongParameterList") // one optional knob per request part the decision table reads
         fun request(
             method: String = "GET",
             path: String = "/api/v1/identity/accounts/me",
@@ -341,9 +342,16 @@ class BrowserSessionFilterTest :
                     method = "POST",
                     path = "/api/v1/identity/sessions",
                     cookie = null,
-                ) { header(BROWSER_SESSION_HEADER, "cookie") }
+                ) {
+                    header(BROWSER_SESSION_HEADER, "cookie")
+                    header(HttpHeaders.ACCEPT_ENCODING, "gzip")
+                }
             val exchange = exchange(signIn, credentials)
             val forwarded = forwarded(exchange)
+            // The body is rewritten here, so identity is asked for an uncompressed one.
+            forwarded.request.headers
+                .getFirst(HttpHeaders.ACCEPT_ENCODING)
+                .shouldBeNull()
             forwarded.response.statusCode = HttpStatus.OK
             val access = accessToken()
             val body = tokenPairBody(access, "refresh-9").toByteArray()
@@ -415,12 +423,18 @@ class BrowserSessionFilterTest :
                 request(
                     method = "POST",
                     path = "/api/v1/identity/sessions/refresh",
-                ) { header(BROWSER_SESSION_HEADER, "cookie") }
+                ) {
+                    header(BROWSER_SESSION_HEADER, "cookie")
+                    header(HttpHeaders.ACCEPT_ENCODING, "gzip")
+                }
             val exchange = exchange(refresh, credentials)
             val forwarded = forwarded(exchange)
             val sent = DataBufferUtils.join(forwarded.request.body).block().shouldNotBeNull()
             String(ByteArray(sent.readableByteCount()).also(sent::read)) shouldBe """{"refreshToken":"refresh-1"}"""
             forwarded.request.headers.contentType shouldBe MediaType.APPLICATION_JSON
+            forwarded.request.headers
+                .getFirst(HttpHeaders.ACCEPT_ENCODING)
+                .shouldBeNull()
             forwarded.request.headers
                 .getFirst(HttpHeaders.AUTHORIZATION)
                 .shouldBeNull()

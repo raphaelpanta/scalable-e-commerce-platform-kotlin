@@ -19,6 +19,14 @@ instances can be added or removed without changing gateway configuration (FR-024
 | `/api/v1/payments/` | `payment` | operator or owning shopper (attempts, refunds); operator only for `/simulator/rules` | `standard` |
 | `/api/v1/notifications/` | `notification` | shopper (own list); operator for `/failed` and `/{id}/retry` | `standard`, `operator` for operator calls |
 | `/actuator/health`, `/actuator/prometheus` | not routed | not public | not applicable |
+| `POST /api/v1/telemetry/v1/traces` (route `telemetry-traces`, feature 005) | `otel-collector` (`OTEL_COLLECTOR_URL`, path rewritten to `/v1/traces`) | anonymous; `Cookie` and `Authorization` stripped | `browse` (per source address), 256 KiB body limit, never retried |
+| `POST /api/v1/telemetry/v1/logs` (route `telemetry-logs`, feature 005) | `otel-collector` (`OTEL_COLLECTOR_URL`, path rewritten to `/v1/logs`) | anonymous; `Cookie` and `Authorization` stripped | `browse` (per source address), 256 KiB body limit, never retried |
+| `GET`/`HEAD` on every path outside `/api/`, `/actuator/` and `/.well-known/` (route `storefront`, feature 005, ordered last) | `storefront` (`STOREFRONT_URL`) | anonymous; no session cookie processing; storefront CSP instead of the API one | `browse` |
+
+The three rows above are additions of feature 005: their behaviour (cookies, telemetry limits, catch-all exclusions
+and headers) is specified in
+[`specs/005-storefront-dev-bootstrap/contracts/gateway-routes.md`](../../005-storefront-dev-bootstrap/contracts/gateway-routes.md);
+every other row and rule of this file stays in force.
 
 Notes:
 

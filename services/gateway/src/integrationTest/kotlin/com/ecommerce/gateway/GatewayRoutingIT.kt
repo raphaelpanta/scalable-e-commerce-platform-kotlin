@@ -137,7 +137,9 @@ class GatewayRoutingIT(
 
     @Test
     fun `internal, JWKS and actuator paths are not routed`() {
-        listOf(JWKS_PATH, "/actuator/health", "/actuator/prometheus", "/.well-known/openid-configuration").forEach { path ->
+        val notRouted =
+            listOf(JWKS_PATH, "/actuator/health", "/actuator/prometheus", "/.well-known/openid-configuration")
+        notRouted.forEach { path ->
             client
                 .get()
                 .uri(path)

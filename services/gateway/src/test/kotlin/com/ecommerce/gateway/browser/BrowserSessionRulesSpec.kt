@@ -1,6 +1,9 @@
 package com.ecommerce.gateway.browser
 
+import com.ecommerce.gateway.security.UNIT_SUBJECT
+import com.ecommerce.gateway.security.UnitSigningKey
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import io.kotest.property.Arb
@@ -289,6 +292,16 @@ class BrowserSessionRulesSpec :
             listOf("[]", "{}", """{"accessToken":"a"}""", """{"accessToken":1,"refreshToken":"r"}""", "nope").forEach {
                 SessionJson.tokenPair(it.toByteArray()) shouldBe null
             }
+        }
+
+        test("the claims of a token signed like identity's are read: subject, roles and expiry") {
+            val signed = UnitSigningKey().token()
+            val claims = AccessTokenClaims.parse(signed).shouldNotBeNull()
+            claims.subject shouldBe UNIT_SUBJECT
+            claims.roles shouldBe setOf("shopper")
+            claims.expiresAt.isAfter(Instant.now()) shouldBe true
+            SessionJson.tokenPair("""{"accessToken":"$signed","refreshToken":"r"}""".toByteArray()) shouldBe
+                TokenPair(signed, "r")
         }
 
         test("a safe method is GET, HEAD or OPTIONS in any case") {

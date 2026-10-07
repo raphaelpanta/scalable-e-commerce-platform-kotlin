@@ -185,7 +185,11 @@ class BrowserSessionFilter(
             SessionSummaryResponse(exchange.response, transport, sealer, rules.idleTimeout) { tokens, claims ->
                 SealedSession.issued(tokens, claims, clock.instant())
             }
-        return exchange.mutate().response(response).build()
+        return exchange
+            .mutate()
+            .request(withoutContentCoding(exchange.request))
+            .response(response)
+            .build()
     }
 
     /** Refresh in browser mode: the body is identity's `RefreshRequest` built from the cookie; 200 renews it. */
@@ -204,6 +208,7 @@ class BrowserSessionFilter(
                         headers.contentLength = body.size.toLong()
                         headers.remove(HttpHeaders.TRANSFER_ENCODING)
                         headers.remove(HttpHeaders.CONTENT_ENCODING)
+                        headers.remove(HttpHeaders.ACCEPT_ENCODING)
                     }
                 }.build()
         val request =
@@ -268,5 +273,9 @@ class BrowserSessionFilter(
             request: ServerHttpRequest,
             accessToken: String,
         ): ServerHttpRequest = request.mutate().header(HttpHeaders.AUTHORIZATION, "Bearer $accessToken").build()
+
+        /** The gateway rewrites this response's body, so identity must not compress it for the browser. */
+        private fun withoutContentCoding(request: ServerHttpRequest): ServerHttpRequest =
+            request.mutate().headers { headers -> headers.remove(HttpHeaders.ACCEPT_ENCODING) }.build()
     }
 }

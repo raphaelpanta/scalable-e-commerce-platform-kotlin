@@ -16,6 +16,20 @@ import java.net.URI
 
 private const val ID = "a1b2c3d4-5e6f-4a7b-8c9d-0e1f2a3b4c5d"
 private const val TELEMETRY_BODY_KIB = 256L
+private const val SESSION_COOKIE_SCHEME = "sessionCookie"
+
+/** The feature 005 telemetry operations (contracts/openapi/telemetry.yaml): not service routes, so listed apart. */
+private val telemetryExpectations =
+    listOf("traces", "logs").map { signal ->
+        Expected(
+            "POST",
+            "/api/v1/telemetry/v1/$signal",
+            "telemetry-$signal",
+            AuthRequirement.ANONYMOUS,
+            Tier.BROWSE,
+            "otel-collector",
+        )
+    }
 
 /** One public operation and the route policy the gateway must apply to it. */
 private data class Expected(
@@ -165,9 +179,13 @@ private val unrouted =
 private val repositoryRoot: File =
     generateSequence(File("").absoluteFile) { it.parentFile }.first { File(it, "contracts/openapi").isDirectory }
 
-/** Every (method, path template, anonymous allowed) of the public OpenAPI files. */
+/**
+ * Every (method, path template, anonymous allowed) of the public OpenAPI files. "Anonymous allowed" is null for an
+ * operation secured only by the browser `sessionCookie` scheme (gateway-browser-session.yaml): the cookie stands for
+ * the bearer of the owning contract, so the route's requirement is that contract's, not the cookie file's.
+ */
 @Suppress("UNCHECKED_CAST")
-private fun openApiOperations(): List<Triple<String, String, Boolean>> =
+private fun openApiOperations(): List<Triple<String, String, Boolean?>> =
     File(repositoryRoot, "contracts/openapi").listFiles { file -> file.extension == "yaml" }.orEmpty().flatMap { file ->
         val document = Yaml().load<Map<String, Any?>>(file.readText())
         val defaultSecurity = document["security"] as List<Map<String, Any?>>?
@@ -177,9 +195,16 @@ private fun openApiOperations(): List<Triple<String, String, Boolean>> =
                 .map { (method, operation) ->
                     val security =
                         (operation as Map<String, Any?>)["security"] as List<Map<String, Any?>>? ?: defaultSecurity
-                    Triple(method.uppercase(), path, security.isNullOrEmpty() || security.any { it.isEmpty() })
+                    Triple(method.uppercase(), path, anonymousAllowed(security))
                 }
         }
+    }
+
+private fun anonymousAllowed(security: List<Map<String, Any?>>?): Boolean? =
+    when {
+        security.isNullOrEmpty() || security.any { it.isEmpty() } -> true
+        security.all { it.keys == setOf(SESSION_COOKIE_SCHEME) } -> null
+        else -> false
     }
 
 class RouteTableTest :
@@ -224,17 +249,21 @@ class RouteTableTest :
 
         test("the expectations cover every operation of the public OpenAPI files and their security") {
             val operations = openApiOperations()
+            val covered = expectations + telemetryExpectations
             val missing =
                 operations.filter { (method, template, _) ->
                     val path = template.replace(Regex("\\{[^}]+}"), ID)
-                    expectations.none { it.method == method && it.path == path }
+                    covered.none { it.method == method && it.path == path }
                 }
             missing.shouldBeEmpty()
             operations.forEach { (method, template, anonymousAllowed) ->
                 val path = template.replace(Regex("\\{[^}]+}"), ID)
                 val route = table.match(method, path).shouldNotBeNull()
                 withClue("$method $template") {
-                    (RoutePolicy.from(route.id.orEmpty(), route.metadata).auth == ANON) shouldBe anonymousAllowed
+                    anonymousAllowed?.let {
+                        (RoutePolicy.from(route.id.orEmpty(), route.metadata).auth == ANON) shouldBe
+                            it
+                    }
                 }
             }
         }

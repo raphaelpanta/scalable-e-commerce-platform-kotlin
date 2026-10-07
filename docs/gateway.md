@@ -53,6 +53,8 @@ A route without `auth`/`tier`, with an unknown value or with another timeout sto
 | `notification-failed` | GET `notifications/failed` | operator | operator |
 | `notification-retry` | POST `notifications/{id}/retry` | operator | operator |
 | `notification-list` | GET `notifications` | shopper | standard |
+| `telemetry-traces`, `telemetry-logs` (feature 005) | POST `telemetry/v1/traces`, `telemetry/v1/logs`, rewritten to the collector's `/v1/traces`, `/v1/logs`; `Cookie` and `Authorization` removed; body up to 256 KiB; never retried | anonymous | browse |
+| `storefront` (feature 005) | GET, HEAD on every path outside `/api/`, `/actuator/` and `/.well-known/` (`Path=/**` with the `NotPath` predicate), `order: 1` so it is tried after every API route | anonymous | browse |
 
 Where `gateway-routes.md` says "shopper" but the OpenAPI operation accepts "shopper or operator" (profile,
 addresses, cart merge, reading one order, payments), the route is `authenticated` and the service decides; every
@@ -66,8 +68,12 @@ mail flooding and token guessing. All of them share one budget per source addres
 accounts from one address (the acceptance suite, the performance run) raise
 `GATEWAY_RATELIMIT_REQUESTSPERMINUTE_AUTH` locally (`platform/perf/compose.perf.yml`).
 
-Deny by default: any other method and path, including `/internal/**`, `/.well-known/**` and `/actuator/**` on
-port 8080, matches no route and answers 404 `not-found` without reaching a service.
+Deny by default: any other method and path matches no route and answers 404 `not-found` without reaching a service.
+Since feature 005 a `GET` or `HEAD` outside `/api/`, `/actuator/` and `/.well-known/` is the storefront's (the static
+container answers the SPA shell or its own 404); every other method anywhere, and every `GET` under those three
+prefixes (`/api/v1/unknown`, `/actuator/health`, `/.well-known/jwks.json` on port 8080), stays 404. The exclusion is
+the `NotPath` route predicate (`NotPathRoutePredicateFactory`, a gateway addition: Spring path patterns the route must
+not match), so the catch-all can never shadow an API path.
 
 ### Service URLs
 
@@ -114,7 +120,10 @@ unverified.
 `RouteAccessFilter` applies the route's `auth` (401 `unauthorized` with `WWW-Authenticate: Bearer`, 403
 `forbidden`), forwards `X-Account-Id` (`sub`) and `X-Roles` (comma-separated roles) and the bearer token, and marks
 responses of authenticated calls `Cache-Control: no-store`. Client-supplied `X-Account-Id`, `X-Roles`,
-`X-Internal-Token`, `Forwarded`, `X-Forwarded-*` and `X-Real-IP` are dropped before anything else runs.
+`X-Internal-Token`, `Forwarded`, `X-Forwarded-*` and `X-Real-IP` are dropped before anything else runs. The caller
+is the resource server's principal or, when the browser-session filter unsealed a bearer from the session cookie
+(below), the `JwtAuthenticationToken` it left in the exchange attribute `BROWSER_AUTHENTICATION_ATTRIBUTE`, verified
+by the same decoder and converter as a client's token.
 
 ## Rate limiting
 
@@ -142,9 +151,13 @@ With N gateway instances a client can get up to N times its budget, and a restar
   log record, which the collector turns into `traceId` for Loki). The server span continues an incoming
   `traceparent`, and the upstream call is its child, so the access line links to the same trace as the services'
   lines (FR-025).
+- `X-Forwarded-Proto: https` (a TLS terminator in front of the gateway) is kept as the request scheme before the
+  header itself is dropped, so the browser-session filters choose the `__Host-` cookie names ("Cookie names by
+  transport" below) and the `Origin` check compares against `https`.
 - Every response carries `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
   `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'` and
-  `Referrer-Policy: no-referrer`; `Server`, `X-Powered-By` and internal headers are removed.
+  `Referrer-Policy: no-referrer`; `Server`, `X-Powered-By` and internal headers are removed. The `storefront` route
+  replaces the CSP with the page policy and adds `Permissions-Policy` ("Storefront route and per-route CSP" below).
 - Request bodies above 1 MiB (5 MiB on the image route) answer 413 before reaching a service; request headers are
   limited to 16 KB and idle connections to 60 s.
 - `ProblemWebExceptionHandler` renders every gateway-originated error as `application/problem+json`
@@ -152,6 +165,92 @@ With N gateway instances a client can get up to N times its budget, and a restar
   `forbidden`, 404 `not-found`, 413 `payload-too-large`, 429 `throttled`, 500 `internal`, 502/503/504
   `unavailable`. The slugs `payload-too-large` and `internal` are gateway additions to the list of
   `docs/service-conventions.md`. Upstream responses, errors included, pass through unchanged.
+
+## Browser session (storefront)
+
+Feature 005 (`specs/005-storefront-dev-bootstrap/contracts/openapi/gateway-browser-session.yaml`, data-model.md
+section 4): the storefront never holds a token. Package `com.ecommerce.gateway.browser`:
+
+- `SealedSession` is the pure payload (access and refresh token, account id, roles, `lastSeenAt`, `issuedAt`);
+  `AesGcmSessionSealer` seals it with the JDK's AES-256-GCM: a fresh 12-byte nonce per sealing, the key id bound as
+  associated data, wire format `<keyId>.<Base64url(nonce || ciphertext || tag)>` without padding, a key set for
+  rotation (today one key, id `k1`). Unseal failures of any kind are `null` and never logged; `toString()` of the
+  payload shows no token.
+- `BrowserSessionKeys` reads `gateway.browser-session.key` (`BROWSER_SESSION_KEY`, 32 random bytes, Base64, shared by
+  every replica). Outside the `dev` and `test` profiles a missing key, or one that does not decode to exactly
+  32 bytes, stops the start-up with the fix in the message, like identity's `IDENTITY_SIGNING_KEY`; under those
+  profiles a throw-away key is generated per process (`BrowserSessionConfiguration`).
+- `BrowserSessionRules` is the decision table of data-model.md section 4.3, pure and property-tested
+  (`BrowserSessionRulesSpec`): no cookie passes through unchanged (API clients keep bearer tokens); cookie plus
+  `Authorization` is 400 `validation`; a non-GET with the cookie needs `Sec-Fetch-Site` `same-origin` or `none`
+  and, when present, an `Origin` equal to the request's scheme, host and port, otherwise 403 `forbidden` (without
+  `Sec-Fetch-Site` the check fails closed unless a matching `Origin` is present); both cookie names at once, an
+  unsealable cookie or `lastSeenAt` older than 30 minutes (`idle-timeout`) is 401 `unauthorized` with the cookie
+  deleted; otherwise the session is valid and refreshed first when the access token expires within 60 s
+  (`refresh-ahead`).
+- `BrowserSessionFilter` (global filter, order -400, before `RouteAccessFilter`) applies the table per route kind:
+  ignored on `identity-registration`, the password-reset paths, `storefront` and `telemetry-*`; on sign-in an
+  existing cookie is ignored; on `POST /api/v1/identity/sessions/refresh` with `X-Browser-Session: cookie` the body
+  sent to identity is built from the sealed refresh token (the page never holds one). A valid session is refreshed
+  through `IdentityRefreshClient` (non-blocking `WebClient` to `IDENTITY_URL`; a refused refresh ends the session
+  with 401 and deletion, an unreachable identity answers 503 and keeps the cookie), then verified by
+  `BearerAuthenticator` (the resource server's decoder and `roles` converter; an invalid token is 401 with deletion,
+  unreadable keys 503) and injected as `Authorization: Bearer`. On the way back (`SessionCookieActions`, at commit)
+  the cookie is re-set with a new `lastSeenAt` (silent renewal), deleted on sign-out and on an upstream 401, and
+  every such response is `Cache-Control: no-store`. Sign-out with an unusable cookie answers 204 with the deletion
+  without reaching identity.
+- `SessionSummaryResponse` rewrites identity's 200 token pair of a browser-mode sign-in or refresh into
+  `{ "expiresAt": <lastSeenAt + idle-timeout>, "roles": [...] }` and seals the tokens into the cookie instead;
+  identity is asked for an uncompressed body (`Accept-Encoding` dropped) because the gateway reads it. A token pair
+  that cannot be read, or a session over the 4 KiB cookie budget, fails closed with 502 `unavailable` and no cookie.
+  Without `X-Browser-Session: cookie` identity's body passes through unchanged and no cookie is set.
+- Refusals are platform `Problem` answers (`BrowserProblems`) with `X-Correlation-Id`, `Cache-Control: no-store` and,
+  for 401, the deletion `Set-Cookie` (`GatewayProblemException.cookies`).
+
+## Cart cookie
+
+`CartCookieFilter` (order -350, after the session filter so a merge carries the injected bearer) acts only when the
+request carries `X-Browser-Session: cookie`: the sealed cart cookie is unsealed and injected as `X-Cart-Token` when
+the client sent none (an explicit header wins; an unsealable cookie, or both names at once, is deleted and ignored);
+an upstream `X-Cart-Token` is sealed into the cart cookie (`HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`) and
+removed from the response; a 200 from `POST /api/v1/cart/merge` deletes the cookie, every other status keeps it. A
+token that would not fit the cookie budget is passed through as the header instead. Without the header the cart
+contract of feature 004 applies untouched.
+
+## Storefront route and per-route CSP
+
+The `storefront` route (`STOREFRONT_URL`, default `http://localhost:8082`, Compose `http://storefront:8080`) forwards
+every `GET`/`HEAD` outside `/api/`, `/actuator/` and `/.well-known/` to the static container and passes its cache
+headers through (`no-store` on the shell, `immutable` on hashed assets): no `Cache-Control: no-store` is added on this
+anonymous route and no cookie is read or set. `EdgeHeaders.policyFor(routeId)` gives the route its page policy,
+applied by `RouteHeadersFilter` as a before-commit action after the edge decorator's hardening, so it replaces the API
+CSP on this route only:
+`default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'`
+plus `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()`; `X-Frame-Options`, `Referrer-Policy`,
+`Strict-Transport-Security` and `X-Content-Type-Options` are unchanged. Every `/api/**` response and every gateway
+error keeps the strict API policy (`EdgeHeadersTest`, `StorefrontRouteIT`).
+
+## Telemetry routes
+
+`telemetry-traces` and `telemetry-logs` forward the storefront's OTLP/HTTP JSON (`POST /api/v1/telemetry/v1/traces`
+and `/logs`) to the collector's receiver at `OTEL_COLLECTOR_URL` (default `http://localhost:4318`, Compose
+`http://otel-collector:4318`) with the prefix rewritten (`RewritePath`), `Cookie` and `Authorization` removed
+(`RemoveRequestHeader`), tier `browse` per source address, `max-body-size: 256KB` (`RequestSizeFilter` honours a route
+limit below the 1 MiB default as well as above it: 413 `payload-too-large`), no `Retry` filter (a collector that is not
+running answers 503 `unavailable` and the browser drops the batch), and the collector's own 200 or 4xx body passed
+through. `GET` or any other method on these paths matches no route (404).
+
+## Cookie names by transport
+
+`__Host-` prefixed cookies require `Secure` and HTTPS, so `Transport.of(scheme, forwardedProto)` picks the names per
+request: `__Host-session` and `__Host-cart` with `Secure` when the request arrived over HTTPS (scheme `https`, or
+`X-Forwarded-Proto: https`, kept as the request scheme by the edge decorator), `session` and `cart` without `Secure`
+over plain HTTP such as `http://localhost`. All other attributes are identical (session: `HttpOnly; SameSite=Strict;
+Path=/`, no `Max-Age`; cart: `HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000`; never a `Domain`). `BrowserCookies`
+renders the `Set-Cookie` values in that documented order and deletions as `<name>=; Max-Age=0; <same attributes>`. The
+gateway accepts whichever name is present and never sets both: setting one name deletes the other in the same
+response, and a request carrying both names of the session cookie is 401 `unauthorized` with both deleted (both
+cart names: ignored and both deleted).
 
 ## Observability
 
@@ -166,9 +265,13 @@ ECS JSON on the console. Traces, logs and metrics are exported over OTLP/HTTP to
 ## Tests
 
 ```bash
-./gradlew -q :services:gateway:test             # route policies, filters, token bucket, correlation, problems, JWT, ...
-./gradlew -q :services:gateway:integrationTest  # GatewayRoutingIT, JwksClientIT, JwksUnavailableIT, ManagementPortIT
+./gradlew -q :services:gateway:test             # route policies, filters, token bucket, correlation, problems, JWT,
+                                                # sealing and session rules (SealedSessionSpec, BrowserSessionRulesSpec)
+./gradlew -q :services:gateway:integrationTest  # GatewayRoutingIT, GatewayRetryIT, JwksClientIT, JwksUnavailableIT,
+                                                # ManagementPortIT, BrowserSessionIT, CartCookieIT, StorefrontRouteIT
 ./gradlew -q :services:gateway:contractTest     # Pact consumer gateway -> identity (JWKS): build/pacts/gateway-identity.json
+./gradlew -q :services:gateway:contractVerify   # Pact provider: storefront-gateway.json (StorefrontGatewayProviderIT,
+                                                # skipped with a message until the storefront consumer has written it)
 ./gradlew -q :services:gateway:pitest           # mutation testing of the unit layer (part of check)
 ```
 
@@ -176,8 +279,16 @@ Mutation testing (T146, Principle VIII): the module applies the `pitest` convent
 `com.ecommerce.gateway.*` and the 80 % threshold. The unit layer drives the filters with `MockServerWebExchange`,
 the edge decorator with a stub `HttpHandler`, and the JWT decoder with keys generated per test. Excluded in
 `services/gateway/build.gradle.kts`, because they are Spring wiring or I/O adapters covered by the integration and
-contract layers: `GatewayApplication`, `SecurityConfiguration`, `OpenTelemetryAppenderInstaller` and `JwksClient`
-(`JwksClientIT`, `JwksUnavailableIT`, `IdentityJwksPactTest`).
+contract layers: `GatewayApplication`, `SecurityConfiguration`, `OpenTelemetryAppenderInstaller`, `JwksClient`
+(`JwksClientIT`, `JwksUnavailableIT`, `IdentityJwksPactTest`), `BrowserSessionConfiguration` and
+`IdentityRefreshClient` (`BrowserSessionIT`).
+
+The provider verification of the storefront pact (`StorefrontProviderStates`) boots the gateway in front of one
+WireMock for identity (with the JWKS of the RFC 8037 test key), cart and storefront and a second one, on a reserved
+port, for the collector (stopped by the state "the telemetry collector is not running"), with a fixed
+`BROWSER_SESSION_KEY`. The sealed cookie values only the provider can mint reach the replayed requests in two ways:
+as provider-state values `sessionCookie` and `cartCookie` (for `fromProviderState` generators in the consumer pact)
+and by rewriting any `session`/`__Host-session` or `cart`/`__Host-cart` value of the request's `Cookie` header.
 
 The integration tests use WireMock upstreams and a WireMock JWKS with an Ed25519 key generated per run. The Pact
 test signs its token with the RFC 8037 test key, whose public half is the first JWKS example of

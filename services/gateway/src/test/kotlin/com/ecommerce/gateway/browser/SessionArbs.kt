@@ -20,7 +20,6 @@ import javax.crypto.spec.SecretKeySpec
 private const val MAX_EPOCH_SECOND = 4_102_444_800L
 private const val MAX_NANO = 999_999_999
 private const val MAX_TOKEN_LENGTH = 200
-private const val MAX_ROLES = 2
 
 /** Generators of the browser-session model (constitution V: fixtures come from generators, not object mothers). */
 object SessionArbs {
@@ -31,7 +30,9 @@ object SessionArbs {
 
     val token: Arb<String> = Arb.string(1..MAX_TOKEN_LENGTH)
 
-    val roles: Arb<Set<String>> = Arb.set(Arb.element("shopper", "operator"), 0..MAX_ROLES)
+    /** Every subset of the two platform roles (a plain enumeration: `Arb.set` cannot always fill a 2-element set). */
+    val roles: Arb<Set<String>> =
+        Arb.element(emptySet(), setOf("shopper"), setOf("operator"), setOf("shopper", "operator"))
 
     val accountId: Arb<String> = Arb.uuid().map(Any::toString)
 
