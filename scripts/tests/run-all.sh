@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Run every scripts/tests/test_*.sh quietly. Prints failures only, then one summary line.
-# The files are independent (each works in its own temporary directories), so they run concurrently; the output is
-# reported in file order. SCRIPT_TESTS_JOBS=1 runs them one after the other.
+# Run every scripts/tests/test_*.sh quietly. Prints failures only, then one summary line (`--quiet` drops the
+# summary on success, for `./gradlew -q verify`). The files are independent (each works in its own temporary
+# directories), so they run concurrently; the output is reported in file order. SCRIPT_TESTS_JOBS=1 runs them one
+# after the other.
 set -euo pipefail
 
+quiet=0
+[ "${1:-}" != --quiet ] || quiet=1
 here="$(cd "$(dirname "$0")" && pwd)"
 total=0
 failed=0
@@ -48,7 +51,7 @@ for f in "${files[@]}"; do
 done
 
 if [ "$failed" -gt 0 ]; then
-  printf 'FAIL: %s of %s tests failed\n' "$failed" "$total"
+  printf 'FAIL: %s of %s tests failed\n' "$failed" "$total" >&2
   exit 1
 fi
-printf 'PASS: %s tests\n' "$total"
+[ "$quiet" = 1 ] || printf 'PASS: %s tests\n' "$total"

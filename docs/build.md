@@ -33,7 +33,8 @@ services/
     infrastructure/             # Spring Boot WebFlux app, four test layers -> id("kotlin-service")
 platform/docker/Dockerfile      # shared multi-stage Dockerfile used by dockerImage
 frontend/                       # reserved for the web storefront (see "Verify command")
-docs/                           # this guide, ci-cd.md, harness.md
+scripts/                        # dev-env.sh bootstrap, repository scripts, their offline tests (scriptsCheck)
+docs/                           # this guide, dev-environment.md, ci-cd.md, harness.md
 .github/workflows/verify.yml    # runs ./gradlew -q verify on pushes to main and, via pr-gate.yml, on pull requests
 ```
 
@@ -86,7 +87,9 @@ mutation {
 Requirements: JDK 25 (`sdk env` reads `.sdkmanrc`; any manager that honours `.java-version` works) and,
 for the integration, contract and acceptance layers and for `dockerImage`, a Docker-API-compatible
 engine. Nothing else is installed: `./gradlew` downloads Gradle 9.8.0 and verifies its checksum, and the
-JDK 25 toolchain is auto-provisioned when it is not installed.
+JDK 25 toolchain is auto-provisioned when it is not installed. `scripts/dev-env.sh check` reports every
+prerequisite of a developer machine with its fix ([dev-environment.md](dev-environment.md)); `shellcheck` is
+optional (the script lint is skipped without it).
 
 Expected result: exit code 0 and no output. `verify` runs, in order of dependency:
 
@@ -98,6 +101,9 @@ Expected result: exit code 0 and no output. `verify` runs, in order of dependenc
 4. `check` of every module: ktlint, detekt, the test layers, architecture rules and Pitest.
 5. The frontend `lint` and `test` npm scripts (`frontendCheck`), once `frontend/package.json` exists. The npm
    executable defaults to `npm` and can be overridden with `-PnpmExecutable=/path/to/npm`.
+6. The repository script tests and lint (`scriptsCheck`): `scriptsTest` runs `scripts/tests/run-all.sh --quiet`
+   (offline, stubbed tools, no engine) and `scriptsLint` runs `scripts/lint.sh` (`shellcheck -x` over `scripts/`
+   and the platform scripts) when `shellcheck` is on the `PATH`, otherwise it is skipped.
 
 Offline: after one online run, `./gradlew -q --offline verify` works from the local caches. With the build
 cache and configuration cache enabled (`gradle.properties`), an unchanged re-run finishes in well under two

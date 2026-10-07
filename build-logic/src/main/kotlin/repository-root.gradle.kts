@@ -8,8 +8,8 @@ import org.gradle.util.GradleVersion
 
 // Internal convention for the root project only (root build.gradle.kts applies nothing else): the `verify`
 // lifecycle task (FR-001) with its toolchain check (FR-010), the version-literal check (FR-004), the
-// `monorepo { exempt(...) }` extension and convention guard (FR-013), the frontend hook (FR-015) and the
-// `newService` scaffold (FR-012).
+// `monorepo { exempt(...) }` extension and convention guard (FR-013), the frontend hook (FR-015), the
+// repository-script tests and lint (`scriptsCheck`, feature 005 FR-029) and the `newService` scaffold (FR-012).
 
 val monorepo = extensions.create<MonorepoExtension>("monorepo")
 val catalog = the<VersionCatalogsExtension>().named("libs")
@@ -92,6 +92,38 @@ if (file("frontend/package.json").exists()) {
             dependsOn(frontendLint, frontendTest)
         }
     verify.configure { dependsOn(frontendCheck) }
+}
+
+// The repository shell scripts (bootstrap, dev-env, platform) carry offline tests and a shellcheck lint; both are
+// part of the gate (feature 005, FR-029). The test runner prints nothing on success with --quiet; the lint runs
+// only when shellcheck is installed (CI runs the pinned image in the platform workflow as well).
+if (file("scripts/tests/run-all.sh").exists()) {
+    val scriptsTest =
+        tasks.register<Exec>("scriptsTest") {
+            group = "verification"
+            description = "Runs the offline tests of the repository scripts (scripts/tests/run-all.sh)"
+            executable = layout.projectDirectory.file("scripts/tests/run-all.sh").asFile.absolutePath
+            args("--quiet")
+        }
+    val scriptsLint =
+        tasks.register<Exec>("scriptsLint") {
+            group = "verification"
+            description = "Shellcheck over the repository scripts (skipped when shellcheck is not installed)"
+            executable = layout.projectDirectory.file("scripts/lint.sh").asFile.absolutePath
+            onlyIf("shellcheck is on the PATH") {
+                (System.getenv("PATH") ?: "")
+                    .split(File.pathSeparator)
+                    .any { dir -> dir.isNotEmpty() && File(dir, "shellcheck").canExecute() }
+            }
+            mustRunAfter(scriptsTest)
+        }
+    val scriptsCheck =
+        tasks.register("scriptsCheck") {
+            group = "verification"
+            description = "Runs the repository script tests and lint"
+            dependsOn(scriptsTest, scriptsLint)
+        }
+    verify.configure { dependsOn(scriptsCheck) }
 }
 
 gradle.projectsEvaluated {
