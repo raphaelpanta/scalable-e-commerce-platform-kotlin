@@ -2,10 +2,11 @@
 # T149 (feature 004, user story 9, AC3): start the freshly built image of one service with the minimum environment it
 # needs to boot WITHOUT the rest of the platform, wait up to HEALTH_TIMEOUT seconds (default 90) for the management port's
 # readiness group `/actuator/health/readiness` to answer {"status":"UP"}, print the last log lines on failure and always
-# stop what it started.
+# stop what it started. For `storefront` (feature 005, T036: the static nginx image of platform/docker/Dockerfile.storefront)
+# the probe is `GET /healthz` on port 8080 answering `ok`.
 #
 # Usage: image-health.sh <service> <image>
-#   service  gateway | identity | catalog | cart | order | payment | notification
+#   service  gateway | identity | catalog | cart | order | payment | notification | storefront
 #   image    the image reference to run, e.g. cart:3f2a... (it must already exist in the local engine)
 #
 # Why this is enough (docs/service-conventions.md section 2, docs/ci-cd.md "Start-and-health check"):
@@ -17,7 +18,9 @@
 #     outside the dev/test profiles, same format as platform/compose/scripts/lib.sh ensure_env). Kafka and the OTLP collector stay on their localhost defaults
 #     (unreachable: the producer and the topic admin only log warnings; SPRING_KAFKA_ADMIN_* below shortens that wait);
 #   - the gateway has no database and needs nothing: it starts alone with its localhost defaults;
-#   - the probe runs INSIDE the container (bash /dev/tcp to 127.0.0.1:8081, the same check as the image HEALTHCHECK),
+#   - the storefront is nginx serving a bundle: no database, no JVM environment, the 64m memory bound of Compose;
+#   - the probe runs INSIDE the container (bash /dev/tcp to 127.0.0.1:8081 for the JVM images; busybox wget to
+#     127.0.0.1:8080/healthz for the storefront, whose image has no bash; the same checks as the image HEALTHCHECKs),
 #     so it works with the runner's host network, a remote Docker engine or Podman without publishing any port.
 # Environment: HEALTH_TIMEOUT (seconds, default 90), POSTGRES_IMAGE (default postgres:18-alpine, the tag Compose uses),
 #   GITHUB_RUN_ID / GITHUB_RUN_ATTEMPT (make the container names unique per run; "local" otherwise).
@@ -27,7 +30,7 @@ service="${1:-}"
 image="${2:-}"
 [ -n "$service" ] && [ -n "$image" ] || { sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//' >&2; exit 64; }
 case "$service" in
-  gateway | identity | catalog | cart | order | payment | notification) ;;
+  gateway | identity | catalog | cart | order | payment | notification | storefront) ;;
   *) echo "::error::unknown service '$service'" >&2; exit 64 ;;
 esac
 
@@ -63,16 +66,24 @@ cleanup() {
 trap cleanup EXIT
 
 random() { openssl rand -hex 16; }
-internal_token="$(random)"
-echo "::add-mask::$internal_token"
 
 # Same shape as the Compose environment (platform/compose/docker-compose.yml): memory bound, credentials from the
-# environment only, seed data off.
-run_args=(-d --name "$app" --memory 768m
-  -e "INTERNAL_API_TOKEN=$internal_token" -e SEED=false
-  -e SPRING_KAFKA_ADMIN_AUTO_CREATE=false -e SPRING_KAFKA_ADMIN_OPERATION_TIMEOUT=5s)
+# environment only, seed data off. The storefront gets only its memory bound (it reads no environment).
+if [ "$service" = storefront ]; then
+  run_args=(-d --name "$app" --memory 64m)
+  probe_target=":8080/healthz"
+  expected="ok"
+else
+  internal_token="$(random)"
+  echo "::add-mask::$internal_token"
+  run_args=(-d --name "$app" --memory 768m
+    -e "INTERNAL_API_TOKEN=$internal_token" -e SEED=false
+    -e SPRING_KAFKA_ADMIN_AUTO_CREATE=false -e SPRING_KAFKA_ADMIN_OPERATION_TIMEOUT=5s)
+  probe_target=":8081/actuator/health/readiness"
+  expected='"status":"UP"'
+fi
 
-if [ "$service" != gateway ]; then
+if [ "$service" != gateway ] && [ "$service" != storefront ]; then
   db_password="$(random)"
   echo "::add-mask::$db_password"
   docker network create "$net" >/dev/null
@@ -99,8 +110,12 @@ fi
 docker run "${run_args[@]}" "$image" >/dev/null
 
 probe() {
-  docker exec "$app" bash -c \
-    'exec 3<>/dev/tcp/127.0.0.1/8081 && printf "GET /actuator/health/readiness HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 && cat <&3' 2>/dev/null
+  if [ "$service" = storefront ]; then
+    docker exec "$app" wget -qO- http://127.0.0.1:8080/healthz 2>/dev/null
+  else
+    docker exec "$app" bash -c \
+      'exec 3<>/dev/tcp/127.0.0.1/8081 && printf "GET /actuator/health/readiness HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 && cat <&3' 2>/dev/null
+  fi
 }
 
 deadline=$((SECONDS + timeout))
@@ -109,13 +124,13 @@ while true; do
     echo "::error::the $service container exited before it reported UP"
     exit 1
   fi
-  if body="$(probe)" && printf '%s' "$body" | grep -q '"status":"UP"'; then
+  if body="$(probe)" && printf '%s' "$body" | grep -qF "$expected"; then
     result=success
     echo "$service is UP after $((timeout - (deadline - SECONDS))) s: $(printf '%s' "$body" | tail -n 1)"
     exit 0
   fi
   if [ "$SECONDS" -ge "$deadline" ]; then
-    echo "::error::$service did not report {\"status\":\"UP\"} on :8081/actuator/health/readiness within ${timeout}s"
+    echo "::error::$service did not answer $expected on $probe_target within ${timeout}s"
     exit 1
   fi
   sleep 2
