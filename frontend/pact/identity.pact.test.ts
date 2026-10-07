@@ -14,14 +14,15 @@ import {
   asGateway,
   bearer,
   instant,
+  MISSING_ID,
   problem,
   PROBLEM,
   uuid,
 } from './gateway.ts';
 import { pactFor } from './pact.config.ts';
 
-// Storefront → identity consumer pact: the interactions of user story 2 (I1–I5, I7, I10, I11 of
-// contracts/pact-matrix.md; the remaining rows are added by later stories), provider states
+// Storefront → identity consumer pact: the interactions of user stories 2 and 4 (I1–I18 of
+// contracts/pact-matrix.md), provider states
 // verbatim, driving the real src/api/identity.ts. Identity sees the request as the gateway
 // forwards it: sign-in and refresh carry their token bodies (the gateway turns the answer into the
 // cookie summary; only the request shape is asserted here), protected calls carry the bearer.
@@ -33,12 +34,21 @@ const SESSIONS = '/api/v1/identity/sessions';
 const REFRESH = '/api/v1/identity/sessions/refresh';
 const ME = '/api/v1/identity/accounts/me';
 const ADDRESSES = '/api/v1/identity/accounts/me/addresses';
+const CURRENT_SESSION = '/api/v1/identity/sessions/current';
+const PREFERENCES = '/api/v1/identity/accounts/me/notification-preferences';
+const PHONE_VERIFICATIONS = '/api/v1/identity/accounts/me/phone-verifications';
+const PASSWORD_RESETS = '/api/v1/identity/password-resets';
+const RESET_MESSAGE = 'If the address is registered, a reset message has been sent.';
+const PHONE = '+351912345678';
+const PHONE_CODE = '123456';
 const GENERIC_MESSAGE = 'If the address can be registered, a verification message has been sent.';
 // Token fixtures (pact-matrix.md, identity section): the family the provider state names, padded to the 43
 // url-safe characters identity accepts as an opaque token.
 const VALID_TOKEN = 'tok-valid-000000000000000000000000000000000';
 const EXPIRED_TOKEN = 'tok-expired-0000000000000000000000000000000';
 const REFRESH_TOKEN = '9b8d6c1a-opaque-refresh-token-0000000000000';
+const RESET_TOKEN = 'tok-reset-000000000000000000000000000000000';
+const UNKNOWN_TOKEN = 'tok-unknown-0000000000000000000000000000000';
 
 const ana = parsedEmail('ana@example.com');
 const newcomer = parsedEmail('new@example.com');
@@ -101,7 +111,7 @@ const anonymous = (url: string) => createIdentityApi({ baseUrl: url, fetch: asGa
 const signedIn = (url: string) =>
   createIdentityApi({ baseUrl: url, fetch: asGateway({ bearer: true }) });
 
-describe('storefront → identity pact (I1–I5, I7, I10, I11)', () => {
+describe('storefront → identity pact (I1–I18)', () => {
   describe('I1 signIn', () => {
     it('signs in with email and password; the gateway turns the token pair into the cookie summary', async () => {
       await provider
@@ -483,6 +493,422 @@ describe('storefront → identity pact (I1–I5, I7, I10, I11)', () => {
           await failure.catch((error: unknown) => {
             expect((error as ProblemError).problem.errors[0]?.field).toBe('recipientName');
           });
+        });
+    });
+  });
+
+  describe('I6 signOut', () => {
+    it('revokes the session of the signed-in account', async () => {
+      await provider
+        .addInteraction()
+        .given('an account ana@example.com is signed in')
+        .uponReceiving('a sign-out of ana@example.com')
+        .withRequest('DELETE', CURRENT_SESSION, (request) => {
+          request.headers({ Authorization: bearer() });
+        })
+        .willRespondWith(204)
+        .executeTest(async (mockServer) => {
+          await expect(signedIn(mockServer.url).signOut()).resolves.toBeUndefined();
+        });
+    });
+  });
+
+  describe('I8 updateOwnProfile', () => {
+    it('changes the display name and answers the updated account', async () => {
+      await provider
+        .addInteraction()
+        .given('an account ana@example.com is signed in')
+        .uponReceiving('a change of the display name of ana@example.com')
+        .withRequest('PUT', ME, (request) => {
+          request.headers({ Authorization: bearer() }).jsonBody({ displayName: 'Ana M. Silva' });
+        })
+        .willRespondWith(200, (response) => {
+          response.jsonBody({ ...account, displayName: like('Ana M. Silva') });
+        })
+        .executeTest(async (mockServer) => {
+          const updated = await signedIn(mockServer.url).updateOwnProfile('Ana M. Silva');
+          expect(updated.displayName).toBe('Ana M. Silva');
+          expect(updated.email).toBe('ana@example.com');
+        });
+    });
+
+    it('reports a display name outside the bounds next to the field', async () => {
+      await provider
+        .addInteraction()
+        .given('an account ana@example.com is signed in')
+        .uponReceiving('a change of the display name of ana@example.com to a name too long')
+        .withRequest('PUT', ME, (request) => {
+          request.headers({ Authorization: bearer() }).jsonBody({ displayName: 'A'.repeat(101) });
+        })
+        .willRespondWith(422, (response) => {
+          response.headers({ 'Content-Type': PROBLEM }).jsonBody({
+            ...problem('validation', 422, 'Validation failed', 'The profile is not valid.'),
+            errors: eachLike({
+              field: string('displayName'),
+              message: like('must be at most 100 characters'),
+            }),
+          });
+        })
+        .executeTest(async (mockServer) => {
+          const failure = signedIn(mockServer.url).updateOwnProfile('A'.repeat(101));
+          await expect(failure).rejects.toBeInstanceOf(ProblemError);
+          await failure.catch((error: unknown) => {
+            expect((error as ProblemError).problem.errors[0]?.field).toBe('displayName');
+          });
+        });
+    });
+  });
+
+  describe('I9 deleteOwnAccount', () => {
+    it('anonymises the signed-in shopper account', async () => {
+      await provider
+        .addInteraction()
+        .given('an account ana@example.com is signed in')
+        .uponReceiving('a deletion of the account of ana@example.com')
+        .withRequest('DELETE', ME, (request) => {
+          request.headers({ Authorization: bearer() });
+        })
+        .willRespondWith(204)
+        .executeTest(async (mockServer) => {
+          await expect(signedIn(mockServer.url).deleteOwnAccount()).resolves.toBeUndefined();
+        });
+    });
+
+    it('refuses an operator account (403)', async () => {
+      await provider
+        .addInteraction()
+        .given('an operator ops@example.com is signed in')
+        .uponReceiving('a deletion of the account of the operator ops@example.com')
+        .withRequest('DELETE', ME, (request) => {
+          request.headers({ Authorization: bearer() });
+        })
+        .willRespondWith(403, (response) => {
+          response
+            .headers({ 'Content-Type': PROBLEM })
+            .jsonBody(
+              problem('forbidden', 403, 'Forbidden', 'Operator accounts cannot be deleted here.'),
+            );
+        })
+        .executeTest(async (mockServer) => {
+          const failure = signedIn(mockServer.url).deleteOwnAccount();
+          await expect(failure).rejects.toBeInstanceOf(ProblemError);
+          await failure.catch((error: unknown) => {
+            expect((error as ProblemError).problem.status).toBe(403);
+          });
+        });
+    });
+  });
+
+  describe('I12 updateOwnAddress', () => {
+    it('replaces a saved address and answers it', async () => {
+      await provider
+        .addInteraction()
+        .given('ana@example.com has 2 addresses')
+        .uponReceiving('a change of the address of ana@example.com')
+        .withRequest('PUT', `${ADDRESSES}/${ADDRESS_2}`, (request) => {
+          request.headers({ Authorization: bearer() }).jsonBody({
+            label: 'Home',
+            recipientName: 'Ana Silva',
+            line1: 'Rua das Flores 12',
+            city: 'Porto',
+            postalCode: '4000-001',
+            countryCode: 'PT',
+            isDefault: true,
+          });
+        })
+        .willRespondWith(200, (response) => {
+          response.jsonBody({ ...address(ADDRESS_2), city: string('Porto') });
+        })
+        .executeTest(async (mockServer) => {
+          const updated = await signedIn(mockServer.url).updateOwnAddress(ADDRESS_2, {
+            ...home,
+            city: 'Porto',
+            postalCode: '4000-001',
+          });
+          expect(updated.id).toBe(ADDRESS_2);
+          expect(updated.city).toBe('Porto');
+        });
+    });
+
+    it('answers 404 for an address the account does not own', async () => {
+      await provider
+        .addInteraction()
+        .given('ana@example.com has 2 addresses')
+        .uponReceiving('a change of an address that ana@example.com does not own')
+        .withRequest('PUT', `${ADDRESSES}/${MISSING_ID}`, (request) => {
+          request.headers({ Authorization: bearer() }).jsonBody({
+            label: 'Home',
+            recipientName: 'Ana Silva',
+            line1: 'Rua das Flores 12',
+            city: 'Lisboa',
+            postalCode: '1000-001',
+            countryCode: 'PT',
+            isDefault: true,
+          });
+        })
+        .willRespondWith(404, (response) => {
+          response
+            .headers({ 'Content-Type': PROBLEM })
+            .jsonBody(problem('not-found', 404, 'Not found', 'Address not found.'));
+        })
+        .executeTest(async (mockServer) => {
+          const failure = signedIn(mockServer.url).updateOwnAddress(MISSING_ID, home);
+          await expect(failure).rejects.toBeInstanceOf(ProblemError);
+          await failure.catch((error: unknown) => {
+            expect((error as ProblemError).problem.status).toBe(404);
+          });
+        });
+    });
+  });
+
+  describe('I13 deleteOwnAddress', () => {
+    it('removes a saved address', async () => {
+      await provider
+        .addInteraction()
+        .given('ana@example.com has 2 addresses')
+        .uponReceiving('a removal of an address of ana@example.com')
+        .withRequest('DELETE', `${ADDRESSES}/${ADDRESS_OWNED}`, (request) => {
+          request.headers({ Authorization: bearer() });
+        })
+        .willRespondWith(204)
+        .executeTest(async (mockServer) => {
+          await expect(
+            signedIn(mockServer.url).deleteOwnAddress(ADDRESS_OWNED),
+          ).resolves.toBeUndefined();
+        });
+    });
+
+    it('answers 404 for an address the account does not own', async () => {
+      await provider
+        .addInteraction()
+        .given('ana@example.com has 2 addresses')
+        .uponReceiving('a removal of an address that ana@example.com does not own')
+        .withRequest('DELETE', `${ADDRESSES}/${MISSING_ID}`, (request) => {
+          request.headers({ Authorization: bearer() });
+        })
+        .willRespondWith(404, (response) => {
+          response
+            .headers({ 'Content-Type': PROBLEM })
+            .jsonBody(problem('not-found', 404, 'Not found', 'Address not found.'));
+        })
+        .executeTest(async (mockServer) => {
+          await expect(
+            signedIn(mockServer.url).deleteOwnAddress(MISSING_ID),
+          ).rejects.toBeInstanceOf(ProblemError);
+        });
+    });
+  });
+
+  describe('I14 getOwnNotificationPreferences', () => {
+    it('reads the channels and whether a phone number is verified', async () => {
+      await provider
+        .addInteraction()
+        .given('ana@example.com has email notifications enabled')
+        .uponReceiving('a read of the notification preferences of ana@example.com')
+        .withRequest('GET', PREFERENCES, (request) => {
+          request.headers({ Authorization: bearer() });
+        })
+        .willRespondWith(200, (response) => {
+          response.jsonBody({ channels: eachLike('email'), phoneVerified: boolean(false) });
+        })
+        .executeTest(async (mockServer) => {
+          const preferences = await signedIn(mockServer.url).getOwnNotificationPreferences();
+          expect(preferences.channels).toEqual(['email']);
+          expect(preferences.phoneVerified).toBe(false);
+        });
+    });
+  });
+
+  describe('I15 updateOwnNotificationPreferences', () => {
+    it('keeps email on and answers the updated preferences', async () => {
+      await provider
+        .addInteraction()
+        .given('ana@example.com has email notifications enabled')
+        .uponReceiving('a notification preference update of ana@example.com to email only')
+        .withRequest('PUT', PREFERENCES, (request) => {
+          request.headers({ Authorization: bearer() }).jsonBody({ channels: ['email'] });
+        })
+        .willRespondWith(200, (response) => {
+          response.jsonBody({ channels: eachLike('email'), phoneVerified: boolean(false) });
+        })
+        .executeTest(async (mockServer) => {
+          const preferences = await signedIn(mockServer.url).updateOwnNotificationPreferences([
+            'email',
+          ]);
+          expect(preferences.channels).toEqual(['email']);
+        });
+    });
+
+    it('refuses sms without a verified phone number (422)', async () => {
+      await provider
+        .addInteraction()
+        .given('ana@example.com has email notifications enabled')
+        .uponReceiving('a notification preference update of ana@example.com asking for sms')
+        .withRequest('PUT', PREFERENCES, (request) => {
+          request.headers({ Authorization: bearer() }).jsonBody({ channels: ['email', 'sms'] });
+        })
+        .willRespondWith(422, (response) => {
+          response.headers({ 'Content-Type': PROBLEM }).jsonBody({
+            ...problem(
+              'validation',
+              422,
+              'Validation failed',
+              'sms requires a verified phone number.',
+            ),
+            errors: eachLike({
+              field: string('channels'),
+              message: like('requires a verified phone number'),
+            }),
+          });
+        })
+        .executeTest(async (mockServer) => {
+          const failure = signedIn(mockServer.url).updateOwnNotificationPreferences([
+            'email',
+            'sms',
+          ]);
+          await expect(failure).rejects.toBeInstanceOf(ProblemError);
+          await failure.catch((error: unknown) => {
+            expect((error as ProblemError).problem.status).toBe(422);
+            expect((error as ProblemError).problem.errors[0]?.field).toBe('channels');
+          });
+        });
+    });
+  });
+
+  describe('I16 phone verification', () => {
+    it('sends a code to the phone number (202)', async () => {
+      await provider
+        .addInteraction()
+        .given('ana@example.com has a pending phone verification')
+        .uponReceiving('a request for a phone verification code of ana@example.com')
+        .withRequest('POST', PHONE_VERIFICATIONS, (request) => {
+          request.headers({ Authorization: bearer() }).jsonBody({ phoneNumber: PHONE });
+        })
+        .willRespondWith(202)
+        .executeTest(async (mockServer) => {
+          await expect(
+            signedIn(mockServer.url).requestPhoneVerification(PHONE),
+          ).resolves.toBeUndefined();
+        });
+    });
+
+    it('confirms the phone number with the right code (204)', async () => {
+      await provider
+        .addInteraction()
+        .given('ana@example.com has a pending phone verification')
+        .uponReceiving('a phone verification of ana@example.com with the right code')
+        .withRequest('POST', `${PHONE_VERIFICATIONS}/confirm`, (request) => {
+          request.headers({ Authorization: bearer() }).jsonBody({ code: PHONE_CODE });
+        })
+        .willRespondWith(204)
+        .executeTest(async (mockServer) => {
+          await expect(
+            signedIn(mockServer.url).confirmPhoneVerification(PHONE_CODE),
+          ).resolves.toBeUndefined();
+        });
+    });
+
+    it('refuses a wrong code (422)', async () => {
+      await provider
+        .addInteraction()
+        .given('ana@example.com has a pending phone verification')
+        .uponReceiving('a phone verification of ana@example.com with a wrong code')
+        .withRequest('POST', `${PHONE_VERIFICATIONS}/confirm`, (request) => {
+          request.headers({ Authorization: bearer() }).jsonBody({ code: '000000' });
+        })
+        .willRespondWith(422, (response) => {
+          response
+            .headers({ 'Content-Type': PROBLEM })
+            .jsonBody(
+              problem('validation', 422, 'Validation failed', 'The code is wrong or has expired.'),
+            );
+        })
+        .executeTest(async (mockServer) => {
+          await expect(
+            signedIn(mockServer.url).confirmPhoneVerification('000000'),
+          ).rejects.toBeInstanceOf(ProblemError);
+        });
+    });
+  });
+
+  describe('I17 requestPasswordReset', () => {
+    it('answers the generic message for a registered email', async () => {
+      await provider
+        .addInteraction()
+        .given('an account ana@example.com exists with a verified email')
+        .uponReceiving('a password reset request for the registered ana@example.com')
+        .withRequest('POST', PASSWORD_RESETS, (request) => {
+          request.jsonBody({ email: 'ana@example.com' });
+        })
+        .willRespondWith(202, (response) => {
+          response.jsonBody({ message: string(RESET_MESSAGE) });
+        })
+        .executeTest(async (mockServer) => {
+          expect(await anonymous(mockServer.url).requestPasswordReset(ana)).toBe(RESET_MESSAGE);
+        });
+    });
+
+    it('answers the same generic message for an email nobody registered', async () => {
+      await provider
+        .addInteraction()
+        .given('no account exists for new@example.com')
+        .uponReceiving('a password reset request for the unknown new@example.com')
+        .withRequest('POST', PASSWORD_RESETS, (request) => {
+          request.jsonBody({ email: 'new@example.com' });
+        })
+        .willRespondWith(202, (response) => {
+          response.jsonBody({ message: string(RESET_MESSAGE) });
+        })
+        .executeTest(async (mockServer) => {
+          expect(await anonymous(mockServer.url).requestPasswordReset(newcomer)).toBe(
+            RESET_MESSAGE,
+          );
+        });
+    });
+  });
+
+  describe('I18 completePasswordReset', () => {
+    it('sets the new password with the emailed token (204)', async () => {
+      await provider
+        .addInteraction()
+        .given('a pending password reset token tok-reset exists')
+        .uponReceiving('a password reset completion with the token tok-reset')
+        .withRequest('POST', `${PASSWORD_RESETS}/complete`, (request) => {
+          request.jsonBody({ token: RESET_TOKEN, newPassword: 'N3w-passphrase-2026!' });
+        })
+        .willRespondWith(204)
+        .executeTest(async (mockServer) => {
+          await expect(
+            anonymous(mockServer.url).completePasswordReset(
+              RESET_TOKEN,
+              parsedPassword('N3w-passphrase-2026!'),
+            ),
+          ).resolves.toBeUndefined();
+        });
+    });
+
+    it('refuses a token that is invalid, used or expired', async () => {
+      await provider
+        .addInteraction()
+        .given('a pending password reset token tok-reset exists')
+        .uponReceiving('a password reset completion with an unknown token')
+        .withRequest('POST', `${PASSWORD_RESETS}/complete`, (request) => {
+          request.jsonBody({ token: UNKNOWN_TOKEN, newPassword: 'N3w-passphrase-2026!' });
+        })
+        .willRespondWith(422, (response) => {
+          response
+            .headers({ 'Content-Type': PROBLEM })
+            .jsonBody(
+              problem('validation', 422, 'Validation failed', 'The token is invalid or expired.'),
+            );
+        })
+        .executeTest(async (mockServer) => {
+          await expect(
+            anonymous(mockServer.url).completePasswordReset(
+              UNKNOWN_TOKEN,
+              parsedPassword('N3w-passphrase-2026!'),
+            ),
+          ).rejects.toBeInstanceOf(ProblemError);
         });
     });
   });

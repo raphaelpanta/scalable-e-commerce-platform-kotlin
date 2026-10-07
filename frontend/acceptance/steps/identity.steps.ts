@@ -74,7 +74,7 @@ Then('the shopper is asked to sign in first', async function (this: StorefrontWo
 
 Given('a signed-in shopper with a saved delivery address', async function (this: StorefrontWorld) {
   this.shopperToken = await this.shoppers.registered(this.shopper);
-  await this.shoppers.addAddress(this.shopperToken, 'Lisboa');
+  this.shopperAddressId = await this.shoppers.addAddress(this.shopperToken, 'Lisboa');
   await signInThroughThePage(this);
 });
 

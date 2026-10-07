@@ -2,6 +2,7 @@ import { type JSX, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 
 import { useCart } from '@app/cart/useCart';
+import { clearDraft } from '@app/checkout/draftStorage';
 import { correlation } from '@app/correlation';
 import { signInLocationFor } from '@app/navigation/safeNext';
 import { hasRole } from '@app/session/sessionStore';
@@ -34,6 +35,9 @@ export function Layout(): JSX.Element {
     try {
       await signOut();
     } finally {
+      // Nothing of the account stays in the tab: the queries are dropped by the session store,
+      // the checkout draft (an address id and a payment method) here.
+      clearDraft(window.sessionStorage);
       setSigningOut(false);
       await navigate('/', { replace: true });
     }

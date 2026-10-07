@@ -7,4 +7,6 @@ export type PaymentAttemptPage = components['schemas']['PaymentAttemptPage'];
 
 export type PaymentPort = {
   listAttempts(orderId: string): Promise<PaymentAttemptPage>;
+  /** `null` when the attempt is unknown or belongs to another shopper's order (404). */
+  getAttempt(attemptId: string): Promise<PaymentAttempt | null>;
 };

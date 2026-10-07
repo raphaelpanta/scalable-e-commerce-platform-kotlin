@@ -20,6 +20,21 @@ export const paymentServer: PaymentServer = {
 };
 
 export const paymentHandlers = [
+  http.get(`${ATTEMPTS_URL}/:attemptId`, ({ params }) => {
+    const found = paymentServer.attempts.find((attempt) => attempt.id === params['attemptId']);
+    if (found === undefined) {
+      return HttpResponse.json(
+        {
+          type: 'https://ecommerce.example/problems/not-found',
+          title: 'Not found',
+          status: 404,
+          detail: 'Payment attempt not found.',
+        },
+        { status: 404, headers: { 'Content-Type': 'application/problem+json' } },
+      );
+    }
+    return HttpResponse.json(found);
+  }),
   http.get(ATTEMPTS_URL, ({ request }) => {
     const orderId = new URL(request.url).searchParams.get('orderId');
     const items = paymentServer.attempts.filter((attempt) => attempt.orderId === orderId);

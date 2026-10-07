@@ -31,6 +31,8 @@ type OrderServer = {
   script: ScriptedRefusal[];
   placeRequests: PlaceRequest[];
   reads: string[];
+  /** The ids a cancellation was requested for, in order. */
+  cancellations: string[];
   /** `createdAt` of the next order placed (the countdown tests pin the clock). */
   now: () => Date;
   reset(): void;
@@ -45,6 +47,7 @@ export const orderServer: OrderServer = {
   script: [],
   placeRequests: [],
   reads: [],
+  cancellations: [],
   now: () => new Date(),
   reset() {
     this.orders = new Map();
@@ -52,6 +55,7 @@ export const orderServer: OrderServer = {
     this.script = [];
     this.placeRequests = [];
     this.reads = [];
+    this.cancellations = [];
     this.now = () => new Date();
   },
   refuseNextWith(...refusals) {
@@ -193,7 +197,110 @@ function refuse(refusal: ScriptedRefusal) {
   }
 }
 
+/** The account id the platform writes in the history for the shopper's own changes. */
+export const OWNER_ID = '3f2b8c0e-5d41-4a39-9c1e-0a7f6b2d4e11';
+export const OPERATOR_ID = '8c5d2e7a-41b6-4f90-a3d8-6e1f0b9c7a52';
+
+export type SeedOrder = {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly orderStatus?: Order['orderStatus'];
+  readonly paymentStatus?: Order['paymentStatus'];
+  readonly cancellationReason?: Order['cancellationReason'];
+  readonly paymentAttemptId?: string | null;
+  readonly statusHistory?: Order['statusHistory'];
+};
+
+/** An order the platform already holds (placed, paid, one Rake line unless a test says otherwise). */
+export function seedOrder(input: SeedOrder): Order {
+  const paymentStatus = input.paymentStatus ?? 'approved';
+  const orderStatus = input.orderStatus ?? 'placed';
+  const created = Date.parse(input.createdAt);
+  const at = (seconds: number): string => new Date(created + seconds * 1000).toISOString();
+  const order: Order = {
+    id: input.id,
+    orderStatus,
+    paymentStatus,
+    cancellationReason: input.cancellationReason ?? null,
+    lines: [
+      {
+        productId: '9a4f1e0e-6c2d-4a17-8d3b-0c7e5f2a1b01',
+        name: 'Rake',
+        unitPrice: { amountMinor: 1000, currency: 'BRL' },
+        quantity: 2,
+        lineTotal: { amountMinor: 2000, currency: 'BRL' },
+      },
+    ],
+    total: { amountMinor: 2000, currency: 'BRL' },
+    deliveryAddress: {
+      recipientName: 'Ana Silva',
+      line1: 'Rua das Flores 12',
+      line2: null,
+      city: 'Lisboa',
+      postalCode: '1000-001',
+      country: 'PT',
+    },
+    statusHistory: input.statusHistory ?? [
+      { kind: 'order', status: 'placed', at: at(0), by: OWNER_ID },
+      { kind: 'payment', status: 'pending', at: at(0), by: 'system' },
+      ...(paymentStatus === 'pending'
+        ? []
+        : [{ kind: 'payment' as const, status: paymentStatus, at: at(1), by: 'system' }]),
+    ],
+    createdAt: input.createdAt,
+    paymentAttemptId: input.paymentAttemptId ?? null,
+    paymentExpiresAt:
+      paymentStatus === 'pending' ? new Date(created + PAYMENT_WINDOW_MS).toISOString() : null,
+  };
+  orderServer.orders.set(order.id, order);
+  return order;
+}
+
 export const orderHandlers = [
+  http.get(ORDERS_URL, ({ request }) => {
+    const url = new URL(request.url);
+    const page = Number(url.searchParams.get('page') ?? '0');
+    const size = Number(url.searchParams.get('size') ?? '20');
+    const all = [...orderServer.orders.values()].sort(
+      (left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt),
+    );
+    return HttpResponse.json({
+      items: all.slice(page * size, page * size + size),
+      page,
+      size,
+      totalItems: all.length,
+    });
+  }),
+  http.post(`${ORDERS_URL}/:orderId/cancellation`, ({ params }) => {
+    const id = String(params['orderId']);
+    orderServer.cancellations.push(id);
+    const order = orderServer.orders.get(id);
+    if (order === undefined) return problem('not-found', 404, 'Not found', 'Order not found.');
+    if (order.orderStatus !== 'placed') {
+      return problem(
+        'order-not-cancellable',
+        409,
+        'Order cannot be cancelled',
+        `Shoppers can only cancel an order while it is placed; this order is ${order.orderStatus}.`,
+      );
+    }
+    const cancelled: Order = {
+      ...order,
+      orderStatus: 'cancelled',
+      cancellationReason: 'SHOPPER_REQUEST',
+      statusHistory: [
+        ...order.statusHistory,
+        {
+          kind: 'order',
+          status: 'cancelled',
+          at: orderServer.now().toISOString(),
+          by: OWNER_ID,
+        },
+      ],
+    };
+    orderServer.orders.set(id, cancelled);
+    return HttpResponse.json(cancelled);
+  }),
   http.post(ORDERS_URL, async ({ request }) => {
     const key = request.headers.get('Idempotency-Key');
     const body = (await request.json()) as { paymentMethod: { token: string } };

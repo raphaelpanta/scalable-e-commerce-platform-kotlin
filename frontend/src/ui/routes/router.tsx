@@ -16,16 +16,23 @@ import { type KnownRouteTemplate, ROUTE_TEMPLATES } from '@domain/routeTemplate'
 
 import { Layout } from '../components/Layout.tsx';
 import { Loading } from '../components/Loading.tsx';
+import { AccountPage } from '../pages/AccountPage.tsx';
+import { AddressesPage } from '../pages/AddressesPage.tsx';
 import { CartPage } from '../pages/CartPage.tsx';
 import { CategoryPage } from '../pages/CategoryPage.tsx';
 import { CheckoutPage } from '../pages/CheckoutPage.tsx';
 import { ConfirmationPage } from '../pages/ConfirmationPage.tsx';
+import { ForgotPasswordPage } from '../pages/ForgotPasswordPage.tsx';
 import { HomePage } from '../pages/HomePage.tsx';
 import { NotAllowedPage } from '../pages/NotAllowedPage.tsx';
 import { NotFoundPage } from '../pages/NotFoundPage.tsx';
+import { NotificationsPage } from '../pages/NotificationsPage.tsx';
+import { OrderPage } from '../pages/OrderPage.tsx';
+import { OrdersPage } from '../pages/OrdersPage.tsx';
 import { PlaceholderPage } from '../pages/PlaceholderPage.tsx';
 import { ProductPage } from '../pages/ProductPage.tsx';
 import { RegisterPage } from '../pages/RegisterPage.tsx';
+import { ResetPasswordPage } from '../pages/ResetPasswordPage.tsx';
 import { SearchPage } from '../pages/SearchPage.tsx';
 import { SignInPage } from '../pages/SignInPage.tsx';
 import { VerifyEmailPage } from '../pages/VerifyEmailPage.tsx';
@@ -77,6 +84,13 @@ const PAGES: Partial<Readonly<Record<KnownRouteTemplate, JSX.Element>>> = {
   '/verify': <VerifyEmailPage />,
   '/checkout': <CheckoutPage />,
   '/orders/:id/confirmation': <ConfirmationPage />,
+  '/orders': <OrdersPage />,
+  '/orders/:id': <OrderPage />,
+  '/account': <AccountPage />,
+  '/account/addresses': <AddressesPage />,
+  '/account/notifications': <NotificationsPage />,
+  '/forgot-password': <ForgotPasswordPage />,
+  '/reset-password': <ResetPasswordPage />,
 };
 
 const PLACEHOLDER_TITLES: Readonly<Record<KnownRouteTemplate, string>> = {

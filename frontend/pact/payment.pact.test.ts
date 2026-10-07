@@ -55,6 +55,36 @@ describe('storefront → payment pact (P2)', () => {
       });
   });
 
+  it('reads one declined attempt by its id', async () => {
+    await provider
+      .addInteraction()
+      .given(`order ${ORDER_1} has a declined payment attempt`)
+      .uponReceiving(`a read of the declined payment attempt of order ${ORDER_1}`)
+      .withRequest('GET', `${ATTEMPTS}/${ATTEMPT_DECLINED}`, (request) => {
+        request.headers({ Authorization: bearer() });
+      })
+      .willRespondWith(200, (response) => {
+        response.jsonBody({
+          id: uuid(ATTEMPT_DECLINED),
+          orderId: uuid(ORDER_1),
+          amount: money(4913),
+          outcome: regex('^(approved|declined|pending|voided)$', 'declined'),
+          declineReason: regex(
+            '^(insufficient_funds|card_expired|card_rejected|suspected_fraud|invalid_payment_method)$',
+            'insufficient_funds',
+          ),
+          providerReference: like('sim_ch_000124'),
+          idempotencyKey: uuid('2b3c4d5e-6f70-4a81-92b3-c4d5e6f70a81'),
+          createdAt: instant('2026-10-02T10:30:00Z'),
+        });
+      })
+      .executeTest(async (mockServer) => {
+        const attempt = await shopper(mockServer.url).getAttempt(ATTEMPT_DECLINED);
+        expect(attempt?.outcome).toBe('declined');
+        expect(attempt?.declineReason).toBe('insufficient_funds');
+      });
+  });
+
   it('answers an empty page for an order without attempts', async () => {
     await provider
       .addInteraction()

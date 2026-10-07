@@ -1,4 +1,5 @@
 import type { components } from '@api/generated/order';
+import type { Listing } from '@app/catalog/browseParams';
 import type { IdempotencyKey } from '@domain/ids';
 
 // The order operations of checkout and confirmation over the generated order contract. Placing an
@@ -8,6 +9,7 @@ import type { IdempotencyKey } from '@domain/ids';
 // throttling, outages and network failures are thrown.
 export type Order = components['schemas']['Order'];
 export type OrderLine = components['schemas']['OrderLine'];
+export type OrderPage = components['schemas']['OrderPage'];
 export type PlaceOrderRequest = components['schemas']['PlaceOrderRequest'];
 export type ChangedLine = components['schemas']['PriceChangedProblem']['changedLines'][number];
 export type UnavailableLine =
@@ -39,8 +41,21 @@ export type PlaceOrderResult =
   /** The session is gone: the page returns to sign-in with the draft kept. */
   | { readonly kind: 'unauthorized' };
 
+/**
+ * What cancelling an own order answers: the cancelled order, the platform's reason for refusing
+ * (409 `order-not-cancellable`, the order has moved on) or an unknown order (404). Throttling,
+ * outages and the other refusals are thrown.
+ */
+export type CancelOrderResult =
+  | { readonly kind: 'cancelled'; readonly order: Order }
+  | { readonly kind: 'notCancellable'; readonly message: string }
+  | { readonly kind: 'notFound' };
+
 export type OrderPort = {
   placeOrder(request: PlaceOrderRequest, key: IdempotencyKey): Promise<PlaceOrderResult>;
   /** `null` when the order is unknown or belongs to another shopper (404). */
   getOwnOrder(id: string): Promise<Order | null>;
+  /** The own orders, newest first (the platform's order). */
+  listOwnOrders(params?: Listing): Promise<OrderPage>;
+  cancelOwnOrder(id: string): Promise<CancelOrderResult>;
 };

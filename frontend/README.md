@@ -144,6 +144,53 @@ declined for token tok_sim_decline_01`; the empty-cart read of K1 reuses `no ano
   failed sign-in counters, verification tokens, anonymous cart tokens and full checkout stubs.
   `./gradlew -q contractVerify` therefore cannot verify `storefront-*.json` until each provider adds them.
 
+## Account and orders (US4, 2026-10-07)
+
+- **Routes**: `/orders`, `/orders/:id`, `/account`, `/account/addresses`, `/account/notifications`,
+  `/forgot-password`, `/reset-password` (the notification service links to `/reset-password?token=`,
+  `LinkPaths.RESET_PASSWORD`). The first five are shopper routes behind the redirect rule; the last two are
+  anonymous and read `?token=` once, replacing history (`/reset-password` keeps the token in memory so a
+  refused password can be retried; a missing, used, expired or invalid token shows one generic message).
+- **OrderView** (`src/app/order/orderView.ts`, extended rather than a second `app/orders` module):
+  `toOrderView(order, role = 'shopper')` derives `cancellationReason` only for a cancelled order,
+  `paymentDeadline` only while the payment is pending (from `paymentExpiresAt`), the history sorted oldest first
+  (stable for equal instants) and `actions` from `allowedActions`. `history[].by` is an account id on the wire:
+  `actorOf` shows `system` for the platform, `you` for the account that placed the order (the `by` of the earliest
+  `order: placed` entry, so no profile lookup is needed) and `operator` for any other account; the id never reaches
+  the page. The order page polls like the confirmation (5 s while pending and before the deadline).
+- **Cancel**: offered by the platform's rule (`allowedActions('shopper', ...)`: only `placed`), behind a
+  `ConfirmDialog` ("Keep the order" is focused on open; Escape and "Keep the order" cancel; focus returns to the
+  opening control). `cancelOwnOrder` answers a closed `CancelOrderResult`: `cancelled` replaces the cached order and
+  refreshes the lists, `notCancellable` (409 `order-not-cancellable`) shows the platform's reason and a "Refresh the
+  order" button and leaves the displayed status as it was, `notFound` (404) says the order no longer exists.
+- **Account deletion** asks for the password. Identity's `deleteOwnAccount` takes none, so the storefront proves it by
+  signing in again with it (`IdentityPort.confirmPassword`: `true`/`false`, built on a client with
+  `reportUnauthorized: false` so a wrong password does not end the session it is made from), then deletes, then
+  signs out (the sign-out may find no session after the account's sessions were revoked and is ignored) and shows the
+  farewell state. A refusal (403 for an operator) is shown in the dialog.
+- **Notification preferences**: `sms` is disabled with its reason until `phoneVerified`; a phone number is verified
+  with the code sent to it (`PhoneNumber`/`VerificationCode` in `src/domain/phone.ts`: E.164 and six digits); at least
+  one channel stays on; a platform 422 is shown and nothing changes. The form remounts when the stored preferences
+  change (`key`), so it always starts from them.
+- **Addresses**: `AddressForm` gained `label` and `initial` for editing; removal is behind a confirmation; the list is
+  paged with `?page=` and the pager appears only with more than one page.
+- **Sign-out** (header) also removes the checkout draft from `sessionStorage` (an address id and a payment method);
+  an expired session keeps it on purpose (US2).
+- **Shared pieces**: `TextField` (label, hint, error described and announced), `ActionError` (error with a dismiss
+  that clears it, or the 429 countdown), `format.ts` (dates and addresses as text), `Pager` takes the noun of the list,
+  `ConfirmDialog` accepts children and keeps its focus when the parent re-renders.
+- **Pacts**: identity I6, I8, I9, I12–I18 (35 interactions in all), order O6 and O8 (15), payment P2 gains
+  `getPaymentAttempt` (3). The unknown reset token is `tok-unknown-` padded with `0` to 43 characters; the
+  `requestPhoneVerification` interaction answers 202 only where identity can send an SMS (see "Provider
+  verification" below).
+- **Provider verification**: identity's contract layer has no SMTP server, so the simulated SMS channel
+  (`SimulatedSmsSender`, mirrored to Mailpit) fails there and `requestPhoneVerification` answers 503 instead of the
+  matrix's 202; the contract test needs a fake `SmsSenderPort` (or an SMTP stub) for I16 to verify.
+- **Acceptance** (`@us4`): `order-tracking.feature` and `account.feature`; orders are placed through the API with the
+  approving token (`ShopperFixtures.placeOrder`), the operator advances them through the API
+  (`support/operator.ts`), the text message code is read from Mailpit (`sms-<digits>@sms.ecommerce.invalid`), the
+  reset link from the reset mail. The keyboard scenario cancels a placed order with Tab and Enter only.
+
 ## Vitest version pin
 
 Vitest is pinned to 4.1.x: with Vitest 5.0 the Stryker Vitest runner (10.0.0) records no per-test coverage, so every mutant survives with "0.00 tests per mutant" and the mutation score is 0. Upgrade Vitest only once a Stryker release declares support for it (verify with `npm run mutate`).

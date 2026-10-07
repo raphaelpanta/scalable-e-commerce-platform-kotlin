@@ -5,6 +5,7 @@ import type { Address } from '@domain/address';
 import { type ApiClientOptions, createApiClient, requireBody } from './client.ts';
 import type { paths as GatewayPaths } from './generated/gateway-browser-session';
 import type { components, paths as IdentityPaths } from './generated/identity';
+import { UnauthorizedError } from './problem.ts';
 
 // Adapter of the identity port over the generated identity contract. Sign-in and refresh go
 // through the gateway's browser-session contract (`X-Browser-Session: cookie`): the page receives
@@ -39,6 +40,8 @@ function addressQuery(params: Listing): AddressQuery {
 export function createIdentityApi(options: ApiClientOptions = {}): IdentityPort {
   const identity = createApiClient<IdentityPaths>(options);
   const gateway = createApiClient<GatewayPaths>(options);
+  // The re-authentication answers 401 for a wrong password; that must not end the session.
+  const reauthentication = createApiClient<GatewayPaths>({ ...options, reportUnauthorized: false });
   return {
     async register(email, password) {
       const { data, response } = await identity.POST('/api/v1/identity/accounts', {
@@ -77,6 +80,76 @@ export function createIdentityApi(options: ApiClientOptions = {}): IdentityPort 
         body: toAddressInput(address),
       });
       return requireBody(data, response);
+    },
+    async signOut() {
+      await identity.DELETE('/api/v1/identity/sessions/current');
+    },
+    async updateOwnProfile(displayName) {
+      const { data, response } = await identity.PUT('/api/v1/identity/accounts/me', {
+        body: { displayName },
+      });
+      return requireBody(data, response);
+    },
+    async deleteOwnAccount() {
+      await identity.DELETE('/api/v1/identity/accounts/me');
+    },
+    async confirmPassword(email, password) {
+      try {
+        await reauthentication.POST('/api/v1/identity/sessions', {
+          params: { header: { 'X-Browser-Session': 'cookie' } },
+          body: { email, password: password.unwrap() },
+        });
+        return true;
+      } catch (error) {
+        if (error instanceof UnauthorizedError) return false;
+        throw error;
+      }
+    },
+    async updateOwnAddress(id, address) {
+      const { data, response } = await identity.PUT(
+        '/api/v1/identity/accounts/me/addresses/{addressId}',
+        { params: { path: { addressId: id } }, body: toAddressInput(address) },
+      );
+      return requireBody(data, response);
+    },
+    async deleteOwnAddress(id) {
+      await identity.DELETE('/api/v1/identity/accounts/me/addresses/{addressId}', {
+        params: { path: { addressId: id } },
+      });
+    },
+    async getOwnNotificationPreferences() {
+      const { data, response } = await identity.GET(
+        '/api/v1/identity/accounts/me/notification-preferences',
+      );
+      return requireBody(data, response);
+    },
+    async updateOwnNotificationPreferences(channels) {
+      const { data, response } = await identity.PUT(
+        '/api/v1/identity/accounts/me/notification-preferences',
+        { body: { channels: [...channels] } },
+      );
+      return requireBody(data, response);
+    },
+    async requestPhoneVerification(phone) {
+      await identity.POST('/api/v1/identity/accounts/me/phone-verifications', {
+        body: { phoneNumber: phone },
+      });
+    },
+    async confirmPhoneVerification(code) {
+      await identity.POST('/api/v1/identity/accounts/me/phone-verifications/confirm', {
+        body: { code },
+      });
+    },
+    async requestPasswordReset(email) {
+      const { data, response } = await identity.POST('/api/v1/identity/password-resets', {
+        body: { email: email.value },
+      });
+      return requireBody(data, response).message;
+    },
+    async completePasswordReset(token, newPassword) {
+      await identity.POST('/api/v1/identity/password-resets/complete', {
+        body: { token, newPassword: newPassword.unwrap() },
+      });
     },
   };
 }

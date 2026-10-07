@@ -13,6 +13,10 @@ import buttons from './buttons.module.css';
 import styles from './forms.module.css';
 
 export type AddressFormProps = {
+  /** The accessible name of the form ("New delivery address" by default). */
+  readonly label?: string;
+  /** The values of the address being edited; absent for a new address. */
+  readonly initial?: AddressInput;
   readonly busy?: boolean;
   /** Per-field refusals of the platform (422 `errors[]`), shown next to the fields. */
   readonly serverErrors?: readonly FieldError[];
@@ -49,6 +53,20 @@ const EMPTY: Record<TextField, string> = {
   label: '',
 };
 
+function valuesOf(initial: AddressInput | undefined): Record<TextField, string> {
+  if (initial === undefined) return EMPTY;
+  return {
+    recipientName: initial.recipientName,
+    line1: initial.line1,
+    line2: initial.line2 ?? '',
+    city: initial.city,
+    region: initial.region ?? '',
+    postalCode: initial.postalCode,
+    countryCode: initial.countryCode,
+    label: initial.label ?? '',
+  };
+}
+
 function reasonText(error: AddressFieldError): string {
   switch (error.reason) {
     case 'required':
@@ -66,14 +84,16 @@ function reasonText(error: AddressFieldError): string {
  * Nothing typed here is persisted by the storefront: the saved address is referenced by its id.
  */
 export function AddressForm({
+  label = 'New delivery address',
+  initial,
   busy = false,
   serverErrors = [],
   onSubmit,
   onCancel,
 }: AddressFormProps): JSX.Element {
   const prefix = useId();
-  const [values, setValues] = useState(EMPTY);
-  const [isDefault, setIsDefault] = useState(false);
+  const [values, setValues] = useState(() => valuesOf(initial));
+  const [isDefault, setIsDefault] = useState(initial?.isDefault ?? false);
   const [clientErrors, setClientErrors] = useState<readonly AddressFieldError[]>([]);
 
   const errorFor = (field: TextField): string | undefined => {
@@ -105,7 +125,7 @@ export function AddressForm({
   };
 
   return (
-    <form className={styles.form} onSubmit={submit} aria-label="New delivery address">
+    <form className={styles.form} onSubmit={submit} aria-label={label}>
       {FIELDS.map((field) => {
         const id = `${prefix}-${field.name}`;
         const error = errorFor(field.name);

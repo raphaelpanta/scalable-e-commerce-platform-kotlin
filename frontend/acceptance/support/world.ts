@@ -83,6 +83,18 @@ export class StorefrontWorld extends World {
   searchTerm: string | undefined;
   /** A bearer token of the scenario's shopper for API-side fixtures and checks (never the page's). */
   shopperToken: string | undefined;
+  /** The id of the delivery address the scenario's shopper saved through the API. */
+  shopperAddressId: string | undefined;
+  /** The ids of the orders placed for the scenario's shopper through the API, oldest first. */
+  readonly placedOrders: string[] = [];
+  /** The id of an order placed by another shopper of the scenario. */
+  otherShopperOrder: string | undefined;
+  /** The phone number the scenario's shopper verified in the browser. */
+  phoneNumber: string | undefined;
+  /** The password the scenario's shopper chose through a reset. */
+  newPassword: string | undefined;
+  /** The reset link of the mail the scenario received. */
+  resetLink: string | undefined;
   /** Mailpit message ids seen before the step that awaits a new message. */
   knownMessages = new Set<string>();
   /** URLs already audited for accessibility in this scenario. */

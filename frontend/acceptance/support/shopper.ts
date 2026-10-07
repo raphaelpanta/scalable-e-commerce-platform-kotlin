@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import type { MailpitClient } from './mailpit.ts';
 import type { Credentials } from './world.ts';
 
@@ -6,6 +8,9 @@ import type { Credentials } from './world.ts';
 // Mailpit token, a bearer token for API-side arrangements (an account cart, a saved address) and
 // checks (the orders that exist). The browser itself only ever uses the storefront.
 type JsonRecord = Record<string, unknown>;
+
+/** The seeded simulated payment method that is always approved (feature 004). */
+const APPROVING_TOKEN = 'tok_sim_approve_4242';
 
 export class ShopperFixtures {
   readonly #baseUrl: string;
@@ -59,6 +64,34 @@ export class ShopperFixtures {
     return id;
   }
 
+  /** Places an order for `quantity` of the product through the API (approved payment); returns its id. */
+  async placeOrder(
+    token: string,
+    addressId: string,
+    productId: string,
+    quantity: number,
+  ): Promise<string> {
+    await this.addToAccountCart(token, productId, quantity);
+    const cart = await this.#request('GET', '/api/v1/cart', undefined, 200, token);
+    const revision = cart['revision'];
+    if (typeof revision !== 'string') throw new Error('the cart has no revision');
+    const order = await this.#request(
+      'POST',
+      '/api/v1/orders',
+      {
+        addressId,
+        cartRevision: revision,
+        paymentMethod: { type: 'card', token: APPROVING_TOKEN },
+      },
+      201,
+      token,
+      { 'Idempotency-Key': randomUUID() },
+    );
+    const id = order['id'];
+    if (typeof id !== 'string') throw new Error('the order was placed without an id');
+    return id;
+  }
+
   /** The orders of the account, newest first. */
   async orders(token: string): Promise<JsonRecord[]> {
     const body = await this.#request('GET', '/api/v1/orders?size=50', undefined, 200, token);
@@ -71,10 +104,12 @@ export class ShopperFixtures {
     body: unknown,
     expectedStatus: number,
     token?: string,
+    headers: Record<string, string> = {},
   ): Promise<JsonRecord> {
     const response = await fetch(`${this.#baseUrl}${path}`, {
       method,
       headers: {
+        ...headers,
         ...(token === undefined ? {} : { Authorization: `Bearer ${token}` }),
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       },
