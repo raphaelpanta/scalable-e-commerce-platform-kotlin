@@ -6,7 +6,13 @@
 .git
 .kotlin
 .idea
+
+# Storefront (platform/docker/Dockerfile.storefront): dependencies, bundles and the generated API types are produced
+# inside the image, never taken from the host
 frontend/node_modules
+frontend/dist
+frontend/build
+frontend/src/api/generated
 
 # Agent worktrees are nested checkouts, never part of the build context or the repository
 .claude/worktrees/
@@ -21,3 +27,9 @@ scripts/
 .claude/
 .tokensave/
 .rtk/
+# ...except what the storefront image copies: its nginx server block and the OpenAPI contracts that
+# frontend/scripts/generate-api.mjs turns into src/api/generated (a few small files; they also enter the
+# context of the JVM images, where `COPY . .` ignores nothing)
+!platform/docker/storefront
+!specs/004-ecommerce-platform-mvp/contracts/openapi
+!specs/005-storefront-dev-bootstrap/contracts/openapi

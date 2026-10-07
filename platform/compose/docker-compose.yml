@@ -1,8 +1,8 @@
 # Local platform (feature 004). Run from this directory:
 #   cp .env.example .env
 #   docker compose --profile core --profile observability up -d --build
-# Profiles: core (gateway, six services, one PostgreSQL each, Kafka, Mailpit), observability (OpenTelemetry Collector,
-# Loki, Tempo, Prometheus, Grafana), ci (Pact Broker). See README.md and docs/running-locally.md.
+# Profiles: core (gateway, storefront, six services, one PostgreSQL each, Kafka, Mailpit), observability (OpenTelemetry
+# Collector, Loki, Tempo, Prometheus, Grafana), ci (Pact Broker). See README.md and docs/running-locally.md.
 #
 # Isolation (FR-023): only gateway:8080, grafana:3000 and mailpit:8025 (and pact-broker:9292 in the ci profile) are
 # published, bound to ${BIND_ADDRESS:-127.0.0.1}. Services, databases and Kafka publish nothing. The gateway is the only
@@ -12,7 +12,8 @@
 # Images: the seven `build:` blocks use the same context and platform/docker/Dockerfile, whose `build` stage compiles
 # every boot jar in one Gradle invocation and does not depend on SERVICE_MODULE; built one at a time
 # (COMPOSE_PARALLEL_LIMIT=1), the first image runs Gradle and the six others reuse that stage from the layer cache
-# (cold `up --build` about 4 minutes instead of 14 to 24, platform/docker/README.md, SC-006).
+# (cold `up --build` about 4 minutes instead of 14 to 24, platform/docker/README.md, SC-006). The storefront image
+# (platform/docker/Dockerfile.storefront, Node build then nginx) is the eighth build and shares nothing with them.
 name: ecommerce-platform
 
 x-platform-env: &platform-env
@@ -79,7 +80,13 @@ services:
       dockerfile: platform/docker/Dockerfile
       args:
         SERVICE_MODULE: :services:gateway
-    environment: *platform-env
+    environment:
+      <<: *platform-env
+      # Storefront route and telemetry pass-through (specs/005-storefront-dev-bootstrap/contracts/gateway-routes.md)
+      STOREFRONT_URL: http://storefront:8080
+      OTEL_COLLECTOR_URL: http://otel-collector:4318
+      # Seals the browser session and cart cookies (32 random bytes, Base64); shared by every gateway replica
+      BROWSER_SESSION_KEY: ${BROWSER_SESSION_KEY:?BROWSER_SESSION_KEY must be set in .env (scripts/dev-env.sh generates it)}
     ports:
       # GATEWAY_PORT lets the stack run beside another local service that already holds 8080
       - "${BIND_ADDRESS:-127.0.0.1}:${GATEWAY_PORT:-8080}:8080"
@@ -87,7 +94,27 @@ services:
     depends_on:
       identity:
         condition: service_healthy
+      storefront:
+        condition: service_healthy
 
+  # ------------------------------------------------------------------ core: storefront (static bundle)
+  # The Vite bundle served by a rootless nginx (platform/docker/Dockerfile.storefront); reachable only through the
+  # gateway's `storefront` route, so it publishes nothing and sits on `internal` alone. Not a JVM: no `x-app`.
+  storefront:
+    image: ecommerce-platform/storefront:local
+    build:
+      context: ../..
+      dockerfile: platform/docker/Dockerfile.storefront
+    restart: unless-stopped
+    profiles: [core]
+    mem_limit: ${STOREFRONT_MEM_LIMIT:-64m}
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   # ------------------------------------------------------------------ core: identity
   identity:

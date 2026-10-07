@@ -17,18 +17,20 @@ Plan for about 8 GB of free memory for containers.
 
 | Profile | Services |
 |---|---|
-| `core` | `gateway`, `identity`, `catalog`, `cart`, `order`, `payment`, `notification`, one PostgreSQL 18 per service (`<ctx>-db`, database `<ctx>`), `kafka` (4.3.1, single-node KRaft, topics auto-created), `mailpit` |
+| `core` | `gateway`, `storefront` (the web storefront bundle served by nginx, `platform/docker/Dockerfile.storefront`), `identity`, `catalog`, `cart`, `order`, `payment`, `notification`, one PostgreSQL 18 per service (`<ctx>-db`, database `<ctx>`), `kafka` (4.3.1, single-node KRaft, topics auto-created), `mailpit` |
 | `observability` | `otel-collector`, `loki`, `tempo`, `prometheus`, `grafana` |
 | `ci` | `pact-broker` (3.0.0) with `pact-broker-db` |
 
-Profiles combine: `--profile core --profile observability --profile ci`. The SMS sink is an in-process simulator of the
-notification service, so no container is needed for it.
+Profiles combine: `--profile core --profile observability --profile ci`. `core` is 16 containers, `core` plus
+`observability` 21. The SMS sink is an in-process simulator of the notification service, so no container is needed for
+it. The gateway waits for `identity` and `storefront` to be healthy; the storefront is plain nginx and is healthy
+within seconds.
 
 ## URLs (the only published ports)
 
 | What | URL |
 |---|---|
-| Public gateway | http://localhost:8080 |
+| Public gateway (API under `/api/**`, the web storefront on every other path) | http://localhost:8080 |
 | Grafana (login `admin` / `GRAFANA_ADMIN_PASSWORD` from `.env`) | http://localhost:3000 |
 | Mailpit (email sink; SMTP `mailpit:1025` internal) | http://localhost:8025 |
 | Pact Broker (`ci` profile, basic auth from `.env`) | http://localhost:9292 |
@@ -40,7 +42,7 @@ they live on the `internal` network; only the gateway is also on `edge` (FR-023)
 
 | File | Content |
 |---|---|
-| `.env` (git-ignored, from `.env.example`) | `INTERNAL_API_TOKEN`, `IDENTITY_SIGNING_KEY`, `SEED`, `GRAFANA_ADMIN_PASSWORD`, `PACT_BROKER_*`, `BIND_ADDRESS`, optional `JWT_ISSUER`/`JWT_AUDIENCE` |
+| `.env` (git-ignored, from `.env.example`) | `INTERNAL_API_TOKEN`, `IDENTITY_SIGNING_KEY`, `BROWSER_SESSION_KEY` (required by the gateway: seals the storefront's session and cart cookies; `scripts/dev-env.sh` and the compose scripts generate it when empty), `SEED`, `GRAFANA_ADMIN_PASSWORD`, `PACT_BROKER_*`, `BIND_ADDRESS`, optional `JWT_ISSUER`/`JWT_AUDIENCE` |
 | `env/<ctx>.env` (committed, local-only defaults) | `<CTX>_DB_HOST`, `<CTX>_DB_USER`, `<CTX>_DB_PASSWORD` for the service and `POSTGRES_USER/PASSWORD/DB` for its database; `env/identity.env` also passes `IDENTITY_SIGNING_KEY` from `.env` and raises `IDENTITY_SOURCE_MAX_FAILURES` to 20 (one acceptance runner address) |
 
 `IDENTITY_SIGNING_KEY` is the Ed25519 private key that signs every access token (PKCS#8 DER in Base64). All identity
@@ -62,7 +64,9 @@ Environment of every service (`identity`, `catalog`, `cart`, `order`, `payment`,
 `IDENTITY_URL`, `CATALOG_URL`, `CART_URL`, `ORDER_URL`, `PAYMENT_URL`, `NOTIFICATION_URL` (`http://<ctx>:8080`),
 `INTERNAL_API_TOKEN`; plus `SEED` (identity, catalog) and `SMTP_HOST=mailpit`, `SMTP_PORT=1025`,
 `PUBLIC_BASE_URL=http://localhost:8080` (notification). The gateway gets the same values without Kafka and
-`INTERNAL_API_TOKEN` (it never routes `/internal/**`).
+`INTERNAL_API_TOKEN` (it never routes `/internal/**`), plus `STOREFRONT_URL=http://storefront:8080` (upstream of the
+storefront route), `OTEL_COLLECTOR_URL=http://otel-collector:4318` (browser telemetry pass-through) and
+`BROWSER_SESSION_KEY` from `.env`. The storefront container reads no environment.
 
 ## Seed data
 
@@ -130,7 +134,9 @@ services never turn healthy and `depends_on: service_healthy` blocks the stack.
 
 ## Building the images
 
-`docker compose --profile core up -d --build` builds the seven service images from `platform/docker/Dockerfile`.
+`docker compose --profile core up -d --build` builds the seven service images from `platform/docker/Dockerfile` and
+the storefront image from `platform/docker/Dockerfile.storefront` (Node build stage, then nginx; about 30 s cold, see
+`platform/docker/README.md`, "Storefront image").
 Their `build` stage compiles all seven boot jars in one Gradle invocation and is identical for every image, so with
 `COMPOSE_PARALLEL_LIMIT=1` (set by the scripts) the first image runs Gradle and the six others reuse the stage from the
 layer cache: a cold `up --build` takes about 4 minutes on the development machine (`platform/docker/README.md`,
@@ -143,7 +149,8 @@ Every service container is bounded (`SERVICE_MEM_LIMIT`, default 768m, and `SERV
 JVM's `MaxRAMPercentage=40` sizes the heap to the container (307 MiB) and leaves room for its off-heap memory (an earlier
 640m limit with a 75 % heap was OOM-killed under load); databases get `DB_MEM_LIMIT` (256m), Kafka
 `KAFKA_MEM_LIMIT` (1g) with `KAFKA_HEAP_OPTS`, and each observability container `OBS_MEM_LIMIT` (512m) except Tempo, `TEMPO_MEM_LIMIT` (2g: every request is
-traced, and 512m and 1g were OOM-killed in a loop under the performance suite). The image also caps the JVM's direct
+traced, and 512m and 1g were OOM-killed in a loop under the performance suite). The storefront (nginx serving static
+files) gets `STOREFRONT_MEM_LIMIT` (64m). The image also caps the JVM's direct
 memory and malloc arenas (platform/docker/README.md, "Runtime settings"). The whole
-`core` + `observability` stack needs about 9 GiB; on a smaller engine VM start `core` alone first. `GATEWAY_PORT`
+`core` + `observability` stack (21 containers) needs about 9 GiB; on a smaller engine VM start `core` alone first. `GATEWAY_PORT`
 moves the published gateway port when 8080 is taken on the host.

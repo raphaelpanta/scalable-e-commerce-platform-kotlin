@@ -59,6 +59,11 @@ clients read only `status`. The image `HEALTHCHECK`, the Compose health check, t
 Compose publishes only `gateway:8080`, `grafana:3000` and `mailpit:8025` to the host; services, databases and
 Kafka are reachable only on the internal network (FR-023).
 
+The storefront container (`platform/docker/Dockerfile.storefront`, nginx serving the web storefront bundle) is not a
+JVM: it listens on **8080** only, its health check is `GET /healthz` answering `ok`, it reads no environment, and
+Compose bounds it with `STOREFRONT_MEM_LIMIT` (default `64m`, against `SERVICE_MEM_LIMIT` 768m for a service). It is
+reached only through the gateway's `storefront` route (`STOREFRONT_URL`).
+
 ## 3. HTTP API rules
 
 - Public paths are versioned `/api/v1/<context>/...` exactly as in `contracts/openapi/*.yaml`; the gateway routes them
