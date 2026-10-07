@@ -17,6 +17,7 @@ import com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo
 import com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig
 import org.apache.hc.core5.http.HttpRequest
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
@@ -25,14 +26,19 @@ import org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDO
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
+import org.springframework.http.HttpStatusCode
 import org.springframework.http.MediaType
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.web.reactive.function.client.WebClient
+import reactor.core.publisher.Mono
 import java.net.ServerSocket
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 import javax.crypto.spec.SecretKeySpec
 
 private const val KID = "2026-10-a1"
@@ -56,6 +62,7 @@ private const val RETRY_AFTER_SECONDS = 42
 // second): the state empties it with sequential requests and stops at the first 429.
 private const val BROWSE_PER_MINUTE = 60
 private const val EXHAUST_ATTEMPTS = BROWSE_PER_MINUTE * 20
+private const val DRAIN_PERIOD_MILLIS = 25L
 private const val SHELL = "<!doctype html><html><body><div id=\"root\"></div></body></html>"
 private val KEY_BYTES = ByteArray(AesGcmSessionSealer.KEY_BYTES) { (it * 3 + 1).toByte() }
 private val SESSION_COOKIES = setOf("session", "__Host-session")
@@ -80,6 +87,7 @@ abstract class StorefrontProviderStates {
 
     private var sessionCookie: String? = null
     private var cartCookie: String? = null
+    private var drain: ScheduledExecutorService? = null
 
     companion object {
         private val collectorPort: Int = ServerSocket(0).use { it.localPort }
@@ -296,20 +304,39 @@ abstract class StorefrontProviderStates {
     @State("the browse budget of the client is exhausted")
     fun browseBudgetExhausted() {
         collectorAcceptsOtlp()
-        val client = WebClient.create("http://localhost:$port")
+        val client = WebClient.create("http://127.0.0.1:$port")
         repeat(EXHAUST_ATTEMPTS) { attempt ->
-            val status =
-                client
-                    .post()
-                    .uri("/api/v1/telemetry/v1/logs")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .bodyValue("""{"resourceLogs":[]}""")
-                    .exchangeToMono { response -> response.releaseBody().thenReturn(response.statusCode()) }
-                    .block()
-            if (status == HttpStatus.TOO_MANY_REQUESTS) return
+            if (exportLogs(client) == HttpStatus.TOO_MANY_REQUESTS) return keepBrowseBudgetEmpty(client)
             check(attempt < EXHAUST_ATTEMPTS - 1) { "the browse budget could not be exhausted" }
         }
     }
+
+    /**
+     * The verifier's HTTP client retries a 429 once after its `Retry-After` (one second), by when the bucket has
+     * refilled: a daemon thread takes every token that comes back until the interaction is over.
+     */
+    private fun keepBrowseBudgetEmpty(client: WebClient) {
+        val executor =
+            Executors.newSingleThreadScheduledExecutor { Thread(it, "browse-budget-drain").apply { isDaemon = true } }
+        executor.scheduleWithFixedDelay({ exportLogs(client) }, 0, DRAIN_PERIOD_MILLIS, TimeUnit.MILLISECONDS)
+        drain = executor
+    }
+
+    @AfterEach
+    fun stopDraining() {
+        drain?.shutdownNow()
+        drain = null
+    }
+
+    private fun exportLogs(client: WebClient): HttpStatusCode? =
+        client
+            .post()
+            .uri("/api/v1/telemetry/v1/logs")
+            .contentType(MediaType.APPLICATION_JSON)
+            .bodyValue("""{"resourceLogs":[]}""")
+            .exchangeToMono { response -> response.releaseBody().thenReturn(response.statusCode()) }
+            .onErrorResume { Mono.empty() }
+            .block()
 
     @State("the telemetry collector is not running")
     fun collectorNotRunning() {
