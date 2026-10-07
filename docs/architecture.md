@@ -2,7 +2,9 @@
 
 Architecture of the platform delivered by feature 004
 ([spec](../specs/004-ecommerce-platform-mvp/spec.md), [plan](../specs/004-ecommerce-platform-mvp/plan.md)): six
-bounded-context services behind a Kotlin gateway, talking over versioned HTTP and Kafka events. This page is the
+bounded-context services behind a Kotlin gateway, talking over versioned HTTP and Kafka events, plus the web
+storefront added by feature 005
+([spec](../specs/005-storefront-dev-bootstrap/spec.md), [plan](../specs/005-storefront-dev-bootstrap/plan.md)). This page is the
 map; the rules it summarises live in the [constitution](../.specify/memory/constitution.md), the
 [service conventions](service-conventions.md) (binding implementation details, they win on conflict) and the
 [contracts](../contracts/README.md) (source of truth for every API and event). Decisions with alternatives are
@@ -21,7 +23,8 @@ domain code (Principle VI). Cross-context references hold ids only.
 | `order` | orders, order and payment status, idempotency records, cancellation | `OrderPlaced`, `OrderPaid`, `OrderPaymentFailed`, `OrderPreparing`, `OrderShipped`, `OrderDelivered`, `OrderCancelled` | `PaymentApproved`, `PaymentDeclined`, `PaymentPending`, `RefundRecorded`, `AccountDeleted` | Orchestrates checkout; two-status model ([ADR 0001](adr/0001-two-status-order-model.md)) |
 | `payment` | charge and refund attempts, simulated provider behind `PaymentProviderPort` | `PaymentApproved`, `PaymentDeclined`, `PaymentPending`, `RefundRecorded` | `OrderPlaced`, `OrderCancelled` | One approved charge per order; no card data stored |
 | `notification` | recipients (read model), notifications, delivery attempts | `NotificationSent`, `NotificationFailed` | account, order and payment events | Email (Mailpit locally) and SMS simulator; order flow never depends on delivery |
-| `gateway` | nothing (no database) | none | none | Single public entry point: JWT, route table, rate limits, correlation id |
+| `gateway` | nothing (no database) | none | none | Single public entry point: JWT, route table, rate limits, correlation id; since feature 005 also the browser session and cart cookies and the telemetry pass-through ([ADR 0005](adr/0005-browser-session-at-the-gateway.md)) |
+| `storefront` | nothing (static bundle, no database, no server logic) | none | none | Not a bounded context: the web client (`frontend/`, TypeScript and React) served as static files by a rootless nginx container, reachable only through the gateway; calls the same public `/api/v1` contracts as any other client |
 
 Event payloads and consumers: [`contracts/asyncapi/events.yaml`](../contracts/asyncapi/events.yaml); full model:
 [data-model.md](../specs/004-ecommerce-platform-mvp/data-model.md) section 3.
@@ -29,6 +32,10 @@ Event payloads and consumers: [`contracts/asyncapi/events.yaml`](../contracts/as
 ```mermaid
 flowchart LR
     client([Shopper or operator]) -->|HTTPS /api/v1| gateway
+    browser([Browser]) -->|pages, /api/v1, telemetry| gateway
+    gateway -->|"GET pages (catch-all)"| storefront
+    gateway -->|"/api/v1/telemetry (OTLP/HTTP)"| collector[OTel Collector]
+    collector -.->|traces, logs| lgtm[(Tempo, Loki)]
     gateway -->|routes| identity
     gateway -->|routes| catalog
     gateway -->|routes| cart
@@ -51,7 +58,9 @@ flowchart LR
 ```
 
 Solid arrows are synchronous HTTP calls (each service, including the gateway, also validates JWTs against the
-identity JWKS and never calls identity per request); dotted arrows are Kafka traffic. Every service also has an
+identity JWKS and never calls identity per request); dotted arrows are Kafka traffic, plus the collector's export to
+Tempo and Loki. The browser reaches nothing but the gateway: the storefront container and the collector publish no host
+port ([section 6](#browser-sessions-and-cookies-feature-005), [ADR 0005](adr/0005-browser-session-at-the-gateway.md)). Every service also has an
 outbox and, where it consumes, a processed-event table in its own database. Synchronous chains stay one hop deep
 (Principle VI): the order service fans out to its providers, which never call further services.
 
@@ -125,6 +134,7 @@ own build; a breaking change fails the provider's pipeline. Exact interaction na
 | order | cart, catalog, payment, identity | HTTP |
 | notification | identity | HTTP |
 | cart | catalog | HTTP |
+| storefront | identity, catalog, cart, order, payment, gateway (browser session and telemetry routes) | HTTP (feature 005, [pact matrix](../specs/005-storefront-dev-bootstrap/contracts/pact-matrix.md); the gateway is also a provider) |
 | notification | identity, order, payment | Message |
 | order | payment, identity | Message |
 | catalog | order | Message |
@@ -256,7 +266,8 @@ cannot occur. Any other transition is refused with 409 and leaves the order unch
 
 | Concern | Mechanism |
 |---|---|
-| Authentication | Bearer JWT (EdDSA/Ed25519, 15 min) from identity; claims `sub`, `roles` (`shopper`, `operator`), `iss`, `aud`, `exp`, `iat`, `jti`. Refresh tokens are opaque, rotating, revocable (30 days) |
+| Authentication (API clients) | Bearer JWT (EdDSA/Ed25519, 15 min) from identity; claims `sub`, `roles` (`shopper`, `operator`), `iss`, `aud`, `exp`, `iat`, `jti`. Refresh tokens are opaque, rotating, revocable (30 days) |
+| Authentication (browsers) | The storefront never holds a token: with `X-Browser-Session: cookie` the gateway seals the access and refresh tokens into an HttpOnly cookie and injects `Authorization: Bearer` itself (next subsection); API clients keep the bearer flow unchanged |
 | Key distribution | JWKS at `/.well-known/jwks.json`; gateway and every service are OAuth2 resource servers and cache keys. No cached key and no JWKS answers 503, never accepts the token |
 | Deny by default | Gateway: unknown route is 404, a present but invalid token is 401 even on anonymous routes. Every service repeats the authorisation decision in its application layer; the gateway is not the only line of defence. Other shoppers' orders answer 404 |
 | Roles | `operator` is never self-assigned (seed or another operator); operator-only actions are audited, refusals included |
@@ -290,9 +301,41 @@ Per-service threat model: [plan.md](../specs/004-ecommerce-platform-mvp/plan.md)
 - **Pipeline.** Services emit ECS JSON logs (`service`, `traceId`, `spanId`, `correlationId`) and OTLP/HTTP to the
   OpenTelemetry Collector, which writes logs to Loki and traces to Tempo; Prometheus scrapes
   `/actuator/prometheus` on port 8081 of every replica (DNS service discovery) and receives span metrics from Tempo.
+- **Browser telemetry (feature 005).** See "Telemetry path" below: the browser's spans and client-error logs enter
+  through the gateway and the same collector, so a page view joins the service lines on `correlationId` and `traceId`.
 - **Grafana.** One UI with provisioned Prometheus, Loki and Tempo data sources (logs link to traces through
   `traceId`) and two dashboards in the folder "E-commerce platform": *Requests by correlation id* and *Service RED*.
   Walkthrough: [running-locally.md](running-locally.md); wiring: [platform/compose/README.md](../platform/compose/README.md).
+
+### Browser sessions and cookies (feature 005)
+
+The page never sees an access or refresh token ([ADR 0005](adr/0005-browser-session-at-the-gateway.md)). A request
+that carries `X-Browser-Session: cookie` to sign in or refresh is forwarded unchanged to identity; on success the gateway
+replaces the JSON body by `{expiresAt, roles}` and sets the session cookie: AES-256-GCM sealed (`BROWSER_SESSION_KEY`, shared
+by every gateway replica, so the gateway stays stateless), `HttpOnly`, `SameSite=Strict`, `Path=/`, no `Max-Age` (it ends with
+the browser). `__Host-session` over HTTPS, `session` over plain HTTP on localhost. Every request that carries it is unsealed,
+refused with 401 and a cookie deletion after 30 minutes without activity, given an `Authorization: Bearer` header (the
+access token is refreshed through identity when it has under a minute left) and answered with a renewed cookie, so the
+idle window slides while the shopper is active. Non-GET requests with the cookie must be same-origin (`Sec-Fetch-Site`,
+`Origin`), otherwise 403; a request with both the cookie and its own `Authorization` is 400.
+
+The anonymous cart survives reloads and restarts through a second sealed cookie, `__Host-cart` (`cart` over HTTP): the
+gateway mirrors the cart contract's `X-Cart-Token` into it (`HttpOnly`, `SameSite=Lax`, 30 days), injects the header on
+later cart requests and deletes the cookie once the cart is merged at sign-in. Neither cookie is readable by scripts and the
+storefront uses no `localStorage` (only `sessionStorage` for the checkout draft's ids and the random telemetry session
+id). Contract: [`contracts/openapi/gateway-browser-session.yaml`](../contracts/openapi/gateway-browser-session.yaml).
+
+### Telemetry path (feature 005)
+
+Browser spans (document load, fetch, user interaction) and client errors leave the storefront through its one telemetry
+module (an allow-list of attributes; URLs reduced to route templates, no form values, search terms or account ids) as
+OTLP/HTTP JSON to `POST /api/v1/telemetry/v1/traces` and `.../logs`. The gateway routes them anonymously to the collector's
+OTLP receiver (`otel-collector:4318`): `browse` rate-limit tier per source address, 256 KiB body limit, `POST` only,
+cookies and `Authorization` stripped, 503 while the `observability` profile is down (the storefront drops the batch). The
+collector adds a second redaction layer (`http.url`, `url.*`, `user.*` removed, `redaction` processor for `storefront`)
+and writes traces to Tempo and logs to Loki, where the *Storefront RUM* dashboard and the correlation-id search read them.
+The storefront sets `X-Correlation-Id` on every request and `traceparent` is propagated, so browser spans, the gateway
+access line and every service line join on both ids. Contract: [`contracts/openapi/telemetry.yaml`](../contracts/openapi/telemetry.yaml).
 
 ### Persistence (Principles IV and VI)
 
@@ -318,10 +361,11 @@ Per-service threat model: [plan.md](../specs/004-ecommerce-platform-mvp/plan.md)
 | Aspect | Design |
 |---|---|
 | Images | One multi-stage recipe, [`platform/docker/Dockerfile`](../platform/docker/Dockerfile), selected with `SERVICE_MODULE`: Gradle build with BuildKit cache, Spring Boot layer extraction, JRE 25 runtime as non-root user `app`, base images pinned by digest, `HEALTHCHECK` on the readiness probe (8081). `JAVA_TOOL_OPTIONS` sets `MaxRAMPercentage=75` and `networkaddress.cache.ttl=5` |
-| Local run | Docker Compose in `platform/compose` with profiles `core` (gateway, six services, one PostgreSQL each, Kafka KRaft, Mailpit), `observability` (OTel Collector, Loki, Tempo, Prometheus, Grafana) and `ci` (Pact Broker). Only `gateway:8080`, `grafana:3000` and `mailpit:8025` are published ([running-locally.md](running-locally.md)) |
+| Local run | Docker Compose in `platform/compose` with profiles `core` (gateway, storefront, six services, one PostgreSQL each, Kafka KRaft, Mailpit), `observability` (OTel Collector, Loki, Tempo, Prometheus, Grafana) and `ci` (Pact Broker). Only `gateway:8080`, `grafana:3000` and `mailpit:8025` are published ([running-locally.md](running-locally.md)) |
 | Discovery and scaling | Platform DNS: a service name resolves to every replica (`--scale catalog=2`); see deviations |
-| CI | GitHub Actions: `verify` (`./gradlew -q verify`) on pushes to `main` and, through `pr-gate`, on pull requests ([ci-cd.md](ci-cd.md)). Design: one path-filtered pipeline per service plus a platform pipeline, Pact verification gating image publication, on a containerised self-hosted runner ([research.md](../specs/004-ecommerce-platform-mvp/research.md) section 4) |
-| Registry | Private `registry:3` on the runner host (`platform/ci-runner`), images tagged `<service>:<git-sha>` and `<service>:<branch>`; a hosted registry is deferred |
+| Storefront image | [`platform/docker/Dockerfile.storefront`](../platform/docker/Dockerfile.storefront): Node 24 build stage (`npm ci`, `npm run build`), then a rootless `nginx-unprivileged` with SPA fallback, hashed assets cached long, `/healthz` for the `HEALTHCHECK`, 64 MB bound; base images pinned by digest. Built by Compose beside the seven JVM images and by `.github/workflows/storefront.yml` |
+| CI | GitHub Actions: `verify` (`./gradlew -q verify`) on pushes to `main` and, through `pr-gate`, on pull requests ([ci-cd.md](ci-cd.md)). Design: one path-filtered pipeline per service, one for the storefront and a platform pipeline (which also runs the storefront's browser acceptance suite), Pact verification gating image publication, on a containerised self-hosted runner ([research.md](../specs/004-ecommerce-platform-mvp/research.md) section 4) |
+| Registry | Private `registry:3` on the runner host (`platform/ci-runner`), images tagged `<service>:<git-sha>` and `<service>:<branch>` (`storefront` included); a hosted registry is deferred |
 
 ## 8. Decisions
 
@@ -342,6 +386,9 @@ Per-service threat model: [plan.md](../specs/004-ecommerce-platform-mvp/plan.md)
 | Notification channels and retries | research | 12 |
 | Test toolchain per layer | research, constitution V | 13 |
 | Version baseline | research | 14 |
+| Browser session at the gateway (sealed cookie) | [ADR 0005](adr/0005-browser-session-at-the-gateway.md) | [005 research](../specs/005-storefront-dev-bootstrap/research.md) 2, 3 |
+| Static storefront behind the gateway | 005 research | 1, 6, 7 |
+| Browser telemetry through a gateway route | 005 research | 4 |
 
 ## 9. Known deviations and follow-ups
 
@@ -354,4 +401,7 @@ Per-service threat model: [plan.md](../specs/004-ecommerce-platform-mvp/plan.md)
 | Self-hosted runner not registered | The containerised runner (`platform/ci-runner`) and its ephemeral registration are not set up; per-service path-filtered pipelines and image publication wait for it ([ci-cd.md](ci-cd.md)) | Register the runner with the public-repository safeguards, or fall back to GitHub-hosted runners for pull requests |
 | Constitution wording | The plan targets Spring Boot 4.1; the constitution says "Spring Boot 3.x" | PATCH amendment "Spring Boot, latest GA major" (task T120) |
 | Private registry | Images are pullable only on the runner host network | Revisit with a deployment feature |
+| Build-time payment-method list for shoppers | Payment's `GET /api/v1/payments/simulator/rules` is operator-only, so the storefront ships the seeded simulator tokens (`frontend/src/domain/paymentMethods.ts`, labelled as local-development methods); the operator console reads the rules document | A real provider replaces the list with its SDK; or expose a shopper-facing list of payment methods in a later payment contract version |
+| Client-side status filter in the operator console | The order contract's list has limited server filters, so the console filters by status within the loaded page and server-side only where a parameter exists (005 plan, Complexity Tracking) | Add the status (and date) filters to `GET /api/v1/orders` as an additive change, then drop the client-side filter |
+| Categories resolved by id | Feature 004 categories have no slug, so category pages are `/categories/:id` (page and sort state stay in the URL, FR-003) | Add a slug to the catalog contract (additive) and redirect the id routes |
 | SC-002 / SC-003 at 1,000 / 100 users | Verified on the development machine (Podman VM, 8 vCPUs, 11.6 GiB, stack plus k6) only up to 200 browsing + 20 checkout users without errors, browse p95 about 1.2 s there; the specified 1,000 / 100 profile fails every threshold, and `--scale catalog=2` does not help because the VM is saturated (`platform/perf/README.md`, "Recorded results") | Run the suite from a separate machine against a deployment with at least 2 CPUs per service and several catalog replicas before claiming the success criteria |
