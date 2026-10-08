@@ -76,6 +76,8 @@ export class CatalogueFixtures {
       readonly stock?: number;
       readonly priceMinor?: number;
       readonly categoryId?: string;
+      /** `false` lists the product without an image, to show the placeholder. */
+      readonly image?: boolean;
     } = {},
   ): Promise<ProductRef> {
     const name = options.name ?? `${alias} ${suffix()}`;
@@ -95,11 +97,13 @@ export class CatalogueFixtures {
       201,
     );
     const id = requireString(body, 'id');
-    await this.#post(
-      `/api/v1/catalog/products/${id}/images`,
-      { url: `https://cdn.example.test/${id}.jpg`, altText: alias, primary: true },
-      201,
-    );
+    if (options.image !== false) {
+      await this.#post(
+        `/api/v1/catalog/products/${id}/images`,
+        { url: `https://cdn.example.test/${id}.jpg`, altText: alias, primary: true },
+        201,
+      );
+    }
     return { alias, id, name, description, priceMinor, categoryId, stock };
   }
 

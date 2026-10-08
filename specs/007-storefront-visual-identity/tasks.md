@@ -60,7 +60,7 @@ checked on its own.
 
   Run `npm ci` and confirm osv-scanner reports nothing new (`.github/workflows/storefront.yml` step "Dependency
   scan").
-- [ ] T003 [P] Scaffold the visual runner per [research §6](research.md) and
+- [X] T003 [P] Scaffold the visual runner per [research §6](research.md) and
   [contracts/visual-baselines.md](contracts/visual-baselines.md):
   - `frontend/visual/playwright.config.ts`: `testDir: '.'` and `snapshotPathTemplate:
     '{testDir}/__screenshots__/{arg}{ext}'`. Six projects (`360|768|1280` × `light|dark`, height 900) set
@@ -76,7 +76,7 @@ checked on its own.
 
   Add `visual/` to the `tests/**` lint override in `frontend/eslint.config.js` and keep it out of
   `vitest.config.ts` `include`.
-- [ ] T004 Build the MSW-backed visual harness (depends on T002 and T003):
+- [X] T004 Build the MSW-backed visual harness (depends on T002 and T003):
   - `frontend/visual/vite.visual.config.ts` extends `frontend/vite.config.ts`. It sets `publicDir` to
     `frontend/visual/public/`, so the worker never reaches the production `dist/`. It serves on
     `http://localhost:80` (inside the container), so the absolute `http://localhost` base of the handlers in
@@ -182,18 +182,18 @@ scenarios in `frontend/acceptance/features/catalogue-browsing.feature` pass unch
 
 ### Tests for User Story 1 ⚠️ (write first, see them fail)
 
-- [ ] T010 [P] [US1] Property tests for `frontend/src/app/catalog/featured.ts` in
+- [X] T010 [P] [US1] Property tests for `frontend/src/app/catalog/featured.ts` in
   `frontend/tests/app/featured.test.ts` (fast-check over arbitrary category lists). The result:
   - has at most 4 entries;
   - contains only `status === 'active'` categories without a parent;
   - keeps catalogue order;
   - is empty when none qualify;
   - is a stable subsequence of its input.
-- [ ] T011 [P] [US1] Update `frontend/tests/ui/layout.test.tsx`:
+- [X] T011 [P] [US1] Update `frontend/tests/ui/layout.test.tsx`:
   - line 73 `name: 'Storefront'` → `'Vibestore'`;
   - add assertions: the banner has a link named "Vibestore" to `/`, the brand mark is `aria-hidden`, and the
     contentinfo contains the tagline "Good things, good vibes".
-- [ ] T012 [P] [US1] Extend `frontend/tests/ui/browse.test.tsx`:
+- [X] T012 [P] [US1] Extend `frontend/tests/ui/browse.test.tsx`:
   - the home page shows the tagline paragraph and featured-category links named after the `gardenTools` and
     `lighting` fixtures (`frontend/tests/msw/catalog.ts`);
   - the section is absent when the categories handler returns an empty list (`server.use`);
@@ -204,7 +204,7 @@ scenarios in `frontend/acceptance/features/catalogue-browsing.feature` pass unch
   - `hoe` (no image) shows the placeholder `role="img"` named "Hoe (no image available)" (use the existing
     `ProductImage` naming), and a broken image (fire `error`) switches to the same placeholder;
   - availability is text ("In stock" / "Out of stock", the existing strings).
-- [ ] T013 [P] [US1] Write the US1 behaviour scenarios first (constitution §V), in a new
+- [X] T013 [P] [US1] Write the US1 behaviour scenarios first (constitution §V), in a new
   `frontend/acceptance/features/visual-identity.feature` with steps in a new
   `frontend/acceptance/steps/identity-visual.steps.ts`. The steps bind through roles and accessible names; the
   feature text names no selectors or endpoints. Scenarios:
@@ -220,17 +220,17 @@ scenarios in `frontend/acceptance/features/catalogue-browsing.feature` pass unch
 
 ### Implementation for User Story 1
 
-- [ ] T014 [P] [US1] Create the brand module `frontend/src/ui/brand/`:
+- [X] T014 [P] [US1] Create the brand module `frontend/src/ui/brand/`:
   - `brand.ts` exports `BRAND_NAME = 'Vibestore'` and `BRAND_TAGLINE = 'Good things, good vibes'`.
   - `BrandMark.tsx` is a static inline SVG (≤ 1 KB, `aria-hidden="true"`, `focusable="false"`, fills through
     `currentColor` and CSS classes, `forced-color-adjust: none` only on the mark).
   - `Wordmark.tsx` renders the mark plus the name in `--font-display` 600 at `--font-size-xl`.
   - `brand.module.css` holds their styles.
-- [ ] T015 [P] [US1] Add `frontend/public/favicon.svg` (the same mark, with a `prefers-color-scheme` media query
+- [X] T015 [P] [US1] Add `frontend/public/favicon.svg` (the same mark, with a `prefers-color-scheme` media query
   inside the SVG). Update `frontend/index.html`: `<title>Vibestore — Good things, good vibes</title>` and
   `<link rel="icon" type="image/svg+xml" href="/favicon.svg">`. Check that the production `platform/docker/Dockerfile.storefront`
   copies `dist/` including `favicon.svg`; Vite copies `public/` into `dist/`.
-- [ ] T016 [US1] Restyle the shell in `frontend/src/ui/components/Layout.tsx` and `Layout.module.css`, per the
+- [X] T016 [US1] Restyle the shell in `frontend/src/ui/components/Layout.tsx` and `Layout.module.css`, per the
   "Shell" table of [ui-surfaces.md](contracts/ui-surfaces.md):
   - A paper header with a bottom rule. `Wordmark` replaces the "Storefront" text inside the existing brand
     `Link`, whose accessible name becomes "Vibestore".
@@ -239,10 +239,10 @@ scenarios in `frontend/acceptance/features/catalogue-browsing.feature` pass unch
   - The skip link stays first.
 
   Depends on T014. Makes T011 pass.
-- [ ] T017 [P] [US1] Implement `frontend/src/app/catalog/featured.ts`:
+- [X] T017 [P] [US1] Implement `frontend/src/app/catalog/featured.ts`:
   `selectFeaturedCategories(categories): readonly Category[]`, a pure function returning the first ≤ 4 active
   top-level categories in catalogue order. Makes T010 pass and keeps Stryker ≥ 80 % on the file.
-- [ ] T018 [US1] Add the editorial introduction to `frontend/src/ui/pages/HomePage.tsx`, with a new
+- [X] T018 [US1] Add the editorial introduction to `frontend/src/ui/pages/HomePage.tsx`, with a new
   `frontend/src/ui/pages/home.module.css`, per the "Home (editorial)" table:
   - The h1 "Products" stays.
   - A lead `<p>` with the tagline in `--font-size-display` (not a heading).
@@ -254,25 +254,25 @@ scenarios in `frontend/acceptance/features/catalogue-browsing.feature` pass unch
   - The product listing comes after the block.
 
   Depends on T017. Makes the home part of T012 pass.
-- [ ] T019 [P] [US1] Restyle `frontend/src/ui/components/ProductImage.tsx` and `states.module.css` (image and
+- [X] T019 [P] [US1] Restyle `frontend/src/ui/components/ProductImage.tsx` and `states.module.css` (image and
   placeholder rules):
   - A fixed `aspect-ratio: var(--image-ratio-card)` frame with `object-fit: cover`, `--radius-md`, and a
     `--color-skeleton` fill while loading.
   - The placeholder fills the same frame with the brand mark (`aria-hidden`) and the text "No image" on
     `--color-surface`. The existing `role="img"` and `aria-label` stay.
   - Accept a `ratio?: 'card' | 'detail'` prop (default `card`), with `detail` using `--image-ratio-detail`.
-- [ ] T020 [P] [US1] Restyle `frontend/src/ui/components/ProductCard.tsx` and `ProductCard.module.css`, per the
+- [X] T020 [P] [US1] Restyle `frontend/src/ui/components/ProductCard.tsx` and `ProductCard.module.css`, per the
   "Product card" table:
   - Image first, then the name (display 600, `--font-size-lg`, two-line clamp), the price (`Money` with
     `.tabular`, 600) and the availability text, with colour only as reinforcement.
   - The whole card is a single link: the existing link stretches over the card with a `::after` overlay, so there
     is one tab stop and the name is unchanged.
   - Hover and press: image scale ≤ 1.02 and `--shadow-md`, with no motion under reduced motion.
-- [ ] T021 [P] [US1] Restyle `frontend/src/ui/components/ProductGrid.module.css` (2 / 3 / 4 columns at 360 / 768 /
+- [X] T021 [P] [US1] Restyle `frontend/src/ui/components/ProductGrid.module.css` (2 / 3 / 4 columns at 360 / 768 /
   1280 with `--space-5` gaps), `CategoryNav.module.css` (quiet links, `aria-current` gets a 2 px primary
   underline) and `SearchBox.module.css` (field per the US2 field contract: `--color-surface-raised`,
   `--color-border-strong`, `--radius-md`).
-- [ ] T022 [US1] Align `frontend/src/ui/pages/browse.module.css` and `pages.module.css` (page title: display,
+- [X] T022 [US1] Align `frontend/src/ui/pages/browse.module.css` and `pages.module.css` (page title: display,
   `--font-size-3xl`, `--font-size-2xl` at ≤ 640 px; section rhythm `--space-8`/`--space-10`) so
   `CategoryPage.tsx` and `SearchPage.tsx` share the home treatment. Depends on T018 and T020. T012 is fully green.
 
@@ -349,7 +349,7 @@ account,states}.test.tsx` pass, and the `shopping-cart`, `checkout` and `order-t
 - [X] T032 [P] [US2] Restyle the orders surfaces: `frontend/src/ui/components/orders.module.css`, `OrderRow.tsx`,
   `StatusHistory.tsx`, and the pages `OrdersPage.tsx`, `OrderPage.tsx` and `ConfirmationPage.tsx`. The
   confirmation gets a display heading and a summary card. Status text stays the carrier of meaning.
-- [ ] T033 [US2] Restructure the product page in `frontend/src/ui/pages/ProductPage.tsx`, adding
+- [X] T033 [US2] Restructure the product page in `frontend/src/ui/pages/ProductPage.tsx`, adding
   `frontend/src/ui/pages/product.module.css`. Top to bottom: back link, `ProductImage ratio="detail"` (beside the
   text from 768 px, above it below that), h1 (display), large tabular price, availability text, quantity and
   "Add to cart" (primary), then the description at `--layout-measure`. Names and order of controls in the DOM
@@ -393,7 +393,7 @@ forced colours, keyboard focus, reduced motion and layout stability.
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T037 [US3] Write `frontend/visual/quality.spec.ts` (tagged `@quality`) per the "Non-screenshot assertions"
+- [X] T037 [US3] Write `frontend/visual/quality.spec.ts` (tagged `@quality`) per the "Non-screenshot assertions"
   table of [visual-baselines.md](contracts/visual-baselines.md). The cases cover the 8 pages (home, category
   `/categories/<gardenTools.id>`, product `/products/<rake.id>`, cart, checkout, confirmation, orders, sign-in;
   scenarios from T004), and the console pages `/console/orders` and `/console/stock` for axe:

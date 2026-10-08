@@ -91,6 +91,79 @@ describe('Home page (FR-001)', () => {
   });
 });
 
+describe('Home page editorial block and product cards (US1)', () => {
+  const only = (...items: ReadonlyArray<typeof gardenTools>) =>
+    http.get(CATEGORIES_URL, () =>
+      HttpResponse.json({ items, page: 0, size: 100, totalItems: items.length }),
+    );
+
+  it('shows the tagline and links to the featured categories, keeping the h1', async () => {
+    renderApp('/');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Products' })).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('main')).getByText('Good things, good vibes'),
+    ).toBeInTheDocument();
+    const tiles = await screen.findByRole('list', { name: 'Featured categories' });
+    expect(within(tiles).getByRole('link', { name: 'Garden tools' })).toHaveAttribute(
+      'href',
+      `/categories/garden-tools-${gardenTools.id}`,
+    );
+    expect(within(tiles).getByRole('link', { name: 'Lighting' })).toBeInTheDocument();
+  });
+
+  it('omits the featured block when there are no categories, but keeps the tagline', async () => {
+    server.use(only());
+    renderApp('/');
+    await screen.findByRole('list', { name: 'Products' });
+    expect(
+      within(screen.getByRole('main')).getByText('Good things, good vibes'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Featured categories' })).toBeNull();
+  });
+
+  it('renders exactly one tile per qualifying category, with no empty placeholders', async () => {
+    server.use(only(gardenTools));
+    const first = renderApp('/');
+    const one = await screen.findByRole('list', { name: 'Featured categories' });
+    expect(within(one).getAllByRole('link')).toHaveLength(1);
+    expect(within(one).getAllByRole('listitem')).toHaveLength(1);
+    first.unmount();
+
+    server.use(only(gardenTools, lighting));
+    renderApp('/');
+    const two = await screen.findByRole('list', { name: 'Featured categories' });
+    expect(within(two).getAllByRole('link')).toHaveLength(2);
+    expect(within(two).getAllByRole('listitem')).toHaveLength(2);
+  });
+
+  it('makes a product card one link named after the product', async () => {
+    renderApp('/');
+    const list = await screen.findByRole('list', { name: 'Products' });
+    const card = within(list).getByRole('link', { name: 'Rake' }).closest('li')!;
+    expect(within(card).getAllByRole('link')).toHaveLength(1);
+  });
+
+  it('shows the branded placeholder for a product without an image and for a broken image', async () => {
+    renderApp('/');
+    const list = await screen.findByRole('list', { name: 'Products' });
+    expect(within(list).getByRole('img', { name: 'Hoe (no image available)' })).toBeInTheDocument();
+    const picture = within(list).getByRole('img', { name: 'Rake on a bench' });
+    act(() => {
+      picture.dispatchEvent(new Event('error'));
+    });
+    expect(
+      await within(list).findByRole('img', { name: 'Rake on a bench (no image available)' }),
+    ).toBeInTheDocument();
+  });
+
+  it('states availability as text', async () => {
+    renderApp('/');
+    const list = await screen.findByRole('list', { name: 'Products' });
+    expect(within(list).getAllByText('In stock').length).toBeGreaterThan(0);
+    expect(within(list).getByText('Out of stock')).toBeInTheDocument();
+  });
+});
+
 describe('Category page (FR-001, FR-003)', () => {
   it("shows only that category's products with a pager and keeps page and size in the URL", async () => {
     const user = userEvent.setup();

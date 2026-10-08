@@ -35,7 +35,7 @@ Product images in fixtures use a same-origin static asset served by the test har
 
 | Assertion | Pages | Widths/themes |
 |---|---|---|
-| No horizontal overflow (`documentElement.scrollWidth <= clientWidth`) | all 8 | 360 and 640; also at 200 % zoom (`deviceScaleFactor`/CSS zoom) at 360 |
+| No horizontal overflow (`documentElement.scrollWidth <= clientWidth`) | all 8 | 360 and 640 (640 = 1280 px at 200 % zoom; 360 px at 200 % would be 180 CSS px, below the 360 px minimum the store supports) |
 | axe (`@axe-core/playwright`) zero violations | all 8 + console orders and stock | light and dark |
 | Forced-colours smoke (`forcedColors: 'active'`): primary button, links, focus ring and radio selection visible; no text on `Canvas` at 1:1 | home, checkout | 360 and 1280 |
 | CLS < 0.1 (`PerformanceObserver` layout-shift sum after load + font swap) | home, product | 360 and 1280 |

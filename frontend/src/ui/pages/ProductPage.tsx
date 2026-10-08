@@ -8,9 +8,9 @@ import { useProduct } from '@app/catalog/useProduct';
 import { correlation } from '@app/correlation';
 import { Quantity, QUANTITY_MAX, QUANTITY_MIN } from '@domain/quantity';
 
-import browse from './browse.module.css';
 import { NotFoundPage } from './NotFoundPage.tsx';
 import styles from './pages.module.css';
+import layout from './product.module.css';
 import buttons from '../components/buttons.module.css';
 import cart from '../components/cart.module.css';
 import { describeError } from '../components/ErrorState.tsx';
@@ -64,11 +64,16 @@ function ProductDetails({ product }: ProductDetailsProps): JSX.Element {
     }
   };
   return (
-    <article className={cx(styles.page, browse.product)} aria-labelledby="page-title">
-      <div className={browse.gallery}>
-        <ProductImage src={primary?.url} alt={primary?.altText ?? product.name} />
+    <article className={cx(styles.page, layout.product)} aria-labelledby="page-title">
+      <p className={layout.back}>
+        <Link className={buttons.link} to="/">
+          Back to products
+        </Link>
+      </p>
+      <div className={layout.gallery}>
+        <ProductImage src={primary?.url} alt={primary?.altText ?? product.name} ratio="detail" />
         {others.length === 0 ? null : (
-          <ul className={browse.thumbnails} aria-label="More images">
+          <ul className={layout.thumbnails} aria-label="More images">
             {others.map((image) => (
               <li key={image.id}>
                 <ProductImage src={image.url} alt={image.altText ?? product.name} />
@@ -77,18 +82,17 @@ function ProductDetails({ product }: ProductDetailsProps): JSX.Element {
           </ul>
         )}
       </div>
-      <div className={browse.details}>
+      <div className={layout.details}>
         <h1 id="page-title" className={styles.title}>
           {product.name}
         </h1>
-        <p className={browse.price}>
+        <p className={layout.price}>
           <Money value={product.price} />
         </p>
-        <p className={cx(browse.availability, !inStock && browse.outOfStock)}>
+        <p className={cx(layout.availability, !inStock && layout.outOfStock)}>
           {inStock ? 'In stock' : 'Out of stock'}
         </p>
-        {description === '' ? null : <p className={browse.description}>{description}</p>}
-        <form className={browse.actions} onSubmit={(event) => void addToCart(event)} noValidate>
+        <form className={layout.actions} onSubmit={(event) => void addToCart(event)} noValidate>
           <div className={cart.quantityField}>
             <label htmlFor={quantityId}>Quantity</label>
             <input
@@ -115,7 +119,7 @@ function ProductDetails({ product }: ProductDetailsProps): JSX.Element {
             Add to cart
           </button>
           {inStock ? null : (
-            <p id={explanationId} className={browse.explanation}>
+            <p id={explanationId} className={layout.explanation}>
               This product is out of stock and cannot be added to the cart.
             </p>
           )}
@@ -133,11 +137,7 @@ function ProductDetails({ product }: ProductDetailsProps): JSX.Element {
             </p>
           ) : null}
         </form>
-        <p>
-          <Link className={buttons.link} to="/">
-            Back to products
-          </Link>
-        </p>
+        {description === '' ? null : <p className={layout.description}>{description}</p>}
       </div>
     </article>
   );
@@ -155,7 +155,7 @@ export function ProductPage(): JSX.Element {
   const product = useProduct(productId);
   if (productId === undefined) return <NotFoundPage />;
   return (
-    <QueryBoundary query={product} loadingLabel="Loading product…">
+    <QueryBoundary query={product} loadingLabel="Loading product…" loading="detail">
       {(found) => (found === null ? <NotFoundPage /> : <ProductDetails product={found} />)}
     </QueryBoundary>
   );

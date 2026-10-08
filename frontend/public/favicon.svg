@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <style>
+    .b { fill: #a8441f }
+    .l { fill: #fff }
+    @media (prefers-color-scheme: dark) {
+      .b { fill: #f0936b }
+      .l { fill: #17130f }
+    }
+  </style>
+  <rect class="b" x="2" y="2" width="20" height="20" rx="6"/>
+  <path class="l" d="M7 17C7 10.500 10.500 7 17 7c0 6.500-3.500 10-10 10z"/>
+</svg>
