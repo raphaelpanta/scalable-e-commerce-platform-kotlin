@@ -3,3 +3,7 @@ dist/
 build/
 src/api/generated/
 package-lock.json
+visual/.dist/
+visual/public/
+visual/test-results/
+visual/playwright-report/

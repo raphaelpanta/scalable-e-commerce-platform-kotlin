@@ -14,6 +14,7 @@
     "test": "npm run --silent ensure-generated && node scripts/quiet.mjs vitest run --reporter=dot --silent=passed-only",
     "build": "npm run --silent ensure-generated && node scripts/quiet.mjs vite build --logLevel warn",
     "budget": "node scripts/check-bundle-budget.mjs",
+    "visual": "node scripts/visual.mjs",
     "dev": "npm run --silent ensure-generated && vite",
     "acceptance": "node acceptance/run.mjs",
     "mutate": "npm run --silent ensure-generated && node scripts/quiet.mjs stryker run",
