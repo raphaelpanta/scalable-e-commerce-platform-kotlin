@@ -1,0 +1,65 @@
+/* Product page: image beside the text from 768 px, above it below that (ui-surfaces.md). */
+.product {
+  align-items: start;
+  gap: var(--space-5);
+}
+
+.back {
+  grid-column: 1 / -1;
+}
+
+.gallery {
+  display: grid;
+  gap: var(--space-3);
+  max-width: var(--image-detail-max-width);
+}
+
+.thumbnails {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--thumbnail-min-width), 1fr));
+  gap: var(--space-2);
+}
+
+.details {
+  display: grid;
+  gap: var(--space-4);
+  align-content: start;
+}
+
+.price {
+  font-family: var(--font-display);
+  font-size: var(--font-size-2xl);
+  font-weight: var(--font-weight-bold);
+  font-variant-numeric: var(--font-numeric);
+}
+
+.availability {
+  font-weight: var(--font-weight-bold);
+  color: var(--color-success);
+}
+
+.outOfStock {
+  color: var(--color-text-muted);
+}
+
+.description {
+  max-width: var(--layout-measure);
+  white-space: pre-line;
+}
+
+.actions {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+}
+
+.explanation {
+  color: var(--color-text-muted);
+}
+
+@media (min-width: 768px) {
+  .product {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    gap: var(--space-8);
+  }
+}

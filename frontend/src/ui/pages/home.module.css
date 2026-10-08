@@ -1,0 +1,53 @@
+/* Editorial introduction of the home page: tagline and featured-category tiles (ui-surfaces.md). */
+.lead {
+  margin-block: var(--space-5) 0;
+  max-width: var(--layout-measure);
+  font-family: var(--font-display);
+  font-size: var(--font-size-display);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+  letter-spacing: var(--letter-spacing-display);
+  color: var(--color-text);
+}
+
+/* auto-fit stretches one to three tiles across the row, so no empty cells are left. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--tile-min-width), 1fr));
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+.tile {
+  display: grid;
+}
+
+.tileLink {
+  display: flex;
+  align-items: flex-end;
+  min-height: var(--tile-min-height);
+  padding: var(--space-5);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+  text-decoration: none;
+  transition:
+    box-shadow var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease);
+}
+
+.tileLink:hover {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-md);
+}
+
+@media (min-width: 768px) {
+  .tiles {
+    margin-bottom: var(--space-10);
+  }
+}

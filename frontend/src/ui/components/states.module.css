@@ -58,23 +58,38 @@
   }
 }
 
+.ratioCard {
+  aspect-ratio: var(--image-ratio-card);
+}
+
+.ratioDetail {
+  aspect-ratio: var(--image-ratio-detail);
+}
+
 .imagePlaceholder {
   display: grid;
-  place-items: center;
+  place-content: center;
+  justify-items: center;
+  gap: var(--space-2);
   width: 100%;
-  aspect-ratio: 1;
   background: var(--color-surface);
-  border: var(--border-width) dashed var(--color-border);
   border-radius: var(--radius-md);
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
 }
 
+.imagePlaceholder svg {
+  width: var(--size-mark-placeholder);
+  height: var(--size-mark-placeholder);
+  opacity: 0.6;
+}
+
 .image {
+  display: block;
   width: 100%;
-  aspect-ratio: 1;
   object-fit: cover;
   border-radius: var(--radius-md);
+  background: var(--color-skeleton);
 }
 
 .inert {

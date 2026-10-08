@@ -1,12 +1,13 @@
 .page {
   display: grid;
-  gap: var(--space-4);
+  gap: var(--space-5);
 }
 
 .title {
   font-size: var(--font-size-2xl);
   font-weight: var(--font-weight-bold);
-  line-height: 1.2;
+  line-height: var(--line-height-tight);
+  letter-spacing: var(--letter-spacing-display);
 }
 
 .actions {
@@ -14,4 +15,14 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-4);
+}
+
+@media (min-width: 640px) {
+  .page {
+    gap: var(--space-8);
+  }
+
+  .title {
+    font-size: var(--font-size-3xl);
+  }
 }
