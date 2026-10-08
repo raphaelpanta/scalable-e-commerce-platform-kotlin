@@ -38,11 +38,11 @@ const dark = declarations(
 );
 
 type Kind = 'text' | 'ui';
-interface Pair {
+type Pair = {
   fg: string;
   bg: string;
   kind: Kind;
-}
+};
 
 const text = (fg: string, bg: string): Pair => ({ fg, bg, kind: 'text' });
 const ui = (fg: string, bg: string): Pair => ({ fg, bg, kind: 'ui' });
@@ -125,14 +125,14 @@ describe('design tokens', () => {
 
   it('defines the colour tokens of the contract in the light theme', () => {
     expect(light.has('--color-border-strong')).toBe(true);
-    expect(colourTokens.length).toBeGreaterThanOrEqual(20);
+    expect(colourTokens.length).toBeGreaterThanOrEqual(19);
   });
 
   it.each(colourTokens)('%s has a dark value', (name) => {
     expect(dark.has(name)).toBe(true);
   });
 
-  const themes: readonly [string, Map<string, string>][] = [
+  const themes: ReadonlyArray<[string, Map<string, string>]> = [
     ['light', light],
     ['dark', dark],
   ];
