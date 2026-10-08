@@ -240,7 +240,7 @@ describe('Checkout refusals and retries (FR-007, FR-008)', () => {
     await waitFor(() => {
       expect(router.state.location.search).toBe('?step=payment');
     });
-    expect(screen.getByRole('radio', { name: /declined/ })).toBeChecked();
+    expect(await screen.findByRole('radio', { name: /declined/ })).toBeChecked();
     expect(screen.getByLabelText('1 items in cart')).toBeInTheDocument();
   });
 
