@@ -323,3 +323,11 @@
 6. **Observability and release** = Phases 9–10.
 
 Task count: 106 (Setup 12, Foundational 26, US1 6, US2 15, US3 12, US4 7, US5 5, US6 7, Telemetry 8, Polish 8).
+
+## Phase 11: Convergence
+
+**Purpose**: remaining work found by `/speckit-converge` on 2026-10-07 against the implemented code (all three findings are LOW: the spec's requirements, the plan's decisions and the constitution's MUSTs are otherwise satisfied and verified live, see docs/validation/2026-10-storefront-run.md).
+
+- [ ] T107 Use a nullable matcher for `paymentAttemptId` in the pending-payment interactions of `frontend/pact/order.pact.test.ts` (O5, O7: `paymentAttemptId: null` is asserted exactly at the `tok_sim_unreachable` rows and in the client assertion), so a real pending attempt that carries an id still verifies, per plan: "Pending payment attempt id" (partial)
+- [ ] T108 Replace `frontend/src/ui/console/ConsolePager.tsx` with the shared `frontend/src/ui/components/Pager.tsx` (it already takes a `noun` prop) and delete the duplicate, per plan: Project Structure (one `ui/components` layer) and Constitution I (no duplicated code) (unrequested)
+- [ ] T109 Remove the unused `getSimulatorRules` console port method (`frontend/src/app/console/consolePort.ts`, `createPaymentRulesApi` in `frontend/src/api/payment.ts`) and the storefront payment pact rows P1 that describe it, or wire it to a visible console element; update `specs/005-storefront-dev-bootstrap/contracts/pact-matrix.md` row P1 accordingly, per FR-011 (the console offers only order fulfilment and stock adjustment) (unrequested)
