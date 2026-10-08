@@ -200,3 +200,12 @@ script's tests: this machine is not the CI host.
 | SC-009 platform cold start under 5 min with the storefront | 3 min 55 s and 3 min 48 s |
 | SC-010 idempotent, dry-runnable commands | section 1 and 2 (dry run, rerun) and the offline suite |
 | SC-011 correlation ids join browser, gateway and services; no personal data in telemetry | the two observability scenarios pass live |
+
+## 8. Final gate (T106)
+
+On `main` at the end of the implementation (2026-10-07): `./gradlew -q verify` exit 0 and silent (5 min 3 s; it includes
+`frontendCheck`, `scriptsCheck`, every module's lint, test layers, provider verification and Pitest), the storefront
+mutation run `npm run mutate` exit 0 (above the 80 % floor), `scripts/tests/run-all.sh --quiet` exit 0 and
+`scripts/lint.sh --require` (shellcheck) exit 0. Three lint findings and one test input surfaced on the way (an
+over-long comment in the acceptance support, ktlint chain formatting in the authorisation steps, and the catalog
+admin test's two-character reason once one character became valid) and were fixed in the preceding commits.
