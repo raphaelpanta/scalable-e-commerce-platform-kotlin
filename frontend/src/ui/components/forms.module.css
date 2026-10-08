@@ -1,7 +1,7 @@
 .form {
   display: grid;
   gap: var(--space-4);
-  max-width: 36rem;
+  max-width: var(--form-max-width);
 }
 
 .field {
@@ -21,7 +21,7 @@
 .input {
   min-height: var(--control-min-size);
   padding: 0 var(--space-3);
-  border: 1px solid var(--color-border);
+  border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-surface-raised);
   color: var(--color-text);
@@ -40,7 +40,7 @@
   display: grid;
   gap: var(--space-3);
   padding: var(--space-4);
-  border: 1px solid var(--color-border);
+  border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
 }
 
@@ -61,7 +61,7 @@
   align-items: start;
   min-height: var(--control-min-size);
   padding: var(--space-2);
-  border: 1px solid var(--color-border);
+  border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-sm);
 }
 
@@ -70,9 +70,9 @@
 }
 
 .radio {
-  width: 1.25rem;
-  height: 1.25rem;
-  margin-top: 0.2rem;
+  width: var(--size-icon);
+  height: var(--size-icon);
+  margin-top: var(--checkbox-offset);
 }
 
 .optionText {
@@ -89,7 +89,7 @@
 
 .status {
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border);
+  border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
 }

@@ -3,7 +3,7 @@
   gap: var(--space-3);
   justify-items: start;
   padding: var(--space-5);
-  border: 1px solid var(--color-border);
+  border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
 }
@@ -44,9 +44,9 @@
 
 .spinner {
   display: inline-block;
-  width: 1.25rem;
-  height: 1.25rem;
-  border: 3px solid var(--color-border);
+  width: var(--size-icon);
+  height: var(--size-icon);
+  border: var(--border-width-heavy) solid var(--color-border);
   border-top-color: var(--color-primary);
   border-radius: 50%;
   animation: spin 900ms linear infinite;
@@ -64,7 +64,7 @@
   width: 100%;
   aspect-ratio: 1;
   background: var(--color-surface);
-  border: 1px dashed var(--color-border);
+  border: var(--border-width) dashed var(--color-border);
   border-radius: var(--radius-md);
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);

@@ -33,7 +33,7 @@
 
 .thumbnails {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(4.5rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--thumbnail-min-width), 1fr));
   gap: var(--space-2);
 }
 
@@ -74,7 +74,7 @@
 
 @media (min-width: 768px) {
   .layout {
-    grid-template-columns: 14rem minmax(0, 1fr);
+    grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   }
 
   .product {

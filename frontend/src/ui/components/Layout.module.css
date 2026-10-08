@@ -22,7 +22,7 @@
 }
 
 .header {
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: var(--border-width) solid var(--color-border);
   background: var(--color-surface);
 }
 
@@ -40,7 +40,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2) var(--space-4);
-  min-height: 4rem;
+  min-height: var(--header-min-height);
   padding-block: var(--space-2);
 }
 
@@ -79,16 +79,16 @@
 
 .navLink[aria-current='page'] {
   text-decoration: underline;
-  text-underline-offset: 0.3em;
+  text-underline-offset: var(--underline-offset);
 }
 
 .badge {
   display: inline-grid;
   place-items: center;
-  min-width: 1.5rem;
-  height: 1.5rem;
+  min-width: var(--size-badge);
+  height: var(--size-badge);
   padding: 0 var(--space-1);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--color-primary);
   color: var(--color-primary-contrast);
   font-size: var(--font-size-sm);
@@ -104,7 +104,7 @@
   background: transparent;
   color: var(--color-text);
   text-decoration: underline;
-  text-underline-offset: 0.3em;
+  text-underline-offset: var(--underline-offset);
 }
 
 .main {
@@ -133,7 +133,7 @@
 }
 
 .footer {
-  border-top: 1px solid var(--color-border);
+  border-top: var(--border-width) solid var(--color-border);
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
 }
