@@ -14,9 +14,18 @@ body {
   margin: 0;
   background: var(--color-bg);
   color: var(--color-text);
-  font-family: var(--font-family);
+  font-family: var(--font-body);
   font-size: var(--font-size-md);
   line-height: var(--line-height);
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+  letter-spacing: var(--letter-spacing-display);
 }
 
 h1,
@@ -43,6 +52,14 @@ svg {
 
 a {
   color: var(--color-primary);
+}
+
+a:hover {
+  color: var(--color-primary-hover);
+}
+
+.tabular {
+  font-variant-numeric: var(--font-numeric);
 }
 
 button,
@@ -80,9 +97,9 @@ button:disabled {
 /* Visually hidden but available to assistive technology. */
 .visually-hidden {
   position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
+  width: var(--size-hairline);
+  height: var(--size-hairline);
+  margin: calc(-1 * var(--size-hairline));
   padding: 0;
   overflow: hidden;
   clip: rect(0 0 0 0);

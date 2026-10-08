@@ -40,6 +40,8 @@ first two through `./gradlew -q frontendCheck` (part of `verify`).
 | `npm run acceptance` | Cucumber.js + Playwright scenarios in `acceptance/`; skipped with exit 0 unless `STOREFRONT_URL` is set |
 | `npm run mutate`     | Stryker over `src/domain`, `src/app`, `src/telemetry` (break at 80 %)                                   |
 | `npm run pact`       | Pact JS consumer tests `pact/*.pact.test.ts`, writing `../build/pacts/storefront-<provider>.json`       |
+| `npm run visual`     | Visual suite in the Playwright container; `-- --update-snapshots` rewrites the baselines                |
+| `npm run budget`     | First-load gzip size against `budget.json` (after `npm run build`)                                      |
 
 Acceptance environment: `STOREFRONT_URL` (the gateway, for example `http://localhost:8080`),
 `MAILPIT_URL` (default `http://localhost:8025`), `OPERATOR_EMAIL`/`OPERATOR_PASSWORD` (feature 004
@@ -190,6 +192,29 @@ declined for token tok_sim_decline_01`; the empty-cart read of K1 reuses `no ano
   approving token (`ShopperFixtures.placeOrder`), the operator advances them through the API
   (`support/operator.ts`), the text message code is read from Mailpit (`sms-<digits>@sms.ecommerce.invalid`), the
   reset link from the reset mail. The keyboard scenario cancels a placed order with Tab and Enter only.
+
+## Design system
+
+The Vibestore identity (feature 007) is presentation only: routes, flows, roles and accessible names do not change.
+The token contract is [design-tokens.md](../specs/007-storefront-visual-identity/contracts/design-tokens.md).
+
+- **Token layers.** Every value lives in `src/ui/styles/tokens.css`: primitive scales (colour, type, space, radius,
+  sizes, motion) and the semantic tokens built on them (`--color-*`, `--font-*`, `--radius-*`, `--space-*`,
+  `--control-min-size`, `--motion-*`), with the dark theme and reduced-motion overrides beside them. `global.css`,
+  `fonts.css` and the component CSS modules use tokens only.
+- **No literal values.** `scripts/check-design-tokens.mjs` (part of `npm run lint`) fails on literal colours or lengths
+  outside `tokens.css` and on `style=` attributes (the CSP has no `unsafe-inline`).
+- **Fonts.** Fraunces (display) and Source Sans 3 (body), self-hosted as `woff2` through the Fontsource packages
+  `@fontsource/fraunces` and `@fontsource-variable/source-sans-3`, both under the SIL Open Font License 1.1 (OFL).
+  No third-party URL is loaded at runtime.
+- **Visual baselines.** `npm run visual` runs `visual/` in the Playwright container
+  (`mcr.microsoft.com/playwright:v1.63.0-noble`, podman or docker), so every host renders the same pixels; never
+  generate baselines outside the container. Update them with `npm run visual -- --update-snapshots` and review the
+  changed PNGs in `visual/__screenshots__/` in the pull request
+  ([visual-baselines.md](../specs/007-storefront-visual-identity/contracts/visual-baselines.md)). CI runs the same
+  command in the "Visual regression" step of `storefront.yml`.
+- **Budget.** `npm run build && npm run budget` compares the gzip size of the first load (entry chunk, its imports,
+  CSS, fonts) with `budget.json` and fails when growth exceeds 150 KB over the recorded baseline.
 
 ## Vitest version pin
 

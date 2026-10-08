@@ -1,0 +1,53 @@
+/* Notices (contracts/ui-surfaces.md): price change, payment decline, throttle and payment countdown.
+   They carry the notice colours and a heavier boundary so they stay the most prominent element of
+   their region; the text, not the colour, carries the meaning. */
+.notice {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: start;
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-notice-bg);
+  color: var(--color-notice-text);
+}
+
+/* A 2 px warning rule on the left edge (price change, countdown). */
+.warning {
+  border-left: var(--border-width-strong) solid var(--color-warning);
+}
+
+/* The same rule in the danger colour (declined payment, refused order). */
+.danger {
+  border-left: var(--border-width-strong) solid var(--color-danger);
+}
+
+.title {
+  font-family: var(--font-display);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+}
+
+.message {
+  max-width: var(--layout-measure);
+}
+
+.countdown {
+  font-variant-numeric: var(--font-numeric);
+  font-weight: var(--font-weight-bold);
+}
+
+.changes {
+  display: grid;
+  gap: var(--space-2);
+  padding-left: var(--space-5);
+  font-variant-numeric: var(--font-numeric);
+  list-style: disc;
+}
+
+@media (forced-colors: active) {
+  .notice {
+    border: var(--border-width) solid CanvasText;
+  }
+}

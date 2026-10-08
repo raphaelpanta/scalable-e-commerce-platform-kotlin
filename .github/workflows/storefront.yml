@@ -105,6 +105,20 @@ jobs:
         working-directory: frontend
         run: npm run test
 
+      # Visual regression (feature 007): `npm run visual` runs the suite in the Playwright image pinned in
+      # frontend/scripts/visual.mjs (mcr.microsoft.com/playwright:v1.63.0-noble) through the runner's Docker socket (docker
+      # when podman is missing), so CI renders the same pixels as the committed baselines. The workspace is mounted at its
+      # own host path like the other tool containers; node_modules lives in a named volume. Keep the tag in sync with
+      # @playwright/test in frontend/package.json.
+      - name: Visual regression (Playwright container)
+        working-directory: frontend
+        run: npm run visual
+
+      # Gzip size of the first load against frontend/budget.json (baseline + 150 KB).
+      - name: Bundle budget
+        working-directory: frontend
+        run: npm run build && npm run budget
+
       # Stryker over src/domain, src/app and src/telemetry; thresholds.break is 80 (frontend/stryker.config.json). CI runs it
       # in full: the incremental file under build/ is not restored, so a surviving mutant cannot hide behind an old result.
       - name: Mutation tests (Stryker, break at 80 %)
@@ -196,7 +210,7 @@ jobs:
       # Short-lived diagnosis aid, only when something failed.
       - name: Pack the test and mutation reports
         if: failure()
-        run: tar -cf storefront-reports.tar --ignore-failed-read build/pacts frontend/build/stryker-incremental.json
+        run: tar -cf storefront-reports.tar --ignore-failed-read build/pacts frontend/build/stryker-incremental.json frontend/visual/test-results
 
       - name: Upload the test and mutation reports
         if: failure()

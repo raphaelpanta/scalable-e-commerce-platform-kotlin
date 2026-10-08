@@ -43,7 +43,7 @@ export function Pager({
       <p className={styles.summary}>
         Showing {shown} of {totalItems} {totalItems === 1 ? noun.singular : noun.plural}
       </p>
-      <p className={styles.position}>
+      <p className={styles.position} aria-current="page">
         Page {page + 1} of {pages}
       </p>
       <div className={styles.controls}>

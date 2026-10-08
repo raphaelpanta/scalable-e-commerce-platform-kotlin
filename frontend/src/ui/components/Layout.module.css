@@ -22,8 +22,8 @@
 }
 
 .header {
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
+  border-bottom: var(--border-width) solid var(--color-border);
+  background: var(--color-bg);
 }
 
 .headerInner,
@@ -40,13 +40,11 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2) var(--space-4);
-  min-height: 4rem;
+  min-height: var(--header-min-height);
   padding-block: var(--space-2);
 }
 
 .brand {
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-bold);
   color: var(--color-text);
   text-decoration: none;
   min-height: var(--control-min-size);
@@ -79,16 +77,18 @@
 
 .navLink[aria-current='page'] {
   text-decoration: underline;
-  text-underline-offset: 0.3em;
+  text-decoration-thickness: var(--border-width-strong);
+  text-decoration-color: var(--color-primary);
+  text-underline-offset: var(--underline-offset);
 }
 
 .badge {
   display: inline-grid;
   place-items: center;
-  min-width: 1.5rem;
-  height: 1.5rem;
+  min-width: var(--size-badge);
+  height: var(--size-badge);
   padding: 0 var(--space-1);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--color-primary);
   color: var(--color-primary-contrast);
   font-size: var(--font-size-sm);
@@ -104,7 +104,7 @@
   background: transparent;
   color: var(--color-text);
   text-decoration: underline;
-  text-underline-offset: 0.3em;
+  text-underline-offset: var(--underline-offset);
 }
 
 .main {
@@ -117,8 +117,10 @@
   justify-items: center;
   gap: var(--space-1);
   padding: var(--space-2) var(--space-4);
-  background: var(--color-warning);
-  color: var(--color-bg);
+  border-bottom: var(--border-width) solid var(--color-border-strong);
+  background: var(--color-notice-bg);
+  color: var(--color-notice-text);
+  font-variant-numeric: var(--font-numeric);
   text-align: center;
 }
 
@@ -129,15 +131,39 @@
 }
 
 .notice .textButton {
-  color: var(--color-bg);
+  color: var(--color-notice-text);
 }
 
 .footer {
-  border-top: 1px solid var(--color-border);
+  border-top: var(--border-width) solid var(--color-border);
+  background: var(--color-surface);
   color: var(--color-text-muted);
   font-size: var(--font-size-sm);
 }
 
 .footerInner {
-  padding-block: var(--space-4);
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  padding-block: var(--space-6);
+}
+
+.tagline {
+  font-family: var(--font-display);
+  font-size: var(--font-size-md);
+  color: var(--color-text);
+}
+
+.copyright {
+  color: var(--color-text-muted);
+}
+
+/* Forced colours: the cart count badge and the merge notice keep their boxes; the text-style
+   Sign out button keeps a border so it reads as a button. */
+@media (forced-colors: active) {
+  .badge,
+  .notice,
+  .textButton {
+    border: var(--border-width) solid CanvasText;
+  }
 }

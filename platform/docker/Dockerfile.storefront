@@ -18,7 +18,8 @@ RUN npm ci --ignore-scripts --silent --no-audit --no-fund
 COPY specs/004-ecommerce-platform-mvp/contracts/openapi /workspace/specs/004-ecommerce-platform-mvp/contracts/openapi
 COPY specs/005-storefront-dev-bootstrap/contracts/openapi /workspace/specs/005-storefront-dev-bootstrap/contracts/openapi
 COPY frontend/ ./
-RUN npm run build --silent
+# The Vite manifest only feeds the bundle-budget check; it is not served.
+RUN npm run build --silent && rm -rf dist/.vite
 
 # Runtime: nginx as the image's unprivileged user (uid 101, `USER 101` in the base image), listening on 8080.
 # The copy replaces the image's default server block; the main nginx.conf (pid and temp paths under /tmp) is kept.

@@ -10,15 +10,19 @@
   "scripts": {
     "generate": "node scripts/generate-api.mjs",
     "ensure-generated": "node scripts/generate-api.mjs --ensure",
-    "lint": "npm run --silent generate && prettier --log-level warn --check . && eslint --max-warnings 0 . && tsc --noEmit",
+    "lint": "node scripts/check-design-tokens.mjs && npm run --silent generate && prettier --log-level warn --check . && eslint --max-warnings 0 . && tsc --noEmit",
     "test": "npm run --silent ensure-generated && node scripts/quiet.mjs vitest run --reporter=dot --silent=passed-only",
     "build": "npm run --silent ensure-generated && node scripts/quiet.mjs vite build --logLevel warn",
+    "budget": "node scripts/check-bundle-budget.mjs",
+    "visual": "node scripts/visual.mjs",
     "dev": "npm run --silent ensure-generated && vite",
     "acceptance": "node acceptance/run.mjs",
     "mutate": "npm run --silent ensure-generated && node scripts/quiet.mjs stryker run",
     "pact": "npm run --silent ensure-generated && node scripts/quiet.mjs vitest run --reporter=dot --silent=passed-only --config pact/vitest.pact.config.ts"
   },
   "dependencies": {
+    "@fontsource-variable/source-sans-3": "5.3.0",
+    "@fontsource/fraunces": "5.3.0",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/api-logs": "0.223.0",
     "@opentelemetry/context-zone": "2.12.0",
@@ -44,6 +48,7 @@
     "@axe-core/playwright": "4.13.0",
     "@cucumber/cucumber": "13.2.1",
     "@pact-foundation/pact": "17.1.4",
+    "@playwright/test": "1.63.0",
     "@stryker-mutator/core": "10.0.0",
     "@stryker-mutator/vitest-runner": "10.0.0",
     "@testing-library/dom": "10.4.2",

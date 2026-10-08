@@ -19,6 +19,18 @@ describe('Layout', () => {
     expect(within(cart).getByLabelText('0 items in cart')).toHaveTextContent('0');
   });
 
+  it('shows the Vibestore brand link home with a decorative mark, and the tagline in the footer', async () => {
+    renderApp('/');
+    await screen.findByRole('heading', { level: 1, name: 'Products' });
+    const brand = within(screen.getByRole('banner')).getByRole('link', { name: 'Vibestore' });
+    expect(brand).toHaveAttribute('href', '/');
+    const mark = brand.querySelector('svg');
+    expect(mark).not.toBeNull();
+    expect(mark).toHaveAttribute('aria-hidden', 'true');
+    const footer = screen.getByRole('contentinfo');
+    expect(within(footer).getByText('Good things, good vibes')).toBeInTheDocument();
+  });
+
   it('offers Sign in to an anonymous visitor, with the current page as the return target', async () => {
     renderApp('/cart');
     expect(await screen.findByRole('heading', { level: 1, name: 'Your cart' })).toBeInTheDocument();
@@ -70,7 +82,7 @@ describe('Layout', () => {
     await user.tab();
     expect(screen.getByRole('link', { name: 'Skip to main content' })).toHaveFocus();
     await user.tab();
-    expect(screen.getByRole('link', { name: 'Storefront' })).toHaveFocus();
+    expect(screen.getByRole('link', { name: 'Vibestore' })).toHaveFocus();
     await user.tab();
     expect(screen.getByRole('link', { name: 'Products' })).toHaveFocus();
     await user.tab();

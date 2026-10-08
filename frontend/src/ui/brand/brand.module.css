@@ -1,0 +1,30 @@
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text);
+  font-family: var(--font-display);
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+  letter-spacing: var(--letter-spacing-display);
+}
+
+.name {
+  white-space: nowrap;
+}
+
+.mark {
+  flex: none;
+  width: var(--size-mark);
+  height: var(--size-mark);
+  forced-color-adjust: none;
+}
+
+.markBody {
+  fill: var(--color-primary);
+}
+
+.markLeaf {
+  fill: var(--color-primary-contrast);
+}

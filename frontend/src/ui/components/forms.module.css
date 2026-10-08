@@ -1,7 +1,8 @@
+/* Field family and radio cards (contracts/ui-surfaces.md "Cart and checkout component family"). */
 .form {
   display: grid;
   gap: var(--space-4);
-  max-width: 36rem;
+  max-width: var(--form-max-width);
 }
 
 .field {
@@ -21,13 +22,22 @@
 .input {
   min-height: var(--control-min-size);
   padding: 0 var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
   background: var(--color-surface-raised);
   color: var(--color-text);
 }
 
+.input:disabled {
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
 .input[aria-invalid='true'] {
+  /* The 2 px boundary replaces the 1 px one; the padding gives the pixel back so nothing shifts. */
+  padding: 0 calc(var(--space-3) - var(--border-width));
+  border-width: var(--border-width-strong);
   border-color: var(--color-danger);
 }
 
@@ -40,8 +50,8 @@
   display: grid;
   gap: var(--space-3);
   padding: var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
 }
 
 .legend {
@@ -51,33 +61,53 @@
 
 .options {
   display: grid;
-  gap: var(--space-2);
+  gap: var(--space-3);
 }
 
+/* Radio card: the native radio stays visible, so selection is never carried by colour alone. */
 .option {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: var(--space-2) var(--space-3);
   align-items: start;
   min-height: var(--control-min-size);
-  padding: var(--space-2);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease);
 }
 
 .option:has(input:checked) {
+  padding: calc(var(--space-3) - var(--border-width-strong) + var(--border-width));
+  border-width: var(--border-width-strong);
   border-color: var(--color-primary);
+  background: var(--color-accent-subtle);
+}
+
+.option:has(input:focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .radio {
-  width: 1.25rem;
-  height: 1.25rem;
-  margin-top: 0.2rem;
+  width: var(--size-icon);
+  height: var(--size-icon);
+  margin-top: var(--checkbox-offset);
+  accent-color: var(--color-primary);
+}
+
+.radio:focus-visible {
+  /* The ring is drawn on the card. */
+  outline: none;
 }
 
 .optionText {
   display: grid;
   gap: var(--space-1);
+  cursor: pointer;
 }
 
 .row {
@@ -89,7 +119,7 @@
 
 .status {
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border);
+  border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
 }
@@ -99,5 +129,22 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: var(--space-4);
+  }
+}
+
+/* Forced colours: inputs keep a visible boundary and the selected radio card a Highlight outline,
+   so selection never relies on the accent fill that forced colours remove. */
+@media (forced-colors: active) {
+  .input,
+  .option {
+    border: var(--border-width) solid CanvasText;
+  }
+
+  .option:has(input:checked) {
+    outline: var(--border-width-strong) solid Highlight;
+  }
+
+  .input[aria-invalid='true'] {
+    border-width: var(--border-width-strong);
   }
 }

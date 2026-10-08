@@ -2,6 +2,7 @@ import type { JSX } from 'react';
 import { NavLink, Outlet } from 'react-router';
 
 import styles from './console.module.css';
+import { Wordmark } from '../brand/Wordmark.tsx';
 import { cx } from '../cx.ts';
 
 /** What the console says about catalogue editing, on every console page (FR-011, US6 scenario 6). */
@@ -17,6 +18,10 @@ export const CATALOGUE_EDITING_NOTE =
 export function ConsoleLayout(): JSX.Element {
   return (
     <div className={styles.console}>
+      <div className={styles.brand}>
+        <Wordmark />
+        <span className={styles.brandSection}>Console</span>
+      </div>
       <nav className={styles.nav} aria-label="Console">
         <NavLink className={cx(styles.navLink)} to="/console/orders">
           Orders

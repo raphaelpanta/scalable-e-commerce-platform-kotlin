@@ -1,17 +1,21 @@
+/* Button family (contracts/ui-surfaces.md): primary, secondary, quiet and danger, all >= 44 px. */
 .button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
   min-height: var(--control-min-size);
+  min-width: var(--control-min-size);
   padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--color-primary);
-  border-radius: var(--radius-sm);
+  border: var(--border-width) solid var(--color-primary);
+  border-radius: var(--radius-md);
   background: var(--color-primary);
   color: var(--color-primary-contrast);
   font-weight: var(--font-weight-bold);
   text-decoration: none;
-  transition: background-color var(--motion-duration) ease;
+  /* Colours switch instantly: a fading fill would pass through low-contrast mixes (for example
+     muted text over a still-terracotta fill while a submit turns the button busy). */
+  transition: transform var(--motion-duration) var(--motion-ease);
 }
 
 .button:hover:not(:disabled) {
@@ -19,20 +23,55 @@
   border-color: var(--color-primary-hover);
 }
 
+.button:active:not(:disabled) {
+  transform: translateY(var(--size-hairline));
+}
+
 .button:disabled {
-  opacity: 0.55;
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
 }
 
 .secondary {
+  border-color: var(--color-border-strong);
+  background: transparent;
+  color: var(--color-text);
+}
+
+.secondary:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface);
+}
+
+.secondary:disabled {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+}
+
+.quiet {
+  border-color: transparent;
   background: transparent;
   color: var(--color-primary);
 }
 
-.secondary:hover:not(:disabled) {
-  background: var(--color-surface);
+.quiet:hover:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-primary-hover);
+  text-decoration: underline;
+  text-underline-offset: var(--underline-offset);
 }
 
-.danger {
+.quiet:disabled {
+  border-color: transparent;
+  background: transparent;
+}
+
+.danger,
+.danger:hover:not(:disabled) {
   background: var(--color-danger);
   border-color: var(--color-danger);
   color: var(--color-danger-contrast);
@@ -44,4 +83,31 @@
   min-height: var(--control-min-size);
   color: var(--color-primary);
   text-decoration: underline;
+  text-underline-offset: var(--underline-offset);
+}
+
+.link:hover {
+  color: var(--color-primary-hover);
+}
+
+/* Forced colours (design-tokens.md mapping): every variant is a bordered system button, so the
+   quiet and link variants stay recognisable as controls once fills and tints are dropped. */
+@media (forced-colors: active) {
+  .button,
+  .secondary,
+  .quiet,
+  .danger {
+    border: var(--border-width) solid ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+  }
+
+  .button:disabled {
+    border-color: GrayText;
+    color: GrayText;
+  }
+
+  .link {
+    color: LinkText;
+  }
 }

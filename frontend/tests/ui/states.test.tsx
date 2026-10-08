@@ -23,6 +23,23 @@ describe('Loading', () => {
     render(<Loading />);
     expect(screen.getByRole('status')).toHaveTextContent('Loading…');
   });
+
+  it.each(['spinner', 'grid', 'detail', 'lines'] as const)(
+    'keeps the polite status and its label in the %s variant, with hidden skeleton blocks',
+    (variant) => {
+      const { container } = render(<Loading variant={variant} label="Loading things…" />);
+      const status = screen.getByRole('status');
+      expect(status).toHaveAttribute('aria-live', 'polite');
+      expect(status).toHaveAccessibleName('');
+      expect(status).toHaveTextContent('Loading things…');
+      const decorative = container.querySelectorAll('[aria-hidden="true"]');
+      expect(decorative.length).toBeGreaterThan(0);
+      for (const block of decorative) {
+        expect(block).toHaveAttribute('aria-hidden', 'true');
+      }
+      expect(status.querySelectorAll(':scope > :not([aria-hidden="true"])')).toHaveLength(1);
+    },
+  );
 });
 
 describe('Empty', () => {
@@ -39,6 +56,7 @@ describe('Empty', () => {
     const actions = [...screen.queryAllByRole('link'), ...screen.queryAllByRole('button')];
     expect(actions).toHaveLength(1);
     expect(actions[0]).toHaveAttribute('href', '/');
+    expect(screen.getAllByRole('heading')).toHaveLength(1);
   });
 
   it('supports a button action', async () => {
@@ -51,6 +69,14 @@ describe('Empty', () => {
 });
 
 describe('ErrorState', () => {
+  it('adds the brand-voice sentence beside the existing title and message', () => {
+    render(<ErrorState message="The catalogue could not be loaded." />);
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('That did not go as planned.');
+    expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
+    expect(alert).toHaveTextContent('The catalogue could not be loaded.');
+  });
+
   it('offers retry and hides the correlation id in a collapsible support section', async () => {
     const user = userEvent.setup();
     const onRetry = vi.fn();
@@ -197,5 +223,7 @@ describe('NotFoundPage', () => {
       'href',
       '/search',
     );
+    expect(screen.getByText('404')).toBeInTheDocument();
+    expect(screen.getByText('We could not find that page.')).toBeInTheDocument();
   });
 });

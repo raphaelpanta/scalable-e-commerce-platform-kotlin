@@ -56,7 +56,7 @@ export function CartLine({ line, busy = false, onQuantity, onRemove }: CartLineP
           }}
         />
         <button
-          className={cx(buttons.button, buttons.secondary)}
+          className={cx(buttons.button, buttons.quiet)}
           type="button"
           disabled={busy}
           aria-label={`Remove ${line.productName}`}

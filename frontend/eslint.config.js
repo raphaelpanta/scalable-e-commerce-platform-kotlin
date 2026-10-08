@@ -70,7 +70,17 @@ const layerAliases = '@{domain,app,api,telemetry,ui}/**';
 
 export default defineConfig(
   {
-    ignores: ['node_modules/', 'dist/', 'build/', 'src/api/generated/', 'public/'],
+    ignores: [
+      'node_modules/',
+      'dist/',
+      'build/',
+      'src/api/generated/',
+      'public/',
+      'visual/public/',
+      'visual/.dist/',
+      'visual/test-results/',
+      'visual/playwright-report/',
+    ],
   },
   eslintJs.configs.recommended,
   ...tsConfigs.strictTypeChecked,
@@ -257,7 +267,7 @@ export default defineConfig(
     },
   },
   {
-    files: ['tests/**/*.{ts,tsx}', 'pact/**/*.ts', 'acceptance/**/*.ts'],
+    files: ['tests/**/*.{ts,tsx}', 'pact/**/*.ts', 'acceptance/**/*.ts', 'visual/**/*.{ts,tsx}'],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',
@@ -273,6 +283,9 @@ export default defineConfig(
       '*.config.ts',
       'eslint.config.js',
       'pact/**/*.ts',
+      'visual/*.config.ts',
+      'visual/*.spec.ts',
+      'visual/guard.ts',
       'src/**/*.d.ts',
     ],
     languageOptions: { globals: { ...globals.node } },

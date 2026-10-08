@@ -168,7 +168,7 @@ export function NotificationsPage(): JSX.Element {
       <h1 id="page-title" className={styles.title}>
         Notification preferences
       </h1>
-      <QueryBoundary query={query} loadingLabel="Loading your preferences…">
+      <QueryBoundary query={query} loadingLabel="Loading your preferences…" loading="lines">
         {(preferences) => (
           <>
             {saved ? (

@@ -24,7 +24,9 @@ export function ProductCard({ product }: ProductCardProps): JSX.Element {
   const inStock = product.availability.inStock;
   return (
     <li className={styles.card}>
-      <ProductImage src={primary?.url} alt={primary?.altText ?? product.name} />
+      <div className={styles.media}>
+        <ProductImage src={primary?.url} alt={primary?.altText ?? product.name} />
+      </div>
       <h2 className={styles.name}>
         <Link className={styles.link} to={productPath(product)}>
           {product.name}

@@ -47,12 +47,14 @@ describe('Checkout steps (FR-006)', () => {
     expect(continueToPayment).toBeDisabled();
     await user.click(screen.getByRole('radio', { name: /Work/ }));
     expect(continueToPayment).toBeEnabled();
+    // Selection is carried by the native radio, not by the card colour alone.
+    expect(screen.getByRole('radio', { checked: true })).toHaveAccessibleName(/Work/);
     await user.click(continueToPayment);
     await waitFor(() => {
       expect(router.state.location.search).toBe('?step=payment');
     });
 
-    expect(screen.getByText(/Local development payment methods/)).toBeInTheDocument();
+    expect(await screen.findByText(/Local development payment methods/)).toBeInTheDocument();
     expect(screen.queryByLabelText(/card number/i)).not.toBeInTheDocument();
     expect(screen.getAllByRole('radio')).toHaveLength(3);
     const continueToReview = screen.getByRole('button', { name: 'Continue to review' });
@@ -322,10 +324,11 @@ describe('Checkout refusals and retries (FR-007, FR-008)', () => {
       expect(confirm).toBeEnabled();
     });
     await user.click(confirm);
+    // The redirect may pass through an intermediate location; wait for the final one as a whole.
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/sign-in');
+      expect(router.state.location.search).toBe('?next=%2Fcheckout%3Fstep%3Dreview');
     });
-    expect(router.state.location.search).toBe('?next=%2Fcheckout%3Fstep%3Dreview');
     expect(storedDraft()).toMatchObject({
       step: 'review',
       addressId: homeAddress.id,

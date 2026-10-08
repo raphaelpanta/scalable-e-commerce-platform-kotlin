@@ -4,18 +4,18 @@
   display: grid;
   place-items: center;
   padding: var(--layout-gutter);
-  background: rgb(0 0 0 / 45%);
+  background: var(--color-overlay);
   z-index: 10;
 }
 
 .dialog {
   display: grid;
   gap: var(--space-4);
-  width: min(100%, 28rem);
+  width: min(100%, var(--dialog-max-width));
   padding: var(--space-5);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   background: var(--color-surface-raised);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-md);
 }
 
 .title {

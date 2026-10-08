@@ -19,6 +19,7 @@ export type EmptyProps = {
 export function Empty({ title, message, action }: EmptyProps): JSX.Element {
   return (
     <div className={styles.state}>
+      <span className={styles.mark} aria-hidden="true" />
       <h2 className={styles.title}>{title}</h2>
       {message === undefined ? null : <p className={styles.message}>{message}</p>}
       {'to' in action ? (
