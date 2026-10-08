@@ -469,7 +469,7 @@ shows at least as many rows as before (compare against a screenshot taken before
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T045 Write `frontend/visual/pages.spec.ts`: 48 `toHaveScreenshot('<page>-<width>-<theme>.png', { fullPage:
+- [X] T045 Write `frontend/visual/pages.spec.ts`: 48 `toHaveScreenshot('<page>-<width>-<theme>.png', { fullPage:
   true })` captures (8 pages × 6 projects) per [visual-baselines.md](contracts/visual-baselines.md):
   - clock frozen with `page.clock.install({ time: '2026-01-15T10:00:00Z' })`;
   - `await document.fonts.ready` before each capture;
