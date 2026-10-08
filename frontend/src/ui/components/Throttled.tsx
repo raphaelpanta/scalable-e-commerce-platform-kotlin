@@ -1,7 +1,7 @@
 import { type JSX, useEffect, useState } from 'react';
 
 import buttons from './buttons.module.css';
-import styles from './states.module.css';
+import styles from './notices.module.css';
 
 export type ThrottledProps = {
   readonly retryAfterSeconds: number;
@@ -40,7 +40,7 @@ export function Throttled({
   const remaining = useCountdown(retryAfterSeconds);
   const canRetry = remaining === 0;
   return (
-    <div className={styles.state} role="status" aria-live="polite">
+    <div className={styles.notice} role="status" aria-live="polite">
       <h2 className={styles.title}>{title}</h2>
       <p className={styles.message}>
         {canRetry ? (

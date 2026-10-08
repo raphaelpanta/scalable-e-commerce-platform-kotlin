@@ -4,9 +4,8 @@ import type { ChangedLine } from '@app/order/orderPort';
 
 import { cx } from '../cx.ts';
 import buttons from './buttons.module.css';
-import styles from './cart.module.css';
 import { Money } from './Money.tsx';
-import states from './states.module.css';
+import styles from './notices.module.css';
 
 export type PriceChangeNoticeProps = {
   readonly changedLines: readonly ChangedLine[];
@@ -27,9 +26,9 @@ export function PriceChangeNotice({
   onAccept,
 }: PriceChangeNoticeProps): JSX.Element {
   return (
-    <div className={cx(states.state, states.danger)} role="alert">
-      <h2 className={states.title}>Prices changed</h2>
-      <p className={states.message}>
+    <div className={cx(styles.notice, styles.warning)} role="alert">
+      <h2 className={styles.title}>Prices changed</h2>
+      <p className={styles.message}>
         The price of one or more items changed since you last viewed the cart. Review the new prices
         and accept them to place the order.
       </p>

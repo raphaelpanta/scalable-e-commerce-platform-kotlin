@@ -13,6 +13,7 @@ import { ActionError } from '../components/ActionError.tsx';
 import buttons from '../components/buttons.module.css';
 import cart from '../components/cart.module.css';
 import { ConfirmDialog } from '../components/ConfirmDialog.tsx';
+import notices from '../components/notices.module.css';
 import orders from '../components/orders.module.css';
 import { OrderSummary } from '../components/OrderSummary.tsx';
 import { PaymentCountdown } from '../components/PaymentCountdown.tsx';
@@ -37,7 +38,7 @@ function PaymentOutcome({ view, order }: { view: OrderView; order: Order }): JSX
     return <p role="status">The payment failed. Looking up the reason…</p>;
   }
   return (
-    <p role="alert">
+    <p className={cx(notices.notice, notices.danger)} role="alert">
       The payment failed: {declineLabel(attempt.data?.declineReason)}. Nothing was charged.
     </p>
   );
@@ -194,7 +195,7 @@ export function OrderPage(): JSX.Element {
   const order = useOwnOrder(orderId);
   if (orderId === undefined) return <NotFoundPage />;
   return (
-    <QueryBoundary query={order} loadingLabel="Loading your order…">
+    <QueryBoundary query={order} loadingLabel="Loading your order…" loading="lines">
       {(found) =>
         found === null ? (
           <NotFoundPage />

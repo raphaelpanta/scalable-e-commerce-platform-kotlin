@@ -20,7 +20,7 @@ export type ProductListingProps = {
 export function ProductListing({ query, empty }: ProductListingProps): JSX.Element {
   const [searchParams] = useSearchParams();
   return (
-    <QueryBoundary query={query} loadingLabel="Loading products…">
+    <QueryBoundary query={query} loadingLabel="Loading products…" loading="grid">
       {(page): ReactNode => {
         if (page.items.length === 0) {
           if (page.page > 0) {

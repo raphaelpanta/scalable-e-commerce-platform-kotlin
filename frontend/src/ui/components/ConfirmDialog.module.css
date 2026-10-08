@@ -13,9 +13,9 @@
   gap: var(--space-4);
   width: min(100%, var(--dialog-max-width));
   padding: var(--space-5);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   background: var(--color-surface-raised);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-md);
 }
 
 .title {

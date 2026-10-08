@@ -2,7 +2,8 @@ import { type JSX, useEffect, useState } from 'react';
 
 import { formatRemaining, remainingUntil } from '@app/order/orderView';
 
-import styles from './cart.module.css';
+import { cx } from '../cx.ts';
+import styles from './notices.module.css';
 
 export type PaymentCountdownProps = {
   /** The order's `paymentExpiresAt`, never recomputed in the browser (FR-009). */
@@ -25,7 +26,12 @@ export function PaymentCountdown({ deadline }: PaymentCountdownProps): JSX.Eleme
   const remaining = remainingUntil(deadline, now);
   const ended = remaining.minutes === 0 && remaining.seconds === 0;
   return (
-    <p role="timer" aria-live="polite" aria-atomic="true">
+    <p
+      className={cx(styles.notice, styles.warning)}
+      role="timer"
+      aria-live="polite"
+      aria-atomic="true"
+    >
       {ended ? (
         'The payment window has ended; the order is being cancelled.'
       ) : (

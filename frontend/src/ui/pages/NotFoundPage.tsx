@@ -8,9 +8,13 @@ import buttons from '../components/buttons.module.css';
 export function NotFoundPage(): JSX.Element {
   return (
     <section className={styles.page} aria-labelledby="not-found-title">
+      <p className={styles.display404} aria-hidden="true">
+        404
+      </p>
       <h1 id="not-found-title" className={styles.title}>
         Page not found
       </h1>
+      <p>We could not find that page.</p>
       <p>The page or item you asked for does not exist or is no longer available.</p>
       <p className={styles.actions}>
         <Link className={buttons.button} to="/">

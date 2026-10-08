@@ -47,6 +47,8 @@ describe('Checkout steps (FR-006)', () => {
     expect(continueToPayment).toBeDisabled();
     await user.click(screen.getByRole('radio', { name: /Work/ }));
     expect(continueToPayment).toBeEnabled();
+    // Selection is carried by the native radio, not by the card colour alone.
+    expect(screen.getByRole('radio', { checked: true })).toHaveAccessibleName(/Work/);
     await user.click(continueToPayment);
     await waitFor(() => {
       expect(router.state.location.search).toBe('?step=payment');
