@@ -102,7 +102,7 @@ The cart service sees `X-Cart-Token` (injected by the gateway from the cart cook
 
 | # | Interaction (`operationId`) | Variants | Provider state | Used by |
 | --- | --- | --- | --- | --- |
-| P1 | `getSimulatorRules` (operator) | 200 rule document (`version`, `defaultOutcome`, `rules[]` with the tokens `tok_sim_approve_4242`, `tok_sim_decline*`, `tok_sim_unreachable`, `tok_sim_unreachable_forever`, amount rules ending 13 and 14); 403 shopper | `the simulator rules document version 2 is active`, `a shopper ana@example.com is signed in` | payment-method options of checkout in local mode and the console; the storefront renders the options from this document when the caller is an operator and from its build-time list of the same seeded tokens for a shopper (the 004 route is operator only; no card number is ever typed or stored, FR-006) |
+| P1 | withdrawn (T109, 2026-10-07) | — | — | the storefront never reads `getSimulatorRules`: every caller chooses from the build-time list of the seeded simulator methods (`frontend/src/domain/paymentMethods.ts`, same tokens as the seeded rule document; no card number is ever typed or stored, FR-006) and the console offers only order fulfilment and stock adjustment (FR-011); the row id is kept so earlier references stay resolvable |
 | P2 | `getPaymentAttempt`, `listPaymentAttemptsForOrder` | 200 attempt with outcome and decline category; 200 empty list | `order 0b9a3b0e-... has a declined payment attempt`, `order 0b9a3b0e-... has no payment attempts` | order page, confirmation (declined retry hint) |
 
 ## Storefront to gateway (`storefront-gateway.json`, verified by the gateway; new)

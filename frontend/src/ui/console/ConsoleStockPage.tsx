@@ -10,12 +10,12 @@ import type { Product } from '@app/catalog/catalogPort';
 import { useProducts } from '@app/catalog/useProducts';
 
 import styles from './console.module.css';
-import { ConsolePager } from './ConsolePager.tsx';
 import { platformRefusal } from './refusal.ts';
 import { StockAdjustmentForm } from './StockAdjustmentForm.tsx';
 import buttons from '../components/buttons.module.css';
 import { Empty } from '../components/Empty.tsx';
 import forms from '../components/forms.module.css';
+import { Pager } from '../components/Pager.tsx';
 import { QueryBoundary } from '../components/QueryBoundary.tsx';
 import { cx } from '../cx.ts';
 import { NotAllowedPage } from '../pages/NotAllowedPage.tsx';
@@ -146,12 +146,11 @@ export function ConsoleStockPage(): JSX.Element {
                   available={chosen.availability.availableQuantity}
                 />
               )}
-              <ConsolePager
+              <Pager
                 page={page.page}
                 size={page.size > 0 ? page.size : (listing.size ?? DEFAULT_PAGE_SIZE)}
                 totalItems={page.totalItems}
                 shown={page.items.length}
-                noun="products"
               />
             </>
           );

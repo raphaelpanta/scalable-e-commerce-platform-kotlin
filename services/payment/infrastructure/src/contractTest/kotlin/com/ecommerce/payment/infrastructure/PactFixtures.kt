@@ -32,9 +32,6 @@ object PactFixtures {
     const val CORRELATION_REGEX = "^[A-Za-z0-9-]{1,64}$"
     const val TIMESTAMP_REGEX = "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
     const val ADA = "7c1d4f3e-0a52-4c0b-8d3a-1e2f3a4b5c6d"
-
-    /** The operator ops@example.com of the storefront console states (feature 005). */
-    const val OPERATOR = "e5a1c3b7-2d40-4f9e-8b16-3c7d9a0f1e22"
     const val ORDER_1 = "0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10"
     const val ORDER_2 = "0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a11"
     const val ORDER_3 = "0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a12"

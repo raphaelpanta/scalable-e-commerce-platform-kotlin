@@ -1,19 +1,17 @@
 import { createContext, useContext } from 'react';
 
 import type { components as OrderComponents } from '@api/generated/order';
-import type { components as PaymentComponents } from '@api/generated/payment';
 import type { Listing } from '@app/catalog/browseParams';
 import type { Order } from '@app/order/orderPort';
 import type { OrderStatus } from '@domain/status';
 
 // What the operator console needs beyond the shopper ports (contracts/storefront-routes.md,
 // `/console/*`): the operator's listing of every order with the `orderStatus` filter, the
-// lifecycle transition (also the operator's cancellation) and the payment simulator rules. The
+// lifecycle transition (also the operator's cancellation). The
 // refusals the console shows are values, never thrown: a 409 is explained and changes nothing, a
 // 403 is the platform refusing a caller without the operator role. Outages, throttling and 401
 // stay thrown for the shared error states and the session layer.
 export type OrderPage = OrderComponents['schemas']['OrderPage'];
-export type SimulatorRules = PaymentComponents['schemas']['SimulatorRules'];
 
 export type ConsoleOrdersParams = Listing & { readonly orderStatus?: OrderStatus };
 
@@ -31,15 +29,6 @@ export type OrderConsolePort = {
   listOrders(params: ConsoleOrdersParams): Promise<OrderPage>;
   /** Moves an order along the lifecycle; `cancelled` is the operator's cancellation. */
   transitionOrderStatus(orderId: string, target: OrderStatus): Promise<TransitionResult>;
-};
-
-export type SimulatorRulesResult =
-  | { readonly kind: 'rules'; readonly rules: SimulatorRules }
-  /** 403: only an operator reads the document. */
-  | { readonly kind: 'forbidden' };
-
-export type SimulatorRulesPort = {
-  getSimulatorRules(): Promise<SimulatorRulesResult>;
 };
 
 export const OrderConsolePortContext = createContext<OrderConsolePort | undefined>(undefined);

@@ -40,16 +40,13 @@ private data class StorefrontCaller(
     companion object {
         /** ana@example.com, the shopper of the storefront interactions. */
         val ANA = StorefrontCaller(UUID.fromString(PactFixtures.ADA), "shopper")
-
-        /** ops@example.com, the operator who reads the simulator rules. */
-        val OPERATOR = StorefrontCaller(UUID.fromString(PactFixtures.OPERATOR), "operator")
     }
 }
 
 /**
  * Provider side of every pact whose provider is `payment`: the platform probe's health check, the four charge calls of
  * the order service (pact-interactions.md section 2.4) replayed against the running service over HTTP with
- * parameterised provider states, the storefront's reads of payment.yaml (feature 005 pact-matrix.md P1 and P2, the
+ * parameterised provider states, the storefront's reads of payment.yaml (feature 005 pact-matrix.md P2, the
  * placeholder bearer replaced by a test token of the signed-in caller, [BearerRewritingTarget]), and the payment events
  * consumed by order and notification (section 3.2), each produced from the fixture payments by the outbox's own
  * mapping. Shared by [PaymentProviderVerificationTest] (pacts of `build/pacts`) and [PaymentBrokerVerificationTest]
@@ -130,12 +127,6 @@ abstract class PaymentProviderStates {
     @State("order 0b9a3b0e-62b7-4f55-8d7e-0c3a6d1d9a10 has no payment attempts")
     fun order1HasNoAttempts() {
         harness.reset()
-    }
-
-    @State("the simulator rules document version 2 is active")
-    fun simulatorRulesActive() {
-        // The rule document is code (SimulatedPaymentRules.DOCUMENT); only an operator may read it.
-        caller = StorefrontCaller.OPERATOR
     }
 
     @State("a shopper ana@example.com is signed in")

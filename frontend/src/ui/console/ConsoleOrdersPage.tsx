@@ -7,11 +7,11 @@ import { useConsoleOrders } from '@app/console/useConsole';
 import { ORDER_STATUSES, OrderStatus } from '@domain/status';
 
 import styles from './console.module.css';
-import { ConsolePager } from './ConsolePager.tsx';
 import { OrdersTable } from './OrdersTable.tsx';
 import { platformRefusal } from './refusal.ts';
 import { Empty } from '../components/Empty.tsx';
 import forms from '../components/forms.module.css';
+import { Pager } from '../components/Pager.tsx';
 import { QueryBoundary } from '../components/QueryBoundary.tsx';
 import { orderStatusLabel } from '../labels.ts';
 import { NotAllowedPage } from '../pages/NotAllowedPage.tsx';
@@ -80,12 +80,12 @@ export function ConsoleOrdersPage(): JSX.Element {
           ) : (
             <>
               <OrdersTable orders={page.items} />
-              <ConsolePager
+              <Pager
                 page={page.page}
                 size={page.size > 0 ? page.size : (filter.size ?? DEFAULT_PAGE_SIZE)}
                 totalItems={page.totalItems}
                 shown={page.items.length}
-                noun="orders"
+                noun={{ singular: 'order', plural: 'orders' }}
               />
             </>
           )

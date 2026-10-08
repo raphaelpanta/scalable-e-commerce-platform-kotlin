@@ -226,8 +226,10 @@ harness; images, Compose and workflows follow the service conventions so nothing
   pending (the id exists once the provider was reached); the consumer pact uses a nullable matcher.
 - **Payment-method options for shoppers**: payment's `getSimulatorRules` is operator-only, so the
   storefront ships a build-time list of the seeded simulator methods (approving, declining,
-  pending) in `frontend/src/domain/paymentMethods.ts`, labelled as local-development methods; the
-  console reads the rules document. A real provider would replace this list with a provider SDK.
+  pending) in `frontend/src/domain/paymentMethods.ts`, labelled as local-development methods, for
+  every caller; the storefront does not read the rules document (the console offers only order
+  fulfilment and stock adjustment, FR-011; the planned read was withdrawn by convergence task
+  T109). A real provider would replace this list with a provider SDK.
 - **Categories by id**: feature 004 categories have no slug, so category pages resolve by id;
   the URL still carries page and sort state (FR-003).
 - **Cookie edge cases** (decided in [contracts/openapi/gateway-browser-session.yaml](contracts/openapi/gateway-browser-session.yaml)):

@@ -29,6 +29,8 @@ import { pactFor } from './pact.config.ts';
 // provider states verbatim, driving the real src/api/order.ts with the bearer the gateway injects.
 // `paymentExpiresAt` (the additive field of the order contract) is asserted while the payment is
 // pending (O5, O7) and null once it is approved (O1); a pending checkout is the contract's 202.
+// `paymentAttemptId` is asserted only once the payment is approved (plan: "Pending payment
+// attempt id").
 const { eachLike, integer, like, regex, string } = MatchersV3;
 
 const ORDERS = '/api/v1/orders';
@@ -99,7 +101,10 @@ function order(payment: 'approved' | 'pending') {
     createdAt: instant('2026-10-02T10:15:00Z'),
     ...(payment === 'approved'
       ? { paymentAttemptId: uuid('c2f1d0a9-5b3e-4e7a-9a60-8d1b2c3e4f50'), paymentExpiresAt: null }
-      : { paymentAttemptId: null, paymentExpiresAt: instant('2026-10-02T10:45:00Z') }),
+      : // Pact V3 has no "uuid or null" matcher, so the pending rows leave `paymentAttemptId`
+        // unconstrained (the provider may answer null or the attempt id; the storefront needs
+        // neither while the payment is pending) instead of pinning it to null.
+        { paymentExpiresAt: instant('2026-10-02T10:45:00Z') }),
   };
 }
 
@@ -370,7 +375,6 @@ describe('storefront → order pact (O1–O8)', () => {
           if (result.kind !== 'placed') return;
           expect(result.order.paymentStatus).toBe('pending');
           expect(result.order.paymentExpiresAt).toBe('2026-10-02T10:45:00Z');
-          expect(result.order.paymentAttemptId).toBeNull();
         });
     });
   });
