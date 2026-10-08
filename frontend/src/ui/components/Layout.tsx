@@ -8,6 +8,8 @@ import { signInLocationFor } from '@app/navigation/safeNext';
 import { hasRole } from '@app/session/sessionStore';
 import { useSession } from '@app/session/useSession';
 
+import { BRAND_TAGLINE } from '../brand/brand.ts';
+import { Wordmark } from '../brand/Wordmark.tsx';
 import { cx } from '../cx.ts';
 import styles from './Layout.module.css';
 
@@ -51,7 +53,7 @@ export function Layout(): JSX.Element {
       <header className={styles.header}>
         <div className={styles.headerInner}>
           <Link className={styles.brand} to="/">
-            Storefront
+            <Wordmark />
           </Link>
           <nav className={styles.nav} aria-label="Primary">
             <NavLink className={cx(styles.navLink)} to="/" end>
@@ -136,7 +138,11 @@ export function Layout(): JSX.Element {
         <Outlet />
       </main>
       <footer className={styles.footer}>
-        <div className={styles.footerInner}>Local development storefront</div>
+        <div className={styles.footerInner}>
+          <Wordmark />
+          <p className={styles.tagline}>{BRAND_TAGLINE}</p>
+          <p className={styles.copyright}>© Vibestore. Local development storefront.</p>
+        </div>
       </footer>
     </div>
   );
