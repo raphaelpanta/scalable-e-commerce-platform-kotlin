@@ -52,7 +52,7 @@ describe('Checkout steps (FR-006)', () => {
       expect(router.state.location.search).toBe('?step=payment');
     });
 
-    expect(screen.getByText(/Local development payment methods/)).toBeInTheDocument();
+    expect(await screen.findByText(/Local development payment methods/)).toBeInTheDocument();
     expect(screen.queryByLabelText(/card number/i)).not.toBeInTheDocument();
     expect(screen.getAllByRole('radio')).toHaveLength(3);
     const continueToReview = screen.getByRole('button', { name: 'Continue to review' });

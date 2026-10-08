@@ -107,7 +107,7 @@ runner starts inside the container.
 
 **⚠️ CRITICAL**: no user-story styling starts before this phase is complete.
 
-- [ ] T005 Write the contrast test first, in `frontend/tests/styles/wcag.ts` and
+- [X] T005 Write the contrast test first, in `frontend/tests/styles/wcag.ts` and
   `frontend/tests/styles/contrast.test.ts`, per [research §5](research.md):
   - `wcag.ts` holds the pure `relativeLuminance(hex)` and `contrastRatio(a, b)` (WCAG 2.x formula).
   - fast-check properties: symmetry, a range of `[1, 21]`, `#FFFFFF`/`#000000` = 21, and `ratio(a, a)` = 1.
@@ -117,7 +117,7 @@ runner starts inside the container.
     [contracts/design-tokens.md](contracts/design-tokens.md), copying the pairs into a typed array in the test:
     text pairs ≥ 4.5 and ui pairs ≥ 3, in both themes.
   - The test must fail against the current tokens, where `--color-border-strong` is missing.
-- [ ] T006 Rebuild `frontend/src/ui/styles/tokens.css` exactly per
+- [X] T006 Rebuild `frontend/src/ui/styles/tokens.css` exactly per
   [contracts/design-tokens.md](contracts/design-tokens.md):
   - Keep every existing name (`--color-bg` … `--motion-duration`). Add every token marked **new**: colours,
     `--font-display`, `--font-body`, `--font-size-3xl`, `--font-size-display`, `--line-height-tight`,
@@ -131,7 +131,7 @@ runner starts inside the container.
   - Keep `@media (prefers-reduced-motion: reduce)` and the 768 px gutter rule.
 
   T005 must now pass.
-- [ ] T007 [P] Write `frontend/src/ui/styles/fonts.css` per [research §1–§2](research.md):
+- [X] T007 [P] Write `frontend/src/ui/styles/fonts.css` per [research §1–§2](research.md):
   - One `@font-face` for `Fraunces` (weight 600, `font-display: swap`) and one for `Source Sans 3` (weight
     `200 900`, `font-display: swap`). Each has a woff2-only `src` that imports the package files
     `@fontsource/fraunces/files/fraunces-latin-600-normal.woff2` and
@@ -145,7 +145,7 @@ runner starts inside the container.
   - Import `fonts.css` once in `frontend/src/main.tsx`, before `global.css`.
 
   Check: `npm run build` emits exactly two `.woff2` files and no `.woff`. `npm run budget` passes.
-- [ ] T008 Migrate the 60 literal values (59 lengths, 1 colour function) out of every
+- [X] T008 Migrate the 60 literal values (59 lengths, 1 colour function) out of every
   `frontend/src/ui/**/*.module.css` and `frontend/src/ui/styles/global.css` into tokens from T006. This is a
   mechanical swap with no visual intent yet. Then update `global.css`:
   - `body` uses `var(--font-body)`;
@@ -153,7 +153,7 @@ runner starts inside the container.
     `var(--letter-spacing-display)`;
   - `a` hover uses `--color-primary-hover`;
   - add `.tabular { font-variant-numeric: var(--font-numeric); }`.
-- [ ] T009 Write `frontend/scripts/check-design-tokens.mjs` per [research §4](research.md) and run it first in
+- [X] T009 Write `frontend/scripts/check-design-tokens.mjs` per [research §4](research.md) and run it first in
   `npm run lint` (`frontend/package.json`):
   - Scan `src/**/*.module.css` and `src/ui/styles/global.css`.
   - Fail on colour literals (hex, `rgb/rgba/hsl/hsla/oklch/lab/color()`, named colours except
