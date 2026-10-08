@@ -97,6 +97,8 @@ services:
       PACT_BROKER_BASIC_AUTH_USERNAME: ${PACT_BROKER_BASIC_AUTH_USERNAME:?set PACT_BROKER_BASIC_AUTH_USERNAME in .env}
       PACT_BROKER_BASIC_AUTH_PASSWORD: ${PACT_BROKER_BASIC_AUTH_PASSWORD:?set PACT_BROKER_BASIC_AUTH_PASSWORD in .env}
       PACT_BROKER_ALLOW_PUBLIC_READ: "false"
+      # The heartbeat (no pact data) answers without credentials, so the container healthcheck can reach it.
+      PACT_BROKER_PUBLIC_HEARTBEAT: "true"
       # Webhooks (contract_content_changed -> workflow_dispatch of the provider's pipeline, README "Pact Broker
       # webhooks") may only call the GitHub API over HTTPS.
       PACT_BROKER_WEBHOOK_SCHEME_WHITELIST: https
@@ -107,7 +109,7 @@ services:
       pact-broker-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-q", "--tries=1", "--timeout=5", "-O", "/dev/null", "http://localhost:9292/diagnostic/status/heartbeat"]
+      test: ["CMD", "wget", "-q", "--tries=1", "--timeout=5", "-O", "/dev/null", "http://127.0.0.1:9292/diagnostic/status/heartbeat"]
       interval: 10s
       timeout: 6s
       retries: 12
