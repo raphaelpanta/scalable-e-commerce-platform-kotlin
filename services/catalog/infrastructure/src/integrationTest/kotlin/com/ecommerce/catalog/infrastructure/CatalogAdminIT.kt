@@ -248,7 +248,7 @@ class CatalogAdminIT : CatalogIntegrationTest() {
         belowReserved["errors"] shouldBe
             listOf(mapOf("field" to "delta", "message" to "would make available quantity negative"))
         val invalid =
-            call(HttpMethod.POST, uri, operator(), mapOf("delta" to 0, "reason" to "x"))
+            call(HttpMethod.POST, uri, operator(), mapOf("delta" to 0, "reason" to " "))
                 .expectProblem(ProblemType.VALIDATION, UNPROCESSABLE)
         @Suppress("UNCHECKED_CAST")
         (invalid["errors"] as List<Json>).map { it["field"] } shouldBe listOf("delta", "reason")
