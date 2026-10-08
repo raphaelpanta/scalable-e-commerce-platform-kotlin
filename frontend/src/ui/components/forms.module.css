@@ -131,3 +131,20 @@
     gap: var(--space-4);
   }
 }
+
+/* Forced colours: inputs keep a visible boundary and the selected radio card a Highlight outline,
+   so selection never relies on the accent fill that forced colours remove. */
+@media (forced-colors: active) {
+  .input,
+  .option {
+    border: var(--border-width) solid CanvasText;
+  }
+
+  .option:has(input:checked) {
+    outline: var(--border-width-strong) solid Highlight;
+  }
+
+  .input[aria-invalid='true'] {
+    border-width: var(--border-width-strong);
+  }
+}

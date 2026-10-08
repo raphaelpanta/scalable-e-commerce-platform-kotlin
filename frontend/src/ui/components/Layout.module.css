@@ -157,3 +157,13 @@
 .copyright {
   color: var(--color-text-muted);
 }
+
+/* Forced colours: the cart count badge and the merge notice keep their boxes; the text-style
+   Sign out button keeps a border so it reads as a button. */
+@media (forced-colors: active) {
+  .badge,
+  .notice,
+  .textButton {
+    border: var(--border-width) solid CanvasText;
+  }
+}

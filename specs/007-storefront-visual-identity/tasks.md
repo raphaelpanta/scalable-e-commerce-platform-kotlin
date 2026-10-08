@@ -412,7 +412,7 @@ forced colours, keyboard focus, reduced motion and layout stability.
     must be present in the DOM before then.
 
   Run it and record the failures it finds. They are the input for T039–T041.
-- [ ] T038 [US3] Append the US3 scenarios to `frontend/acceptance/features/visual-identity.feature`:
+- [X] T038 [US3] Append the US3 scenarios to `frontend/acceptance/features/visual-identity.feature`:
   - "The store is usable in a dark appearance": with a dark appearance preferred, the home and checkout pages
     pass the accessibility audit. Add a `colorScheme` option to `#contextOptions()` in
     `frontend/acceptance/support/world.ts`, set by a Given step; the default stays light.
@@ -423,15 +423,15 @@ forced colours, keyboard focus, reduced motion and layout stability.
 
 ### Implementation for User Story 3
 
-- [ ] T039 [P] [US3] Add `@media (forced-colors: active)` rules per the "Forced-colours mapping" of
+- [X] T039 [P] [US3] Add `@media (forced-colors: active)` rules per the "Forced-colours mapping" of
   [design-tokens.md](contracts/design-tokens.md) to `buttons.module.css`, `forms.module.css` (radio cards: a
   `Highlight` 2 px outline when selected), `StatusBadges` (border kept), `Pager.module.css`,
   `ProductCard.module.css` (no shadow), `states.module.css` (skeleton outline) and `Layout.module.css` (notice
   border).
-- [ ] T040 [P] [US3] Fix every overflow and contrast failure that T037 reported, at 360 / 640 px and in both
+- [X] T040 [P] [US3] Fix every overflow and contrast failure that T037 reported, at 360 / 640 px and in both
   themes. The usual causes are long names (wrap with `overflow-wrap: anywhere`), long prices (`white-space:
   nowrap` on amounts only) and the header nav. The fix is CSS only, in the module that owns the element.
-- [ ] T041 [US3] Tune the fallback metrics in `frontend/src/ui/styles/fonts.css`
+- [X] T041 [US3] Tune the fallback metrics in `frontend/src/ui/styles/fonts.css`
   (`size-adjust`/`ascent-override`/`descent-override`) until CLS < 0.1 holds on home and product, with margin.
   Verify by blocking `/assets/*.woff2` in the T037 run (route abort): text must stay visible and the layout must
   stay intact. Depends on T037.

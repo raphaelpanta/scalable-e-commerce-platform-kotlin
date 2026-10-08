@@ -45,3 +45,9 @@
   font-variant-numeric: var(--font-numeric);
   list-style: disc;
 }
+
+@media (forced-colors: active) {
+  .notice {
+    border: var(--border-width) solid CanvasText;
+  }
+}

@@ -25,7 +25,10 @@ export function HomePage(): JSX.Element {
         Products
       </h1>
       <p className={home.lead}>{BRAND_TAGLINE}</p>
-      {featured.length === 0 ? null : (
+      {categories.isPending ? (
+        // Reserves the tile row while the categories load, so the listing below never moves.
+        <div className={home.tilesPending} aria-hidden="true" />
+      ) : featured.length === 0 ? null : (
         <ul className={home.tiles} aria-label="Featured categories">
           {featured.map((category) => (
             <li key={category.id} className={home.tile}>

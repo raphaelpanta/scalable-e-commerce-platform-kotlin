@@ -85,3 +85,12 @@
 .outOfStock {
   color: var(--color-text-muted);
 }
+
+/* Forced colours: no shadow; the card keeps a border so it still reads as one target. */
+@media (forced-colors: active) {
+  .card,
+  .card:hover {
+    border: var(--border-width) solid CanvasText;
+    box-shadow: none;
+  }
+}

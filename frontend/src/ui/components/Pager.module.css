@@ -36,3 +36,9 @@
   border-bottom: var(--border-width-strong) solid var(--color-primary);
   font-weight: var(--font-weight-bold);
 }
+
+@media (forced-colors: active) {
+  .position[aria-current='page'] {
+    outline: var(--border-width-strong) solid Highlight;
+  }
+}

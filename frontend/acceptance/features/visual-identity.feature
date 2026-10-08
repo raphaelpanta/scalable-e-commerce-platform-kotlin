@@ -34,3 +34,25 @@ Feature: A recognisable storefront identity
     When I open the page "/this-page-does-not-exist"
     Then I see "404"
     And the not-found page offers a way back to the store
+
+  Scenario: The store is usable in a dark appearance
+    Given a category "Garden tools" with these products in stock:
+      | Rake |
+    And the shopper prefers a dark appearance
+    When I open the storefront
+    Then the page passes the accessibility audit
+    When an anonymous shopper opens the category "Garden tools"
+    Then the page passes the accessibility audit
+    When the shopper views the cart
+    Then the page passes the accessibility audit
+
+  Scenario: Nothing scrolls sideways on a small phone
+    Given a category "Garden tools" with these products in stock:
+      | Rake |
+    And the shopper uses a narrow phone screen
+    When I open the storefront
+    Then the page does not scroll sideways
+    When an anonymous shopper opens the category "Garden tools"
+    Then the page does not scroll sideways
+    When the shopper views the cart
+    Then the page does not scroll sideways

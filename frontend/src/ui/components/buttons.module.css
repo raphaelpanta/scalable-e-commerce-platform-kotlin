@@ -90,3 +90,25 @@
 .link:hover {
   color: var(--color-primary-hover);
 }
+
+/* Forced colours (design-tokens.md mapping): every variant is a bordered system button, so the
+   quiet and link variants stay recognisable as controls once fills and tints are dropped. */
+@media (forced-colors: active) {
+  .button,
+  .secondary,
+  .quiet,
+  .danger {
+    border: var(--border-width) solid ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+  }
+
+  .button:disabled {
+    border-color: GrayText;
+    color: GrayText;
+  }
+
+  .link {
+    color: LinkText;
+  }
+}
