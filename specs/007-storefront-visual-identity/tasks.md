@@ -448,11 +448,11 @@ forced colours, keyboard focus, reduced motion and layout stability.
 themes (T037), and `frontend/acceptance/features/console.feature` passes unchanged. At 1280 px, the orders table
 shows at least as many rows as before (compare against a screenshot taken before the change).
 
-- [ ] T042 [US4] Append the US4 scenario to `frontend/acceptance/features/visual-identity.feature`:
+- [X] T042 [US4] Append the US4 scenario to `frontend/acceptance/features/visual-identity.feature`:
   "Operators work under the same brand". The console shows the Vibestore name beside "Console", and the orders
   list is still offered. Reuse the operator sign-in from `frontend/acceptance/support/operator.ts`. Depends on
   T013.
-- [ ] T043 [P] [US4] Migrate `frontend/src/ui/console/console.module.css` to semantic tokens only:
+- [X] T043 [P] [US4] Migrate `frontend/src/ui/console/console.module.css` to semantic tokens only:
   - colours, `--radius-*`, the body in `--font-body` and the headings in `--font-display`;
   - the table header on `--color-surface` and row borders in `--color-border`;
   - the button and field classes from `buttons.module.css` and `forms.module.css` (`TransitionButtons.tsx`,
@@ -460,7 +460,7 @@ shows at least as many rows as before (compare against a screenshot taken before
 
   Do not change padding, row height, column order or control sizes beyond the token swap. Take a 1280 px
   screenshot of `/console/orders` before and after and attach both to the PR.
-- [ ] T044 [US4] Show the brand in `frontend/src/ui/console/ConsoleLayout.tsx`: a small `Wordmark` with the
+- [X] T044 [US4] Show the brand in `frontend/src/ui/console/ConsoleLayout.tsx`: a small `Wordmark` with the
   existing "Console" text. The nav `aria-label="Console"` and every role stay. Depends on T014 and T043.
 
 **Checkpoint**: all four stories are complete.
@@ -477,13 +477,13 @@ shows at least as many rows as before (compare against a screenshot taken before
 
   Generate the baselines with `npm run visual -- --update-snapshots` (the container only) and commit
   `frontend/visual/__screenshots__/*.png`. Re-run without the flag: 48 pass.
-- [ ] T046 [P] Add a "Visual regression" step to `.github/workflows/storefront.yml`, after "Unit and component
+- [X] T046 [P] Add a "Visual regression" step to `.github/workflows/storefront.yml`, after "Unit and component
   tests". It runs `npm run visual` inside `mcr.microsoft.com/playwright:v1.63.0-noble` through the runner's
   Docker socket, using the same image-pin comment block as the other tool containers. On failure it adds
   `frontend/visual/test-results/` to the report tarball. Also add a "Bundle budget" step: `npm run build && npm
   run budget`. Keep the workflow's path filters, and update `.github/scripts/tests/test-path-filter-check.sh` if
   `frontend/visual/**` needs listing.
-- [ ] T047 [P] Document the design system in `frontend/README.md`, under a "Design system" section:
+- [X] T047 [P] Document the design system in `frontend/README.md`, under a "Design system" section:
   - the token layers and where values live;
   - the rule "no literal values" enforced by `check-design-tokens.mjs`;
   - the fonts and their licences (OFL, with the Fontsource packages);
@@ -492,7 +492,7 @@ shows at least as many rows as before (compare against a screenshot taken before
 
   Link [contracts/design-tokens.md](contracts/design-tokens.md). Update `docs/build.md` with the `visual` and
   `budget` scripts.
-- [ ] T048 [P] SC-007 sweep: `grep -rn "Storefront" frontend/src frontend/index.html frontend/public` returns
+- [X] T048 [P] SC-007 sweep: `grep -rn "Storefront" frontend/src frontend/index.html frontend/public` returns
   nothing user-visible. Comments and internal identifiers that match "storefront" are allowed. Fix any remaining
   visible label.
 - [ ] T049 Run the full gate in the foreground, in this order:

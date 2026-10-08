@@ -113,6 +113,11 @@ on the Gradle daemon's PATH (a version manager such as nvm or fnm that only your
 point the build at it: `./gradlew -q verify -PnpmExecutable=$(command -v npm)`. `./gradlew -q frontendCheck` runs
 just the two frontend tasks.
 
+Two storefront checks run outside `verify` (both run in the storefront pipeline):
+`npm --prefix frontend run visual` is the visual suite in the Playwright container (podman or docker;
+`-- --update-snapshots` rewrites the baselines), and `npm --prefix frontend run build && npm --prefix frontend run budget`
+keeps the first-load size within 150 KB of `frontend/budget.json`.
+
 Offline: after one online run, `./gradlew -q --offline verify` works from the local caches. With the build
 cache and configuration cache enabled (`gradle.properties`), an unchanged re-run finishes in well under two
 minutes.

@@ -56,3 +56,9 @@ Feature: A recognisable storefront identity
     Then the page does not scroll sideways
     When the shopper views the cart
     Then the page does not scroll sideways
+
+  Scenario: Operators work under the same brand
+    When I sign in as the operator
+    And I open the page "/console/orders"
+    Then the console shows the Vibestore name beside "Console"
+    And the console offers the orders list
