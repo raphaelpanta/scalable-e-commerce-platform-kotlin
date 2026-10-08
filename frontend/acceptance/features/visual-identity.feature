@@ -34,3 +34,9 @@ Feature: A recognisable storefront identity
     When I open the page "/this-page-does-not-exist"
     Then I see "404"
     And the not-found page offers a way back to the store
+
+  Scenario: Operators work under the same brand
+    When I sign in as the operator
+    And I open the page "/console/orders"
+    Then the console shows the Vibestore name beside "Console"
+    And the console offers the orders list
