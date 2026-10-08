@@ -495,7 +495,7 @@ shows at least as many rows as before (compare against a screenshot taken before
 - [X] T048 [P] SC-007 sweep: `grep -rn "Storefront" frontend/src frontend/index.html frontend/public` returns
   nothing user-visible. Comments and internal identifiers that match "storefront" are allowed. Fix any remaining
   visible label.
-- [ ] T049 Run the full gate in the foreground, in this order:
+- [X] T049 Run the full gate in the foreground, in this order:
   1. `./gradlew -q verify` (silent);
   2. `npm run build && npm run budget` (growth ≤ 150 KB);
   3. `npm run visual` (48 + quality, green);
@@ -504,7 +504,7 @@ shows at least as many rows as before (compare against a screenshot taken before
 
   Fix failures in the owning module, never by editing acceptance steps or regenerating baselines to hide a
   regression.
-- [ ] T050 Run the [quickstart.md](quickstart.md) walkthrough end to end, including §5 (font-load failure). Capture
+- [X] T050 Run the [quickstart.md](quickstart.md) walkthrough end to end, including §5 (font-load failure). Capture
   before and after screenshots of home, product and checkout (`main` vs branch) at 1280 light, and attach them
   to the PR for the SC-008 review.
 
