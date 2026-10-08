@@ -10,7 +10,7 @@
   "scripts": {
     "generate": "node scripts/generate-api.mjs",
     "ensure-generated": "node scripts/generate-api.mjs --ensure",
-    "lint": "npm run --silent generate && prettier --log-level warn --check . && eslint --max-warnings 0 . && tsc --noEmit",
+    "lint": "node scripts/check-design-tokens.mjs && npm run --silent generate && prettier --log-level warn --check . && eslint --max-warnings 0 . && tsc --noEmit",
     "test": "npm run --silent ensure-generated && node scripts/quiet.mjs vitest run --reporter=dot --silent=passed-only",
     "build": "npm run --silent ensure-generated && node scripts/quiet.mjs vite build --logLevel warn",
     "budget": "node scripts/check-bundle-budget.mjs",

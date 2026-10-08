@@ -21,6 +21,7 @@ import { SessionStoreContext } from '@app/session/useSession';
 import { initTelemetry, type Telemetry } from '@telemetry/index';
 import { createStorefrontRouter } from '@ui/routes/router';
 
+import './ui/styles/fonts.css';
 import './ui/styles/tokens.css';
 import './ui/styles/global.css';
 
