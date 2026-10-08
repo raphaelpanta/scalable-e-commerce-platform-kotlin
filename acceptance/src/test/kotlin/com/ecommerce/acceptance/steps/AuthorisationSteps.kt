@@ -57,14 +57,20 @@ class AuthorisationSteps(
 
     @Then("the operator's list holds the orders of both shoppers")
     fun theOperatorsListHoldsBoth() {
-        val listed = world.api.last.body.items().map { it.string("id") }
+        val listed =
+            world.api.last.body
+                .items()
+                .map { it.string("id") }
         listed shouldContain world.orderId()
         listed shouldContain checkNotNull(world.otherOrderId) { "No other shopper's order" }
     }
 
     @Then("the operator's list holds neither of their orders")
     fun theOperatorsListHoldsNeither() {
-        val listed = world.api.last.body.items().map { it.string("id") }
+        val listed =
+            world.api.last.body
+                .items()
+                .map { it.string("id") }
         listed shouldNotContain world.orderId()
         listed shouldNotContain checkNotNull(world.otherOrderId) { "No other shopper's order" }
     }
