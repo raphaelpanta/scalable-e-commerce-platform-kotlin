@@ -187,14 +187,14 @@ value class StockLevel private constructor(
     }
 }
 
-/** Why stock was adjusted: trimmed, 3..200 characters, mandatory (FR-002). */
+/** Why stock was adjusted: trimmed, 1..255 characters, mandatory (FR-002; bounds of the catalog contract's `StockAdjustmentRequest.reason`). */
 @JvmInline
 value class StockAdjustmentReason private constructor(
     val value: String,
 ) {
     companion object {
-        const val MIN: Int = 3
-        const val MAX: Int = 200
+        const val MIN: Int = 1
+        const val MAX: Int = 255
 
         fun of(raw: String?): Either<FieldIssue, StockAdjustmentReason> =
             Text.bounded(raw.orEmpty(), "reason", MIN..MAX).map(::StockAdjustmentReason)

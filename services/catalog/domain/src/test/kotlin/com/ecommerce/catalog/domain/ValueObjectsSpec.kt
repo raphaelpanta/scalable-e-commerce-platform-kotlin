@@ -105,16 +105,16 @@ class ValueObjectsSpec :
             StockLevel.of(-1, "stock").error().field shouldBe "stock"
         }
 
-        test("an adjustment reason is mandatory, 3 to 200 characters") {
+        test("an adjustment reason is mandatory, 1 to 255 characters (the contract's bounds)") {
             StockAdjustmentReason.of(" Delivery received ").value().value shouldBe "Delivery received"
-            StockAdjustmentReason.of(null).error() shouldBe FieldIssue("reason", "must be at least 3 characters")
-            StockAdjustmentReason.of("ab").error().reason shouldBe "must be at least 3 characters"
-            StockAdjustmentReason.of("abc").value().value shouldBe "abc"
+            StockAdjustmentReason.of(null).error() shouldBe FieldIssue("reason", "must not be blank")
+            StockAdjustmentReason.of("   ").error().reason shouldBe "must not be blank"
+            StockAdjustmentReason.of("a").value().value shouldBe "a"
             StockAdjustmentReason
-                .of("r".repeat(200))
+                .of("r".repeat(255))
                 .value()
-                .value.length shouldBe 200
-            StockAdjustmentReason.of("r".repeat(201)).error().reason shouldBe "must be at most 200 characters"
+                .value.length shouldBe 255
+            StockAdjustmentReason.of("r".repeat(256)).error().reason shouldBe "must be at most 255 characters"
         }
 
         test("a quantity is 1 to 99") {

@@ -151,7 +151,7 @@ When(
     );
     const code = /\b(\d{6})\b/.exec(message.text)?.[1];
     assert.ok(code !== undefined, 'the text message carries no six digit code');
-    await page.getByLabel('Verification code').fill(code);
+    await page.getByLabel('Verification code', { exact: true }).fill(code);
     await page.getByRole('button', { name: 'Confirm number' }).click();
     await page.getByText(`Your phone number ${phone} is verified.`).waitFor({ state: 'visible' });
   },
@@ -230,10 +230,10 @@ When(
     const url = new URL(this.resetLink);
     await this.goto(`${url.pathname}${url.search}`);
     const page = this.currentPage();
-    await page.getByLabel('New password').waitFor({ state: 'visible' });
+    await page.getByLabel('New password', { exact: true }).waitFor({ state: 'visible' });
     assert.equal(new URL(page.url()).searchParams.get('token'), null);
     this.newPassword = `${this.shopper.password}-new`;
-    await page.getByLabel('New password').fill(this.newPassword);
+    await page.getByLabel('New password', { exact: true }).fill(this.newPassword);
     await page.getByRole('button', { name: 'Set new password' }).click();
     await page
       .getByRole('status')
@@ -269,7 +269,7 @@ Then('the same reset link cannot be used a second time', async function (this: S
   const url = new URL(this.resetLink);
   await this.goto(`${url.pathname}${url.search}`);
   const page = this.currentPage();
-  await page.getByLabel('New password').fill(`${this.shopper.password}-again`);
+  await page.getByLabel('New password', { exact: true }).fill(`${this.shopper.password}-again`);
   await page.getByRole('button', { name: 'Set new password' }).click();
   await page
     .getByRole('alert')

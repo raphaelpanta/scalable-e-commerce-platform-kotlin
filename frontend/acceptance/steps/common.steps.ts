@@ -80,8 +80,10 @@ When('I sign in as the shopper', async function (this: StorefrontWorld) {
 });
 
 When('I sign out', async function (this: StorefrontWorld) {
-  await this.currentPage().getByRole('button', { name: 'Sign out' }).click();
-  await this.currentPage().waitForLoadState('networkidle');
+  const page = this.currentPage();
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  // Signing out is complete once the banner offers to sign in again (the session request has answered).
+  await page.getByRole('link', { name: 'Sign in' }).waitFor({ state: 'visible' });
 });
 
 // Keyboard-only navigation helpers (SC-006).
