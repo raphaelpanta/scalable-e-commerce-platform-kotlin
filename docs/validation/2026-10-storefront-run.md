@@ -159,3 +159,44 @@ the command contract; `reset` and `down` behaved exactly as specified.
 Cold start (T104, SC-009): section 2's `init --start` built every image from a cold image cache and reached a usable
 storefront in 3 min 55 s, within the 5-minute limit the feature 004 measurement (3 min 58 s without the storefront)
 already met; the storefront image adds about 30 s of build (28.7 s cold, 6 s warm, `platform/docker/README.md`).
+
+## 7. Account, orders and operator console live (T078, T090; US4, US6) and the quickstart walk-through (T105)
+
+Date: 2026-10-07, commit `b7bc76b`, second cold start of the platform (`init --start`, fresh volumes, 3 min 48 s).
+
+| Suite | Result |
+|-------|--------|
+| Storefront acceptance, desktop, all stories (US1, US2, US4, US6) | **43 scenarios, 434 steps, all passed** (3 min 21 s) after three step defects of the account feature were fixed: two locators matched a form or section whose accessible name contained the field label (exact matching now), and the sign-out step moved on while the sign-out request was still in flight (it now waits for the "Sign in" link) |
+| Storefront acceptance, 360 px viewport | **43 passed** (2 min 42 s); one earlier run had a single timing failure on the console stock page while a catalog mutation run competed for the machine, which passed alone and in the clean run |
+| Platform JVM suite with the US6 extensions of `authorisation-sweep.feature` and the two observability scenarios | **110 scenarios, 0 failures** (13 min 31 s) |
+| Provider verification of the six storefront pacts on `main` | identity 52, catalog 34, order 33, gateway 32, cart 24, payment 15 interactions, all passed (SC-007) |
+
+Two platform defects were found and fixed through the console work: catalog's domain capped the stock-adjustment
+reason at 200 characters while its contract allows 255 (`StockAdjustmentReason` now follows the contract), and the
+order contract had to gain the additive operator listing (`GET /api/v1/orders` with role `operator` and an
+`orderStatus` filter) so the console can list every shopper's orders.
+
+The quickstart sections 2 to 11 were exercised as follows: section 2 by the two bootstrap starts (sections 2 and 7
+of this record), section 3 by the smoke requests, sections 4 and 5 by the storefront suites above (every scenario
+of the shopper journey and of the console, including declined and pending payments, price change acknowledgement,
+double submission, session expiry, mailbox-driven verification and password reset, account deletion), section 6 by
+the telemetry check (section 5 of this record), section 7 by the axe audit inside the suites, section 8 by the
+provider verifications and the final gate (section 8 of this record), section 9 by the maintenance commands
+(section 6), section 11 by the cold-start timings. Section 10 (runner-host mode) was exercised offline only, by the
+script's tests: this machine is not the CI host.
+
+### Success criteria
+
+| Criterion | Outcome |
+|-----------|---------|
+| SC-001 fresh clone to running storefront under 30 min with one command | 3 min 55 s and 3 min 48 s (`init --start`) |
+| SC-002 checks under 30 s; idempotent rerun under 10 s | 2.5 s; 1.6 s |
+| SC-003 first-time shopper journey under 5 min | the full checkout scenario runs in seconds; a human walk-through fits comfortably |
+| SC-004 p95 page content 2 s, actions 1 s | measured by the Storefront RUM dashboard over the suites' sessions; no span above the thresholds |
+| SC-005 feature 004 shopper scenarios through the storefront, operator fulfilment and stock through the console | 43 storefront scenarios cover US1–US6 of feature 004 (catalogue editing excluded by clarification) |
+| SC-006 zero critical/serious accessibility violations, keyboard-only journeys | axe audit on every page visited, keyboard-only browsing, checkout, order cancellation and stock adjustment scenarios pass |
+| SC-007 every storefront edge has a verified consumer contract | six pacts, 190 interactions, all verified by the providers |
+| SC-008 no generated secret in output or tracked files | `test_dev_env_secrets.sh` (gitleaks over transcripts) and the live transcripts of section 2 |
+| SC-009 platform cold start under 5 min with the storefront | 3 min 55 s and 3 min 48 s |
+| SC-010 idempotent, dry-runnable commands | section 1 and 2 (dry run, rerun) and the offline suite |
+| SC-011 correlation ids join browser, gateway and services; no personal data in telemetry | the two observability scenarios pass live |
