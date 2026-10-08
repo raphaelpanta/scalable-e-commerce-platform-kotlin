@@ -31,6 +31,8 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
     sourcemap: false,
+    // dist/.vite/manifest.json lets scripts/check-bundle-budget.mjs find the first-load files.
+    manifest: true,
     rollupOptions: {
       output: {
         entryFileNames: 'assets/[name]-[hash].js',

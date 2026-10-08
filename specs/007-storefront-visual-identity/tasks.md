@@ -46,7 +46,7 @@ checked on its own.
 
 **Purpose**: dependencies, the size baseline and the visual-runner scaffolding that every story builds on.
 
-- [ ] T001 Record the first-load size baseline before any change. On a clean checkout of `main`, run
+- [X] T001 Record the first-load size baseline before any change. On a clean checkout of `main`, run
   `npm ci && npm run build`. Write `frontend/scripts/check-bundle-budget.mjs` per [research §7](research.md): read
   `dist/index.html` and `dist/.vite/manifest.json` (enable `build.manifest: true` in `frontend/vite.config.ts`),
   collect the entry chunk, its static imports, the CSS and the `woff2` files, and sum the gzip size (level 9;
@@ -54,7 +54,7 @@ checked on its own.
   (`{"baselineBytes": <n>, "maxGrowthBytes": 153600}`). Without it, the script exits 1 when the current size
   exceeds `baselineBytes + maxGrowthBytes`, printing one line with both numbers. Add the npm script
   `"budget": "node scripts/check-bundle-budget.mjs"`. Commit `budget.json` with the baseline taken from `main`.
-- [ ] T002 [P] Add exact-pinned dependencies in `frontend/package.json` and `frontend/package-lock.json`:
+- [X] T002 [P] Add exact-pinned dependencies in `frontend/package.json` and `frontend/package-lock.json`:
   - runtime `@fontsource/fraunces` `5.3.0` and `@fontsource-variable/source-sans-3` `5.3.0`;
   - dev `@playwright/test` `1.63.0`, the same version as `playwright`. Do not use 1.64.0.
 
