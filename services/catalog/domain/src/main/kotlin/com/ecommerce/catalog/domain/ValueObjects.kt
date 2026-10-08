@@ -187,7 +187,10 @@ value class StockLevel private constructor(
     }
 }
 
-/** Why stock was adjusted: trimmed, 1..255 characters, mandatory (FR-002; bounds of the catalog contract's `StockAdjustmentRequest.reason`). */
+/**
+ * Why stock was adjusted: trimmed, 1..255 characters, mandatory (FR-002; the bounds of the catalog contract's
+ * `StockAdjustmentRequest.reason`).
+ */
 @JvmInline
 value class StockAdjustmentReason private constructor(
     val value: String,
