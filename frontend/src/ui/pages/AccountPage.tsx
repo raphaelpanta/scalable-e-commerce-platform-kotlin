@@ -206,7 +206,7 @@ function AccountDetails({ onDeleted }: { readonly onDeleted: () => void }): JSX.
       <h1 id="page-title" className={styles.title}>
         Your account
       </h1>
-      <QueryBoundary query={profile} loadingLabel="Loading your account…">
+      <QueryBoundary query={profile} loadingLabel="Loading your account…" loading="lines">
         {(account) => (
           <>
             <ProfileForm account={account} />

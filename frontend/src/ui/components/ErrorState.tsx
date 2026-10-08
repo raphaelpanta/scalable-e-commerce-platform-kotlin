@@ -37,8 +37,10 @@ export function ErrorState({
 }: ErrorStateProps): JSX.Element {
   return (
     <div className={cx(styles.state, styles.danger)} role="alert">
+      <span className={styles.mark} aria-hidden="true" />
       <h2 className={styles.title}>{title}</h2>
       <p className={styles.message}>{message}</p>
+      <p className={styles.message}>That did not go as planned.</p>
       {onRetry === undefined ? null : (
         <button className={buttons.button} type="button" onClick={onRetry}>
           {retryLabel}

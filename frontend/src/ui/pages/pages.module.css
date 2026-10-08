@@ -15,3 +15,31 @@
   align-items: center;
   gap: var(--space-4);
 }
+
+/* User story 2 (transactions and identity pages). */
+.page > p,
+.page > dl,
+.page > form {
+  max-width: var(--layout-measure);
+}
+
+.titleDisplay {
+  font-size: var(--font-size-3xl);
+}
+
+.display404 {
+  color: var(--color-primary);
+  font-family: var(--font-display);
+  font-size: var(--font-size-display);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+  letter-spacing: var(--letter-spacing-display);
+}
+
+.receipt {
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  font-variant-numeric: var(--font-numeric);
+}

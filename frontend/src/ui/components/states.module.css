@@ -1,24 +1,41 @@
+/* Empty, error, loading and skeleton states (contracts/ui-surfaces.md "States"). */
 .state {
   display: grid;
   gap: var(--space-3);
-  justify-items: start;
-  padding: var(--space-5);
+  justify-items: center;
+  padding: var(--space-6) var(--space-5);
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   background: var(--color-surface);
+  text-align: center;
+}
+
+.mark {
+  width: calc(2 * var(--size-badge));
+  height: calc(2 * var(--size-badge));
+  border: var(--border-width-strong) solid var(--color-primary);
+  border-radius: 50%;
+  background: var(--color-accent-subtle);
 }
 
 .title {
-  font-size: var(--font-size-lg);
+  font-family: var(--font-display);
+  font-size: var(--font-size-xl);
   font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-display);
 }
 
 .message {
+  max-width: var(--layout-measure);
   color: var(--color-text-muted);
 }
 
 .danger {
   border-color: var(--color-danger);
+}
+
+.danger .title {
+  color: var(--color-danger);
 }
 
 .details {
@@ -39,7 +56,7 @@
 }
 
 .countdown {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--font-numeric);
 }
 
 .spinner {
@@ -55,6 +72,118 @@
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* Skeleton loading: blocks are aria-hidden and reserve their space, so arriving content moves
+   nothing. The label stays available to assistive technology as visually hidden text. */
+.loading {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.srOnly {
+  position: absolute;
+  width: var(--size-hairline);
+  height: var(--size-hairline);
+  margin: calc(-1 * var(--size-hairline));
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skeleton {
+  display: block;
+  min-height: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-skeleton);
+}
+
+.skeletonImage {
+  aspect-ratio: var(--image-ratio-card);
+  min-height: var(--size-thumb);
+}
+
+.skeletonDetailImage {
+  aspect-ratio: var(--image-ratio-detail);
+  min-height: var(--size-thumb);
+}
+
+.skeletonTitle {
+  min-height: var(--space-5);
+  width: 60%;
+}
+
+.skeletonLine {
+  min-height: var(--space-4);
+}
+
+.skeletonShort {
+  width: 40%;
+}
+
+.skeletonGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min-width), 1fr));
+  gap: var(--space-5);
+}
+
+.skeletonCard {
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+
+.skeletonDetail {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.skeletonLines {
+  display: grid;
+  gap: var(--space-3);
+  align-content: start;
+}
+
+.skeletonRow {
+  min-height: var(--size-thumb);
+  border-radius: var(--radius-lg);
+}
+
+@media (min-width: 768px) {
+  .skeletonDetail {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton {
+    background-image: linear-gradient(
+      90deg,
+      var(--color-skeleton),
+      var(--color-surface-raised),
+      var(--color-skeleton)
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1400ms var(--motion-ease) infinite;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (forced-colors: active) {
+  .skeleton {
+    border: var(--border-width) solid GrayText;
   }
 }
 

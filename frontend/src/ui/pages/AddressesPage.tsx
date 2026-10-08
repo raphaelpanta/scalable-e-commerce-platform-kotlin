@@ -140,7 +140,7 @@ export function AddressesPage(): JSX.Element {
         />
       ) : null}
       {form()}
-      <QueryBoundary query={query} loadingLabel="Loading your addresses…">
+      <QueryBoundary query={query} loadingLabel="Loading your addresses…" loading="lines">
         {(page): ReactNode => {
           if (page.items.length === 0) {
             if (page.page > 0) {

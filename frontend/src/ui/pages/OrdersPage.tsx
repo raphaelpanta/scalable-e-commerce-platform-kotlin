@@ -25,7 +25,7 @@ export function OrdersPage(): JSX.Element {
       <h1 id="page-title" className={styles.title}>
         Your orders
       </h1>
-      <QueryBoundary query={query} loadingLabel="Loading your orders…">
+      <QueryBoundary query={query} loadingLabel="Loading your orders…" loading="lines">
         {(page): ReactNode => {
           if (page.items.length === 0) {
             if (page.page > 0) {
@@ -41,7 +41,7 @@ export function OrdersPage(): JSX.Element {
             return (
               <Empty
                 title="No orders yet"
-                message="The orders you place appear here, with their status."
+                message="The orders you place appear here, with their status. Your first one will land here."
                 action={{ label: 'Browse products', to: '/' }}
               />
             );
