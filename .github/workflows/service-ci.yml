@@ -3,7 +3,7 @@
 # (.github/workflows/<ctx>.yml) with `paths:` filters, so a change confined to one service runs only that pipeline.
 # Documentation: docs/ci-cd.md, runner and registry: platform/ci-runner/README.md.
 #
-# Jobs (each bounded by timeout-minutes: 15; `gate` and `jar` start together, `image` follows `jar`, `publish` joins both):
+# Jobs (gate bounded by timeout-minutes: 30 for cache-cold runs, the others by 15; `gate` and `jar` start together, `image` follows `jar`, `publish` joins both):
 #   gate    ./gradlew -q check of the service modules (ktlint, detekt, test layers, architecture rules, Pitest with
 #           its threshold), then the Pact flow against the broker when PACT_BROKER_URL is configured (publish pacts,
 #           provider verification with result publication, can-i-deploy), then the dependency scan (osv-scanner)
@@ -85,7 +85,7 @@ jobs:
   gate:
     name: gate (${{ inputs.service }})
     runs-on: [self-hosted, linux, ecommerce]
-    timeout-minutes: 15
+    timeout-minutes: 30
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     env:
       SERVICE: ${{ inputs.service }}
