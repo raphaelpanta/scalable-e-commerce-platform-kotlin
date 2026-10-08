@@ -292,16 +292,16 @@ account,states}.test.tsx` pass, and the `shopping-cart`, `checkout` and `order-t
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T023 [P] [US2] Extend `frontend/tests/ui/states.test.tsx`:
+- [X] T023 [P] [US2] Extend `frontend/tests/ui/states.test.tsx`:
   - `Loading` with each `variant` (`spinner`, `grid`, `detail`, `lines`) keeps `role="status"`,
     `aria-live="polite"` and the accessible text "Loading…" (or the given label), and its skeleton blocks are
     `aria-hidden`.
   - `Empty` renders one heading, one message and one primary action link.
   - `ErrorState` keeps its existing asserted strings and adds the brand-voice sentence beside them.
-- [ ] T024 [P] [US2] Add a regression assertion to `frontend/tests/ui/checkout.test.tsx`: the selected payment
+- [X] T024 [P] [US2] Add a regression assertion to `frontend/tests/ui/checkout.test.tsx`: the selected payment
   radio card still exposes a checked native radio (`getByRole('radio', { checked: true })`), so selection is not
   carried by colour alone. Do not change any existing step.
-- [ ] T025 [US2] Append the US2 scenarios to `frontend/acceptance/features/visual-identity.feature` (steps in
+- [X] T025 [US2] Append the US2 scenarios to `frontend/acceptance/features/visual-identity.feature` (steps in
   `identity-visual.steps.ts`, reusing the cart and checkout steps where they already exist):
   - "An empty cart points the way back": an empty cart shows a friendly message and a single action that leads
     to the products.
@@ -311,16 +311,16 @@ account,states}.test.tsx` pass, and the `shopping-cart`, `checkout` and `order-t
 
 ### Implementation for User Story 2
 
-- [ ] T026 [US2] Build the button family in `frontend/src/ui/components/buttons.module.css`, per the "Buttons"
+- [X] T026 [US2] Build the button family in `frontend/src/ui/components/buttons.module.css`, per the "Buttons"
   row: `primary` (primary fill, primary-contrast text, hover `--color-primary-hover`, pressed `translateY(1px)`),
   `secondary` (`--border-width` `--color-border-strong`) and `quiet` (primary text, underline on hover). The
   disabled state is muted on surface with `not-allowed`, and every variant is at least 44 px. Keep the existing
   class names that components import. If one is renamed, update every importer in the same task.
-- [ ] T027 [P] [US2] Build the field family in `frontend/src/ui/components/forms.module.css` (used by
+- [X] T027 [P] [US2] Build the field family in `frontend/src/ui/components/forms.module.css` (used by
   `TextField.tsx`, `QuantityInput.tsx`, `AddressForm.tsx`, `PreferencesForm.tsx`): a raised surface,
   `--color-border-strong` 1 px, `--radius-md`, and a 600 label above. In the error state, the text and a 2 px
   border use `--color-danger`. The message stays linked by `aria-describedby`.
-- [ ] T028 [P] [US2] Turn `frontend/src/ui/components/PaymentMethodPicker.tsx` and `AddressPicker.tsx` into
+- [X] T028 [P] [US2] Turn `frontend/src/ui/components/PaymentMethodPicker.tsx` and `AddressPicker.tsx` into
   radio cards, styled in `forms.module.css`:
   - Unselected: a 1 px `--color-border-strong` border.
   - Selected: a 2 px `--color-primary` border and an `--color-accent-subtle` fill, with the native radio mark
@@ -328,11 +328,11 @@ account,states}.test.tsx` pass, and the `shopping-cart`, `checkout` and `order-t
   - The `:focus-visible` ring is drawn on the card.
 
   The markup keeps every `input type="radio"` and label. Makes T024 pass.
-- [ ] T029 [P] [US2] Restyle `frontend/src/ui/components/StatusBadges.tsx` (`--radius-pill`, accent-subtle
+- [X] T029 [P] [US2] Restyle `frontend/src/ui/components/StatusBadges.tsx` (`--radius-pill`, accent-subtle
   fill, 1 px border kept for forced colours, text "Order: …"/"Payment: …" unchanged), `ConfirmDialog.module.css`
   (raised surface, `--radius-lg`, `--shadow-md`, backdrop ink at 50 % through a token, focus trap unchanged) and
   `Pager.module.css` (secondary buttons; current page `aria-current` plus a 2 px primary underline).
-- [ ] T030 [P] [US2] Restyle the notices:
+- [X] T030 [P] [US2] Restyle the notices:
   - `frontend/src/ui/components/PriceChangeNotice.tsx`: `role="alert"` kept, `--color-notice-bg/text`, a 2 px
     `--color-warning` left rule, and the accept button as primary.
   - The throttle notice `.notice` in `Layout.module.css` and `Throttled.tsx`: `role="status"` kept, notice
@@ -340,13 +340,13 @@ account,states}.test.tsx` pass, and the `shopping-cart`, `checkout` and `order-t
   - `PaymentCountdown.tsx`: notice styling, with the text still carrying the time.
 
   The price-change and decline notices must stay the most prominent element in their region (threat model).
-- [ ] T031 [P] [US2] Restyle the cart and summary in `frontend/src/ui/components/cart.module.css`,
+- [X] T031 [P] [US2] Restyle the cart and summary in `frontend/src/ui/components/cart.module.css`,
   `CartLine.tsx` and `OrderSummary.tsx`:
   - Lines show the thumbnail (`ProductImage`), the name, a tabular price and quantity, and a quiet remove button.
   - The summary is a `--color-surface` card with tabular totals and the display serif on the total.
   - A 15-line cart keeps its summary and primary action reachable at 360 px: the summary stacks under the lines,
     with no sticky overlap.
-- [ ] T032 [P] [US2] Restyle the orders surfaces: `frontend/src/ui/components/orders.module.css`, `OrderRow.tsx`,
+- [X] T032 [P] [US2] Restyle the orders surfaces: `frontend/src/ui/components/orders.module.css`, `OrderRow.tsx`,
   `StatusHistory.tsx`, and the pages `OrdersPage.tsx`, `OrderPage.tsx` and `ConfirmationPage.tsx`. The
   confirmation gets a display heading and a summary card. Status text stays the carrier of meaning.
 - [ ] T033 [US2] Restructure the product page in `frontend/src/ui/pages/ProductPage.tsx`, adding
@@ -354,7 +354,7 @@ account,states}.test.tsx` pass, and the `shopping-cart`, `checkout` and `order-t
   text from 768 px, above it below that), h1 (display), large tabular price, availability text, quantity and
   "Add to cart" (primary), then the description at `--layout-measure`. Names and order of controls in the DOM
   are unchanged. Depends on T019 and T026.
-- [ ] T034 [US2] Add skeleton variants to `frontend/src/ui/components/Loading.tsx` and `states.module.css`, per
+- [X] T034 [US2] Add skeleton variants to `frontend/src/ui/components/Loading.tsx` and `states.module.css`, per
   [research §8](research.md):
   - The `variant?: 'spinner' | 'grid' | 'detail' | 'lines'` prop, `spinner` by default.
   - Skeleton blocks are `aria-hidden`, use `--color-skeleton`, and reserve dimensions with `aspect-ratio` and
@@ -365,14 +365,14 @@ account,states}.test.tsx` pass, and the `shopping-cart`, `checkout` and `order-t
 
   Thread a `loading` variant prop through `QueryBoundary.tsx` and `ProductListing.tsx`: listings use `grid`, the
   product page `detail`, and orders and account pages `lines`. Makes T023 (Loading) pass.
-- [ ] T035 [US2] Brand the empty and error states in `frontend/src/ui/components/Empty.tsx`, `ErrorState.tsx`,
+- [X] T035 [US2] Brand the empty and error states in `frontend/src/ui/components/Empty.tsx`, `ErrorState.tsx`,
   `ActionError.tsx` and `frontend/src/ui/pages/NotFoundPage.tsx`, per the "States" table:
   - A centred mark, one heading, one message and one primary action.
   - Keep every existing heading, label and message string, adding the brand-voice sentence beside them.
   - The not-found page shows a display "404".
 
   Makes T023 fully green.
-- [ ] T036 [US2] Apply the field and button families to the identity and account pages (`SignInPage`,
+- [X] T036 [US2] Apply the field and button families to the identity and account pages (`SignInPage`,
   `RegisterPage`, `ForgotPasswordPage`, `ResetPasswordPage`, `VerifyEmailPage`, `AccountPage`, `AddressesPage`,
   `NotificationsPage`, `CheckoutPage`, `NotAllowedPage` and `PlaceholderPage` in `frontend/src/ui/pages/`), using
   only class changes in `pages.module.css`. Form widths are capped at `--layout-measure`. Depends on T026 and
