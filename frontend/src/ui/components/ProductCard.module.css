@@ -63,13 +63,10 @@
   text-decoration: underline;
 }
 
-.link:focus-visible {
-  outline: none;
-}
-
-.link:focus-visible::after {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-ring-offset);
+/* The focus ring stays on the link itself (global :focus-visible rule), so the focused element
+   always carries the indicator; the card adds a raised outline around it. */
+.card:has(.link:focus-visible) {
+  box-shadow: var(--shadow-md);
 }
 
 .price {

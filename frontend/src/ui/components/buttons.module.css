@@ -13,10 +13,9 @@
   color: var(--color-primary-contrast);
   font-weight: var(--font-weight-bold);
   text-decoration: none;
-  transition:
-    background-color var(--motion-duration) var(--motion-ease),
-    border-color var(--motion-duration) var(--motion-ease),
-    transform var(--motion-duration) var(--motion-ease);
+  /* Colours switch instantly: a fading fill would pass through low-contrast mixes (for example
+     muted text over a still-terracotta fill while a submit turns the button busy). */
+  transition: transform var(--motion-duration) var(--motion-ease);
 }
 
 .button:hover:not(:disabled) {
