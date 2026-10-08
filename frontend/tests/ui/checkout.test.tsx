@@ -324,10 +324,11 @@ describe('Checkout refusals and retries (FR-007, FR-008)', () => {
       expect(confirm).toBeEnabled();
     });
     await user.click(confirm);
+    // The redirect may pass through an intermediate location; wait for the final one as a whole.
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/sign-in');
+      expect(router.state.location.search).toBe('?next=%2Fcheckout%3Fstep%3Dreview');
     });
-    expect(router.state.location.search).toBe('?next=%2Fcheckout%3Fstep%3Dreview');
     expect(storedDraft()).toMatchObject({
       step: 'review',
       addressId: homeAddress.id,
