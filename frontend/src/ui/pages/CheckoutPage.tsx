@@ -26,11 +26,11 @@ import buttons from '../components/buttons.module.css';
 import cart from '../components/cart.module.css';
 import { Empty } from '../components/Empty.tsx';
 import { describeError, ErrorState } from '../components/ErrorState.tsx';
+import notices from '../components/notices.module.css';
 import { OrderSummary } from '../components/OrderSummary.tsx';
 import { PaymentMethodPicker } from '../components/PaymentMethodPicker.tsx';
 import { PriceChangeNotice } from '../components/PriceChangeNotice.tsx';
 import { QueryBoundary } from '../components/QueryBoundary.tsx';
-import states from '../components/states.module.css';
 import { Throttled } from '../components/Throttled.tsx';
 import { cx } from '../cx.ts';
 import { declineLabel } from '../labels.ts';
@@ -63,7 +63,7 @@ function RefusalNotice({
     case 'insufficientStock':
       title = 'Some items are no longer available';
       message = (
-        <ul className={cart.changes}>
+        <ul className={notices.changes}>
           {refusal.unavailableLines.map((line) => (
             <li key={line.productId}>
               {line.name}: requested {line.requestedQuantity}, available {line.availableQuantity}
@@ -116,9 +116,9 @@ function RefusalNotice({
       break;
   }
   return (
-    <div className={cx(states.state, states.danger)} role="alert">
-      <h2 className={states.title}>{title}</h2>
-      {typeof message === 'string' ? <p className={states.message}>{message}</p> : message}
+    <div className={cx(notices.notice, notices.danger)} role="alert">
+      <h2 className={notices.title}>{title}</h2>
+      {typeof message === 'string' ? <p className={notices.message}>{message}</p> : message}
       {action}
     </div>
   );
@@ -227,7 +227,7 @@ export function CheckoutPage(): JSX.Element {
     state.status !== 'refusedPriceChange';
 
   const addressStep = (
-    <QueryBoundary query={addresses} loadingLabel="Loading your addresses…">
+    <QueryBoundary query={addresses} loadingLabel="Loading your addresses…" loading="lines">
       {(page) => (
         <>
           <AddressPicker
@@ -316,7 +316,7 @@ export function CheckoutPage(): JSX.Element {
   );
 
   const reviewStep = (
-    <QueryBoundary query={cartQuery} loadingLabel="Loading your cart…">
+    <QueryBoundary query={cartQuery} loadingLabel="Loading your cart…" loading="lines">
       {() =>
         view.isEmpty ? (
           <Empty

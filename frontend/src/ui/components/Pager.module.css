@@ -22,7 +22,17 @@
   margin-left: auto;
 }
 
-.inert {
-  opacity: 0.55;
+.inert,
+.inert:hover:not(:disabled) {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
   cursor: not-allowed;
+}
+
+/* The current page: aria-current plus a 2 px primary underline (the text carries the meaning). */
+.position[aria-current='page'] {
+  padding-block: var(--space-1);
+  border-bottom: var(--border-width-strong) solid var(--color-primary);
+  font-weight: var(--font-weight-bold);
 }

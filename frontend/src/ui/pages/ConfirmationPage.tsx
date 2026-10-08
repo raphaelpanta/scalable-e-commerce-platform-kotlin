@@ -10,6 +10,7 @@ import { NotFoundPage } from './NotFoundPage.tsx';
 import styles from './pages.module.css';
 import buttons from '../components/buttons.module.css';
 import cart from '../components/cart.module.css';
+import notices from '../components/notices.module.css';
 import { OrderSummary } from '../components/OrderSummary.tsx';
 import { PaymentCountdown } from '../components/PaymentCountdown.tsx';
 import { QueryBoundary } from '../components/QueryBoundary.tsx';
@@ -29,7 +30,7 @@ function PaymentOutcome({ order }: { readonly order: Order }): JSX.Element | nul
   if (!failed) return null;
   const latest = attempts.data?.items.find((attempt) => attempt.outcome === 'declined');
   return (
-    <p role="alert">
+    <p className={cx(notices.notice, notices.danger)} role="alert">
       The payment failed: {declineLabel(latest?.declineReason)}. Nothing was charged.
     </p>
   );
@@ -45,10 +46,10 @@ function Confirmation({ order }: { readonly order: Order }): JSX.Element {
   };
   return (
     <section className={styles.page} aria-labelledby="page-title">
-      <h1 id="page-title" className={styles.title}>
+      <h1 id="page-title" className={cx(styles.title, styles.titleDisplay)}>
         {cancelled ? 'Order cancelled' : pending ? 'Order received' : 'Order confirmed'}
       </h1>
-      <p>
+      <p className={styles.receipt}>
         Order number <strong>{orderNumber(order.id)}</strong>
       </p>
       <p className={styles.actions}>
@@ -89,7 +90,7 @@ function Confirmation({ order }: { readonly order: Order }): JSX.Element {
         }))}
         total={order.total}
       />
-      <p>
+      <p className={styles.receipt}>
         Delivery to {order.deliveryAddress.recipientName}, {order.deliveryAddress.line1},{' '}
         {order.deliveryAddress.postalCode} {order.deliveryAddress.city},{' '}
         {order.deliveryAddress.country}.
@@ -118,7 +119,7 @@ export function ConfirmationPage(): JSX.Element {
   const order = useOwnOrder(orderId);
   if (orderId === undefined) return <NotFoundPage />;
   return (
-    <QueryBoundary query={order} loadingLabel="Loading your order…">
+    <QueryBoundary query={order} loadingLabel="Loading your order…" loading="lines">
       {(found) => (found === null ? <NotFoundPage /> : <Confirmation order={found} />)}
     </QueryBoundary>
   );

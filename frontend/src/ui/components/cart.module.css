@@ -8,7 +8,7 @@
   gap: var(--space-3);
   padding: var(--space-4);
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   background: var(--color-surface);
 }
 
@@ -20,6 +20,8 @@
 }
 
 .name {
+  font-family: var(--font-display);
+  letter-spacing: var(--letter-spacing-display);
   font-size: var(--font-size-lg);
   font-weight: var(--font-weight-bold);
 }
@@ -29,16 +31,18 @@
 }
 
 .amount {
-  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  font-variant-numeric: var(--font-numeric);
 }
 
 .lineTotal {
   font-weight: var(--font-weight-bold);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--font-numeric);
 }
 
 .notice {
   color: var(--color-warning);
+  font-weight: var(--font-weight-bold);
 }
 
 .unavailable {
@@ -69,11 +73,11 @@
   width: var(--size-thumb);
   min-height: var(--control-min-size);
   padding: 0 var(--space-2);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
   background: var(--color-surface-raised);
   color: var(--color-text);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--font-numeric);
 }
 
 .summary {
@@ -81,12 +85,22 @@
   gap: var(--space-3);
   padding: var(--space-4);
   border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  overflow-x: auto;
 }
 
 .table {
   width: 100%;
   border-collapse: collapse;
+  font-size: var(--font-size-md);
+}
+
+.table caption {
+  padding-bottom: var(--space-2);
+  text-align: left;
+  font-family: var(--font-display);
+  font-size: var(--font-size-lg);
 }
 
 .table th,
@@ -100,14 +114,17 @@
 .table td:last-child,
 .numeric {
   text-align: right;
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--font-numeric);
 }
 
 .total {
   display: flex;
   justify-content: space-between;
-  font-size: var(--font-size-lg);
+  align-items: baseline;
+  font-family: var(--font-display);
+  font-size: var(--font-size-xl);
   font-weight: var(--font-weight-bold);
+  font-variant-numeric: var(--font-numeric);
 }
 
 .steps {
@@ -142,7 +159,7 @@
 }
 
 .countdown {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--font-numeric);
   font-weight: var(--font-weight-bold);
 }
 
@@ -165,10 +182,4 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   user-select: all;
   overflow-wrap: anywhere;
-}
-
-.changes {
-  display: grid;
-  gap: var(--space-2);
-  padding-left: var(--space-5);
 }
