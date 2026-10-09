@@ -66,9 +66,10 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: .github/scripts/pr-gate.sh --skip-verify
 
+  # Shell tests only: the light runner (platform/ci-runner, `runner-light`) runs them next to verify.
   hook-tests:
     name: hook-tests
-    runs-on: [self-hosted, linux, ecommerce]
+    runs-on: [self-hosted, linux, ecommerce-light]
     timeout-minutes: 10
     if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
@@ -87,7 +88,7 @@ jobs:
     name: pr-gate
     needs: [verify, mutation, hook-tests]
     if: always()
-    runs-on: [self-hosted, linux, ecommerce]
+    runs-on: [self-hosted, linux, ecommerce-light]
     timeout-minutes: 5
     steps:
       # No checkout: this job runs for every pull request, forks included, and executes no pull request code.

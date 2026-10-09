@@ -28,7 +28,11 @@ path-filtered service and platform checks of the pull request (see "Required sta
 | Diagnosis | on failure the `verify-reports` artifact holds `**/build/reports/**`, `**/build/test-results/**` and the Pitest log for 7 days |
 | Mutation hand-over | called with `mutation-reports: true` (pr-gate), a green run uploads `pitest-reports` (a tar of every `mutations.xml`, kept 1 day) for the pr-gate `mutation` job |
 
-Gradle caches are written only from `main` (`cache-read-only` is true everywhere else).
+No job uses the GitHub cache service: the self-hosted runners keep the Gradle user home (dependencies, wrapper, the local
+build cache), the Gradle configuration cache, the npm cache, the Playwright browsers and the JDK and Node of
+`setup-java`/`setup-node` on their own disk, so `setup-gradle` runs with `cache-disabled: true` and `setup-node` without
+`cache:` (platform/ci-runner/README.md, "Caches"). `verify` sets up Node 24 and installs the frontend dependencies before
+`./gradlew -q verify`, which runs the storefront's lint and tests.
 
 ## Runner requirements
 
@@ -114,9 +118,9 @@ pinned shellcheck image over the same file list when the platform changes and on
 | | Image scan | `aquasec/trivy image --severity CRITICAL --ignore-unfixed --exit-code 1` | a CRITICAL vulnerability with a fix is in the image |
 | | SBOM | `anchore/syft` CycloneDX JSON, artifact `sbom-<ctx>` (30 days) | |
 | | Start and health | `.github/scripts/image-health.sh <ctx> <image>`: run the image (with a `postgres:18-alpine` sidecar except for the gateway), wait up to 90 s for the readiness group `/actuator/health/readiness` to report UP, stop everything | the container exits or does not report UP in 90 s; the last 80 log lines are printed |
-| | Hand-over (push to `main` only) | `docker save` to the artifact `image-<ctx>` (1 day) | |
-| `publish` (push to `main` only) | Push | `docker login --password-stdin`, `docker push <REGISTRY_HOST>/<ctx>:<sha>` and `:<branch>`; runs only when `gate` and `image` both succeeded | the registry rejects the push; skipped with a warning when `REGISTRY_HOST` or the secrets are missing |
-| `<ctx>` | Aggregate | shell | `gate` or `image` did not succeed, or `publish` failed (a skipped `publish` is fine; a skipped `gate` or `image` counts as failure) |
+| | Hand-over (push to `main` only) | the image stays in the runners' shared engine (its ID is a job output); with the repository variable `IMAGE_HANDOVER=artifact`, `docker save` to the artifact `image-<ctx>` (1 day) instead. Pull-request images are removed at the end of the job | |
+| `publish` (push to `main` only) | Push | the image ID must equal the `image` job's; `docker login --password-stdin`, `docker push <REGISTRY_HOST>/<ctx>:<sha>` and `:<branch>`; runs only when `gate` and `image` both succeeded | the image is missing or differs, or the registry rejects the push; skipped with a warning when `REGISTRY_HOST` or the secrets are missing |
+| `<ctx>` | Aggregate | shell; on `main` it then removes the image from the engine | `gate` or `image` did not succeed, or `publish` failed (a skipped `publish` is fine; a skipped `gate` or `image` counts as failure) |
 
 `gate`, `jar`, `image` and `publish` each have `timeout-minutes: 15` and a concurrency group per service and ref
 (`service-ci-<ctx>-<event>-<ref>`; pull-request runs are cancelled by a newer push, `main` runs never are). SC-009 asks for
@@ -130,9 +134,12 @@ log) is kept for 7 days; `dependencies-<ctx>` holds the dependency list and lock
 `gate` (checks, pacts, dependency scan) and `jar` (compile and package) have no dependency on each other and start together;
 `image` follows `jar` only, so the image build, the Trivy scan, the SBOM and the start-and-health check overlap with the
 Gradle `check` instead of waiting for it. `publish` needs both `gate` and `image`: nothing is pushed unless the gate passed,
-and the image that is pushed is the one that was scanned and started (it travels as the artifact `image-<ctx>`, loaded with
-`docker load`, so it does not matter which runner or engine the job lands on). The aggregate `service-ci / <ctx>` needs all
-of them. Parallelism needs two free runner slots: with one runner replica the jobs queue one after the other, as before.
+and the image that is pushed is the one that was scanned and started (the publish job compares its ID with the `image`
+job's; the image stays in the engine both runners share, or travels as the artifact `image-<ctx>` with
+`IMAGE_HANDOVER=artifact`). The aggregate `service-ci / <ctx>` needs all of them. `gate` and `jar` run Gradle and ask for
+`[self-hosted, linux, ecommerce]`; `image`, `publish` and the aggregate only drive the engine and ask for
+`[self-hosted, linux, ecommerce-light]`, which the small `runner-light` of platform/ci-runner serves next to the Gradle
+runner, so an image build overlaps with the next Gradle job instead of queueing behind it.
 
 The Docker build no longer compiles when the pipeline hands it the jar: `platform/docker/Dockerfile` has the optional build
 argument `APP_JAR` (default empty), the path of a pre-built boot jar inside the build context. When it is set, the build
@@ -227,7 +234,7 @@ identical), and reports the same check name, `service-ci / storefront`: its aggr
 | | Image scan | `aquasec/trivy image --severity CRITICAL --ignore-unfixed --exit-code 1` | a CRITICAL vulnerability with a fix is in the image |
 | | SBOM | `anchore/syft` CycloneDX JSON, artifact `sbom-storefront` (30 days) | |
 | | Start and health | `.github/scripts/image-health.sh storefront <image>`: run the image alone with its 64 MB bound and wait up to 90 s for `GET /healthz` to answer `ok` | the container exits or does not answer in 90 s |
-| | Hand-over (push to `main` only) | `docker save` to the artifact `image-storefront` (1 day) | |
+| | Hand-over (push to `main` only) | as in `service-ci.yml`: the image stays in the shared engine, or the artifact `image-storefront` with `IMAGE_HANDOVER=artifact` | |
 | `publish` (push to `main` only) | Push | as in `service-ci.yml`: `<REGISTRY_HOST>/storefront:<sha>` and `:<branch>` | the registry rejects the push; skipped with a warning when the registry is not configured |
 | `service-ci / storefront` | Aggregate | shell | `gate` or `image` did not succeed, or `publish` failed (a skipped `publish` is fine) |
 

@@ -53,8 +53,23 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
-          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          # GRADLE_USER_HOME (dependencies, wrapper, local build cache) already lives on the runner's own disk
+          # (platform/ci-runner): restoring and saving it through the GitHub cache service would only cost time.
+          cache-disabled: true
           validate-wrappers: true
+
+      - name: Keep the Gradle configuration cache on the runner
+        run: .github/scripts/ci-cache.sh gradle
+
+      # verify runs the storefront's lint and tests (frontendCheck, repository-root convention): Node 24 as frontend/.nvmrc,
+      # its dependencies from the lock file. The npm download cache lives on the runner (npm_config_cache).
+      - name: Set up Node from frontend/.nvmrc
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: frontend/.nvmrc
+
+      - name: Install the frontend dependencies
+        run: npm ci --prefix frontend --silent --no-audit --no-fund --prefer-offline
 
       - name: Verify
         run: ./gradlew -q verify

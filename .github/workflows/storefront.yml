@@ -15,7 +15,8 @@
 #   image   docker build of platform/docker/Dockerfile.storefront, Trivy image scan (fails on CRITICAL), CycloneDX SBOM
 #           (syft), start-and-health (nginx answers `ok` on /healthz within 90 s, .github/scripts/image-health.sh)
 #   publish on pushes to main only, after gate AND image succeeded: push of <REGISTRY_HOST>/storefront:<sha> and :<branch>
-#           to the private registry (the image travels from `image` as the artifact image-storefront)
+#           to the private registry (the image stays in the runners' shared engine, or travels as the artifact
+#           image-storefront when the repository variable IMAGE_HANDOVER=artifact)
 #   result  the aggregate, named `service-ci / storefront`: fails unless gate and image succeeded and publish succeeded or
 #           was skipped (a skipped gate or image, e.g. a fork pull request, is a failure)
 #
@@ -84,17 +85,15 @@ jobs:
         with:
           persist-credentials: false
 
-      # Node 24 as frontend/.nvmrc and `engines` (engine-strict); the npm download cache is keyed by the lock file.
+      # Node 24 as frontend/.nvmrc and `engines` (engine-strict); the npm download cache lives on the runner (npm_config_cache).
       - name: Set up Node from frontend/.nvmrc
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: frontend/.nvmrc
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Install the frontend dependencies
         working-directory: frontend
-        run: npm ci --silent --no-audit --no-fund
+        run: npm ci --silent --no-audit --no-fund --prefer-offline
 
       # prettier --check, eslint --max-warnings 0, tsc --noEmit and the freshness of src/api/generated.
       - name: Lint
@@ -221,12 +220,15 @@ jobs:
           if-no-files-found: ignore
           path: storefront-reports.tar
 
+  # Light runner (platform/ci-runner, `runner-light`): the job only drives the engine through the socket.
   image:
     name: image (storefront)
     needs: gate
-    runs-on: [self-hosted, linux, ecommerce]
+    runs-on: [self-hosted, linux, ecommerce-light]
     timeout-minutes: 15
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    outputs:
+      image-id: ${{ steps.build.outputs.image-id }}
     env:
       REGISTRY_HOST: ${{ vars.REGISTRY_HOST }}
       # Podman engines drop HEALTHCHECK from OCI images; BuildKit is what the Dockerfile syntax line expects.
@@ -254,11 +256,14 @@ jobs:
       # The Node build stage installs from the lock file and runs `npm run build`; the runtime stage is a rootless nginx.
       # The build context is the repository root (the Dockerfile copies the OpenAPI contracts the types are generated from).
       - name: Build the image
+        id: build
         run: |
+          set -euo pipefail
           docker build -f platform/docker/Dockerfile.storefront \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             -t "$IMAGE_SHA" -t "$IMAGE_BRANCH" .
+          echo "image-id=$(docker image inspect --format '{{.Id}}' "$IMAGE_SHA")" >> "$GITHUB_OUTPUT"
 
       # Fails on CRITICAL vulnerabilities that have a fix; the image is scanned before it is pushed.
       - name: Image scan (Trivy)
@@ -289,13 +294,14 @@ jobs:
         run: .github/scripts/image-health.sh storefront "$IMAGE_SHA"
 
       # Hand-over to the publish job, only when a push to main will publish: the image that was scanned and started is
-      # the image that is pushed, whichever runner (and engine) the publish job lands on.
+      # the image that is pushed (the publish job checks its ID). It stays in the runners' shared engine, or travels as
+      # the artifact image-storefront with the repository variable IMAGE_HANDOVER=artifact, as in service-ci.yml.
       - name: Save the image for the publish job
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.IMAGE_HANDOVER == 'artifact'
         run: docker save -o ci-image.tar "$IMAGE_SHA" "$IMAGE_BRANCH"
 
       - name: Upload the image for the publish job
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.IMAGE_HANDOVER == 'artifact'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: image-storefront
@@ -303,12 +309,16 @@ jobs:
           if-no-files-found: error
           path: ci-image.tar
 
+      - name: Remove the image from the engine
+        if: always() && !(github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.IMAGE_HANDOVER != 'artifact')
+        run: docker rmi "$IMAGE_SHA" "$IMAGE_BRANCH" >/dev/null 2>&1 || true
+
   # Pushes the image that `image` built, scanned and started, once `gate` AND `image` have succeeded. Runs on pushes to
   # main only (skipped otherwise, which the aggregate accepts). The registry credentials exist only in this job's step.
   publish:
     name: publish (storefront)
     needs: [gate, image]
-    runs-on: [self-hosted, linux, ecommerce]
+    runs-on: [self-hosted, linux, ecommerce-light]
     timeout-minutes: 15
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -317,12 +327,24 @@ jobs:
       REGISTRY_HOST: ${{ vars.REGISTRY_HOST }}
     steps:
       - name: Download the image
+        if: vars.IMAGE_HANDOVER == 'artifact'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: image-storefront
 
       - name: Load the image
+        if: vars.IMAGE_HANDOVER == 'artifact'
         run: docker load -i ci-image.tar
+
+      - name: Check the image against the image job
+        env:
+          IMAGE_ID: ${{ needs.image.outputs.image-id }}
+        run: |
+          set -euo pipefail
+          image="${REGISTRY_HOST:+$REGISTRY_HOST/}storefront:$GITHUB_SHA"
+          actual="$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null)" ||
+            { echo "::error::$image is not in this runner's engine (runners on several engines: set the repository variable IMAGE_HANDOVER=artifact)"; exit 1; }
+          [ "$actual" = "$IMAGE_ID" ] || { echo "::error::$image is $actual, not the image $IMAGE_ID the image job scanned"; exit 1; }
 
       # The credentials exist only in this step and in a throw-away Docker config directory.
       - name: Push the image to the private registry
@@ -352,7 +374,7 @@ jobs:
     name: service-ci / storefront
     needs: [gate, image, publish]
     if: always()
-    runs-on: [self-hosted, linux, ecommerce]
+    runs-on: [self-hosted, linux, ecommerce-light]
     timeout-minutes: 5
     steps:
       - name: Require gate and image to have succeeded (publish too when it ran)
@@ -363,3 +385,15 @@ jobs:
         run: |
           echo "gate: $GATE, image: $IMAGE, publish: $PUBLISH"
           [ "$GATE" = success ] && [ "$IMAGE" = success ] && { [ "$PUBLISH" = success ] || [ "$PUBLISH" = skipped ]; }
+
+      # The image of a push to main stays in the engine for the publish job; it is removed here once that job is over
+      # (pushed, failed or skipped), as in service-ci.yml.
+      - name: Remove the image from the engine
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.IMAGE_HANDOVER != 'artifact'
+        env:
+          REGISTRY_HOST: ${{ vars.REGISTRY_HOST }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          branch="$(printf '%s' "$REF_NAME" | tr -c 'A-Za-z0-9_.-' '-' | sed 's/^[.-]*//' | cut -c1-120)"
+          repo="${REGISTRY_HOST:+$REGISTRY_HOST/}storefront"
+          docker rmi "$repo:$GITHUB_SHA" "$repo:${branch:-unknown}" >/dev/null 2>&1 || true

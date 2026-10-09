@@ -84,7 +84,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # BROWSER_SESSION_KEY is empty in .env.example (scripts/dev-env.sh generates it) and required by the gateway, so
+      # the validation gets a placeholder; the CI runner stack is validated with its example values.
       - name: Validate the Compose files (every profile, with and without the performance override)
+        env:
+          BROWSER_SESSION_KEY: validation-only
         run: |
           set -euo pipefail
           if docker compose version >/dev/null 2>&1; then compose=(docker compose); else compose=(docker-compose); fi
@@ -118,8 +122,13 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
-          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          # GRADLE_USER_HOME (dependencies, wrapper, local build cache) already lives on the runner's own disk
+          # (platform/ci-runner): restoring and saving it through the GitHub cache service would only cost time.
+          cache-disabled: true
           validate-wrappers: true
+
+      - name: Keep the Gradle configuration cache on the runner
+        run: .github/scripts/ci-cache.sh gradle
 
       # Throw-away configuration: example values plus a random internal token, never reused or published.
       - name: Create platform/compose/.env for CI
@@ -132,6 +141,9 @@ jobs:
           key="$(openssl genpkey -algorithm ed25519 -outform DER | base64 -w0)"
           echo "::add-mask::$key"
           sed -i "s|^IDENTITY_SIGNING_KEY=.*|IDENTITY_SIGNING_KEY=$key|" platform/compose/.env
+          session="$(openssl rand -base64 32)"
+          echo "::add-mask::$session"
+          sed -i "s|^BROWSER_SESSION_KEY=.*|BROWSER_SESSION_KEY=$session|" platform/compose/.env
 
       # The override lifts the gateway's per-source-address rate limits (auth, browse, standard tiers) for this run only.
       - name: Build and start the core stack (rate-limit override)
@@ -159,11 +171,9 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: frontend/.nvmrc
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
       - name: Install the frontend dependencies
-        run: npm ci --prefix frontend --silent --no-audit --no-fund
+        run: npm ci --prefix frontend --silent --no-audit --no-fund --prefer-offline
 
       # --with-deps installs the shared libraries of Chromium through apt, which needs root or passwordless sudo in the
       # runner container (the usual runner image has both); without either, the browser is installed alone and the
@@ -219,6 +229,9 @@ jobs:
       # Always: a failed or cancelled run must not leave a stack (ports 8080, 3000, 8025) or volumes behind.
       - name: Tear down the stack
         if: always()
+        env:
+          # Only for the interpolation of a .env copied from the example (the run failed before it was created).
+          BROWSER_SESSION_KEY: teardown-only
         run: |
           if docker compose version >/dev/null 2>&1; then compose=(docker compose); else compose=(docker-compose); fi
           cd platform/compose
@@ -252,8 +265,13 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
-          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          # GRADLE_USER_HOME (dependencies, wrapper, local build cache) already lives on the runner's own disk
+          # (platform/ci-runner): restoring and saving it through the GitHub cache service would only cost time.
+          cache-disabled: true
           validate-wrappers: true
+
+      - name: Keep the Gradle configuration cache on the runner
+        run: .github/scripts/ci-cache.sh gradle
 
       - name: Create platform/compose/.env for CI
         run: |
@@ -265,6 +283,9 @@ jobs:
           key="$(openssl genpkey -algorithm ed25519 -outform DER | base64 -w0)"
           echo "::add-mask::$key"
           sed -i "s|^IDENTITY_SIGNING_KEY=.*|IDENTITY_SIGNING_KEY=$key|" platform/compose/.env
+          session="$(openssl rand -base64 32)"
+          echo "::add-mask::$session"
+          sed -i "s|^BROWSER_SESSION_KEY=.*|BROWSER_SESSION_KEY=$session|" platform/compose/.env
 
       # Layers are cached on the runner host after the `platform` job; a cold host rebuilds the seven images.
       - name: Build and start the core stack (rate-limit override)
@@ -309,6 +330,9 @@ jobs:
 
       - name: Tear down the stack
         if: always()
+        env:
+          # Only for the interpolation of a .env copied from the example (the run failed before it was created).
+          BROWSER_SESSION_KEY: teardown-only
         run: |
           if docker compose version >/dev/null 2>&1; then compose=(docker compose); else compose=(docker-compose); fi
           cd platform/compose

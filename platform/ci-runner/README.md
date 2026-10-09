@@ -7,20 +7,37 @@ the host.
 
 | Service | Image | Published on the host |
 | --- | --- | --- |
-| `runner` | `myoung34/github-runner:2.337.0-ubuntu-noble` (tracks `actions/runner` 2.337.0; includes Docker CLI, Compose, git, jq) | nothing (host network) |
+| `runner` | `myoung34/github-runner:2.337.0-ubuntu-noble` (tracks `actions/runner` 2.337.0; includes Docker CLI, Compose, git, jq); labels `ecommerce`, `ecommerce-light` | nothing (host network) |
+| `runner-light` (profile `light`) | the same image, 2 CPUs and 1536m; label `ecommerce-light` only: image builds and scans, publish, the aggregate jobs, hook tests | nothing (host network) |
 | `registry` | `registry:3.1.2`, htpasswd (bcrypt) auth, TLS | `${REGISTRY_BIND_ADDRESS}:${REGISTRY_PORT}` = `127.0.0.1:5443` |
 | `pact-broker`, `pact-broker-db` | `pactfoundation/pact-broker:3.0.0-pactbroker2.121.2`, `postgres:18-alpine` (same as the `ci` profile of `platform/compose`) | `${PACT_BROKER_BIND_ADDRESS}:${PACT_BROKER_PORT}` = `127.0.0.1:9292` |
 
 Images are pinned by tag (the runner and the registry also by digest). Restart policies: `unless-stopped` for the
 registry, the broker and its database; `always` for the runner (see "Ephemeral behaviour"). Volumes: `registry-data`,
-`pact-broker-db-data`, and the bind-mounted `data/` (certificate, htpasswd; git-ignored) and `RUNNER_WORKDIR`.
+`pact-broker-db-data`, `runner-cache` and `runner-toolcache` (see "Caches"), the work directories (`ci-runner-work`,
+`ci-runner-work-light`, or `RUNNER_WORKDIR`), and the bind-mounted `data/` (certificate, htpasswd; git-ignored).
 
 ## Host requirements
 
-A dedicated Linux machine or VM (see the warning below) with Docker Engine and the Compose plugin, at least 4 CPU cores
-and 16 GB of memory (Gradle, Testcontainers, the platform workflow's stack of about 8 GB), outbound access to GitHub,
-Maven Central, the Gradle Plugin Portal, `api.osv.dev` and the registries of the tool images, and `gh` (logged in) if you
-use `scripts/run-ephemeral.sh`.
+A dedicated Linux machine or VM (see the warning below) with Docker Engine or Podman and Compose, at least 4 CPU cores
+and 16 GB of memory (Gradle, Testcontainers, the platform workflow's stack of about 8 GB), about 20 GB of free disk for
+the caches, the work directories and the images, outbound access to GitHub, Maven Central, the Gradle Plugin Portal,
+`api.osv.dev` and the registries of the tool images, and `gh` (logged in) if you use `scripts/run-ephemeral.sh`.
+
+The runners are always Linux containers, whatever the machine: on macOS the engine's Linux VM (Podman machine, Docker
+Desktop, Colima) is the host of this stack. `scripts/run-ephemeral.sh` runs on the Mac or on the Linux host (bash 3.2 or
+later, BSD or GNU tools) and takes everything it sizes or mounts from the engine, never from the machine it runs on:
+
+- **CPUs and memory** come from `docker info` (the VM's 10 CPUs and 14 GiB on the development Mac, not the Mac's own).
+- **Work directories** are engine volumes on the VM's own disk. A macOS folder shared into the VM (`/Users/...`, virtiofs)
+  is 30 to 50 times slower for the small files of a checkout, a Gradle build or an npm install (measured on the
+  development Mac: 3,000 small files written in 2.8 s on the share, 0.09 s on the VM disk), so never use one as
+  `RUNNER_WORKDIR`.
+- **SELinux** (Fedora CoreOS under `podman machine`, Fedora, RHEL) keeps a confined container from opening the engine
+  socket; the runners run with `security_opt: label=disable` so that `docker` and Testcontainers work inside jobs.
+- **Podman**: rootful (`podman machine set --rootful`) serves `/var/run/docker.sock`; for rootless Podman set
+  `DOCKER_SOCKET=/run/user/<uid>/podman/podman.sock` in `.env`. Images are built with `BUILDAH_FORMAT=docker` (set by
+  the runners and the workflows) so that they keep their `HEALTHCHECK`.
 
 The storefront (feature 005) adds two needs on the runner. The storefront pipeline and the browser acceptance steps of
 `platform.yml` install Node 24 with `actions/setup-node` and need outbound access to the npm registry (`registry.npmjs.org`)
@@ -35,8 +52,7 @@ and the other packages `npx playwright install-deps chromium` lists) must alread
 
 ```bash
 cd platform/ci-runner
-cp .env.example .env && $EDITOR .env        # REPO_URL, RUNNER_WORKDIR, passwords; never commit .env
-sudo mkdir -p /srv/ci-runner/work           # RUNNER_WORKDIR from .env (same path inside and outside the container)
+cp .env.example .env && $EDITOR .env        # REPO_URL, passwords (RUNNER_WORKDIR stays empty); never commit .env
 
 scripts/init-registry.sh --install-ca       # self-signed certificate + htpasswd under data/; prints the generated password once
 docker compose up -d registry pact-broker   # also starts pact-broker-db
@@ -73,20 +89,27 @@ gh secret set PACT_BROKER_PASSWORD         # PACT_BROKER_BASIC_AUTH_PASSWORD of 
 
 ### Register the runner
 
-Labels: the runner is started with `LABELS=ecommerce`; GitHub adds `self-hosted`, `Linux` and the architecture, so jobs
-select it with `runs-on: [self-hosted, linux, ecommerce]` (all workflows do). Scope: `RUNNER_SCOPE=repo`, `REPO_URL` from
-`.env`. Pick one registration mode:
+Labels: `runner` is started with `LABELS=ecommerce,ecommerce-light`, `runner-light` with `LABELS=ecommerce-light`;
+GitHub adds `self-hosted`, `Linux` and the architecture. Jobs that run Gradle, Node or the platform stack select
+`runs-on: [self-hosted, linux, ecommerce]` (only `runner` serves them, one at a time, which also keeps the platform
+stack's fixed host ports to one job); jobs that only drive the engine or aggregate results select
+`[self-hosted, linux, ecommerce-light]` and run on whichever of the two is free, so an image build no longer waits for a
+Gradle job. Scope: `RUNNER_SCOPE=repo`, `REPO_URL` from `.env`. Pick one registration mode:
 
-- **B, recommended: on-demand runner with a registration token fetched on the host.** Leave `ACCESS_TOKEN` empty and run
-  `scripts/run-ephemeral.sh` (under systemd, tmux or nohup). While no workflow run is queued or in progress, no runner
-  is up. When work appears, it fetches a one-hour registration token with the host's `gh` login and starts a freshly
-  created, non-ephemeral container that serves job after job (no restart and new registration per job). Once the runner
-  has been idle (not busy and nothing queued) for `RUNNER_IDLE_TIMEOUT` seconds (default 900; poll interval
-  `RUNNER_POLL_INTERVAL`, default 30, both in `.env` or the environment), it stops and removes the container, deletes
-  the registration through the API and empties the work directory, then waits for the next queued run. Ctrl-C or
-  SIGTERM stops the script once the runner is idle; a running job is not cut off. No long-lived token is ever in the
-  container's environment. Jobs of one session share the container and its tool cache (the checkout is cleaned by
-  `actions/checkout`); a new session always starts from a new container.
+- **B, recommended: on-demand runners with a registration token fetched on the host.** Leave `ACCESS_TOKEN` empty and
+  run `scripts/run-ephemeral.sh` (under systemd, launchd, tmux or nohup). While no workflow run is queued or in progress,
+  no runner is up. When work appears, it fetches a one-hour registration token with the host's `gh` login and starts
+  freshly created, non-ephemeral containers (`runner` and, unless `RUNNER_LIGHT=false`, `runner-light`) that serve job
+  after job (no restart and new registration per job). Once a runner has been idle (not busy and nothing queued) for
+  `RUNNER_IDLE_TIMEOUT` seconds (default 900; poll interval `RUNNER_POLL_INTERVAL`, default 30, both in `.env` or the
+  environment), it stops and removes its container, deletes the registration through the API and empties the work
+  directory; the next queued run starts it again. At startup and before each start it also deletes offline
+  registrations with its name prefix that a crash left behind, and when a session ends it prunes dangling images and
+  build cache older than 72 hours (`RUNNER_PRUNE=false` keeps them). Ctrl-C or SIGTERM stops the script once the
+  runners are idle; a running job is not cut off. No long-lived token is ever in a container's environment. Jobs of one
+  session share the container and the caches (the checkout is cleaned by `actions/checkout`); a new session always
+  starts from a new container. `scripts/run-ephemeral.sh --print-config` prints the sizing and the work directories it
+  would use, without starting anything.
 - **A, simple: PAT in `.env`.** Set `ACCESS_TOKEN` to a fine-grained personal access token (or a GitHub App token)
   restricted to this one repository with "Administration: read and write" (needed to create registration tokens) and
   nothing else, then `docker compose up -d runner`. With `restart: always` the container restarts after each job and
@@ -99,7 +122,8 @@ session) and `DISABLE_AUTOMATIC_DEREGISTRATION=true`, because the image's own de
 token that `UNSET_CONFIG_VARS` has already removed, fails and leaves an offline runner behind; the script deletes the
 registration itself. Both use `DISABLE_AUTO_UPDATE=1` (the image carries the runner version) and
 `UNSET_CONFIG_VARS=true` (registration settings are removed from the jobs' environment). Check Settings > Actions >
-Runners: one runner, labels `self-hosted`, `Linux`, `X64`, `ecommerce`, status Idle. The runner image's `docker compose`
+Runners: `ecommerce-<n>` with labels `self-hosted`, `Linux`, the architecture (`X64` or `ARM64`), `ecommerce`,
+`ecommerce-light`, and `ecommerce-light-<n>` with `ecommerce-light`, status Idle. The runner image's `docker compose`
 can be checked with `docker run --rm --entrypoint docker myoung34/github-runner:2.337.0-ubuntu-noble compose version`;
 the platform workflow falls back to `docker-compose`.
 
@@ -180,6 +204,34 @@ triggered with a token that has write access to the repository, so it does not w
 Without webhooks nothing breaks: each provider pipeline still verifies the broker's pacts (consumer versions on `main`,
 deployed or released, and on the same branch) whenever it runs.
 
+## Caches
+
+Everything a job would otherwise download or rebuild lives on the runner host, so no workflow uses the GitHub cache
+service (restoring and saving gigabytes over the network costs more than it saves when the data already sits on the
+same disk):
+
+| What | Where | Used by |
+| --- | --- | --- |
+| Gradle user home: dependencies, wrapper distribution, JDK toolchains, **local build cache** | volume `runner-cache`, `/opt/ci-cache/gradle` (`GRADLE_USER_HOME`) | every Gradle job; `setup-gradle` runs with `cache-disabled: true` |
+| Gradle configuration cache | `/opt/ci-cache/gradle-configuration-cache/<workspace>`, linked into `.gradle/` by `.github/scripts/ci-cache.sh gradle` | every Gradle job |
+| npm download cache | `/opt/ci-cache/npm` (`npm_config_cache`); `npm ci --prefer-offline` | the storefront, verify, mutation and platform jobs |
+| Playwright browsers | `/opt/ci-cache/ms-playwright` (`PLAYWRIGHT_BROWSERS_PATH`) | the platform job |
+| JDK and Node of `setup-java` / `setup-node` | volume `runner-toolcache`, `/opt/hostedtoolcache` | every job that sets them up |
+| Image layers, tool images (Pact CLI, osv-scanner, Trivy, syft, shellcheck), the visual suite's `node_modules` | the engine | image, scan and platform jobs |
+| Trivy vulnerability database | engine volume `trivy-cache` | image jobs |
+
+The build cache only pays off when task outputs do not change from one build to the next: the boot applications' build
+information therefore carries no build time (`kotlin-boot-app` convention), otherwise every test layer, Pitest and the
+boot jar would run again in every job. With the cache warm, a service pipeline after `verify` (or the other way round)
+takes its compilation, unit, integration and acceptance tests and Pitest from the cache; the contract layers run again
+on purpose (their pacts live outside the task outputs, and broker verification publishes results).
+
+Images of pull-request runs are removed by the image job; on `main` the image stays in the engine for the publish job
+(both runners use the same engine; the repository variable `IMAGE_HANDOVER=artifact` restores the artifact hand-over for
+runners on several engines), which checks its ID and is followed by the removal in the aggregate job.
+
+To start from a cold cache: `docker volume rm ci-runner_runner-cache ci-runner_runner-toolcache` while no runner is up.
+
 ## Public-repository safeguards
 
 GitHub advises against self-hosted runners on public repositories because any pull request can run code on them. The
@@ -192,7 +244,8 @@ stack and the workflows apply these mitigations (specs research.md section 4); t
    outside collaborators"** (`scripts/bootstrap-repo.sh` attempts it through the API; verify it in the UI). The guard in
    the workflow file is only a second barrier: a fork controls its own copy of the file.
 3. **Actions are pinned by full commit SHA** with the release in a trailing comment; tool images by tag and digest.
-4. **Ephemeral runner**: one job per registration, a new container per job in mode B.
+4. **Ephemeral runners**: a new container and registration per session of jobs in mode B (one job per registration in
+   mode A); the work directory is emptied when a session ends.
 5. **Least privilege**: workflow `permissions: contents: read`, checkout without persisted credentials, secrets only in
    the steps that use them (`REGISTRY_*` in the push step, `PACT_BROKER_*` in the broker steps; never in the Gradle
    `check`), registration token or a repository-scoped PAT or GitHub App, Settings > Actions > General > Workflow
@@ -245,18 +298,25 @@ docker system prune -f --volumes=false          # reclaim build cache and stoppe
 - Runner does not appear: check `REPO_URL`, the token scope, and `docker compose logs runner`.
 - Jobs fail on `docker login` with a certificate error: the host's Docker daemon does not trust `data/certs/registry.crt`
   for exactly the `REGISTRY_HOST` value (re-run `init-registry.sh --install-ca`).
-- Testcontainers cannot reach its containers: with the host network and the mounted socket this works as on a normal
-  Linux host; check that nothing else binds the ports and that `docker ps` works inside the job.
+- Testcontainers cannot reach its containers ("Could not find a valid Docker environment") or `docker` fails with
+  "permission denied" on `/var/run/docker.sock`: SELinux separates the runner from the socket. The runners carry
+  `security_opt: label=disable`; a container started before that change must be recreated (restart
+  `scripts/run-ephemeral.sh`). Check with `docker exec ci-runner-runner-1 docker version` while a runner is up. Ryuk is
+  off (`TESTCONTAINERS_RYUK_DISABLED=true`), as on the development machine.
 - Images lose their health check: the engine is Podman and the build was not in Docker format (`BUILDAH_FORMAT=docker` is
   set by the runner service and by the workflows).
-- Resources: the runner container is capped at `RUNNER_CPUS` (9) and `RUNNER_MEM_LIMIT` (10g), below the engine VM
-  (10 CPUs and 14 GiB on the development Mac), because the containers that jobs start through the Docker socket
-  (Testcontainers, the platform workflow's stack) run outside that cap and need the rest. Inside the runner, Gradle uses
-  6 workers and a 4 GB daemon heap (`RUNNER_GRADLE_OPTS`, passed to the jobs as `GRADLE_OPTS`) instead of the 4 workers
-  and 3 GB of `gradle.properties`. The engine VM itself is sized with `podman machine set --cpus --memory` while stopped.
-- On-demand behaviour: `scripts/run-ephemeral.sh` sets `RUNNER_RESTART=no`, keeps one container per session of jobs and
-  removes it after `RUNNER_IDLE_TIMEOUT`; its log (for example `~/ci-runner/run-ephemeral.log` under nohup) has one
-  line per start and stop. With plain `docker compose up -d runner` the container restarts after every job instead
+- Resources: `runner` is capped at `RUNNER_CPUS` and `RUNNER_MEM_LIMIT`, by default all engine CPUs but one and the
+  engine memory less 4 GiB (9 CPUs and 10g on the development Mac's 10-CPU, 14 GiB VM), because the containers that jobs
+  start through the Docker socket (Testcontainers, the platform workflow's stack, image builds) run outside that cap and
+  need the rest; `runner-light` is capped at 2 CPUs and 1536m. Inside `runner`, Gradle uses up to 6 workers and a 4 GB
+  daemon heap (`RUNNER_GRADLE_OPTS`, passed to the jobs as `GRADLE_OPTS`) instead of the 4 workers and 3 GB of
+  `gradle.properties`. The engine VM itself is sized with `podman machine set --cpus --memory` while stopped; its disk
+  only grows (`podman machine set --disk-size`). `scripts/run-ephemeral.sh --print-config` shows the values in effect.
+- Disk: the script warns in its log when the engine disk has less than 8 GiB free; `docker system df` shows what the
+  images use.
+- On-demand behaviour: `scripts/run-ephemeral.sh` sets `RUNNER_RESTART=no`, keeps one container per runner and session
+  of jobs and removes it after `RUNNER_IDLE_TIMEOUT`; its log (for example `~/ci-runner/run-ephemeral.log` under nohup)
+  has one line per start and stop. With plain `docker compose up -d runner` the container restarts after every job instead
   (mode A above).
 - Jobs stay queued: check that the script is running (`pgrep -fl run-ephemeral`) and read its log. A failed
   registration-token request is retried and the loop carries on.
