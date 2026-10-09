@@ -10,8 +10,9 @@
 # Jobs (gate bounded by timeout-minutes: 30 for cache-cold runs, the others by 15; `image` follows `gate`, `publish` follows both):
 #   gate    Node 24, `npm ci`, `npm run lint` (prettier, eslint, tsc, generated types), `npm run test` (Vitest),
 #           `npm run mutate` (Stryker, breaks below 80 %), `npm run pact` (consumer pacts to build/pacts/storefront-*.json),
-#           then the Pact flow against the broker when PACT_BROKER_URL is configured (publish the pacts, can-i-deploy for
-#           the pacticipant `storefront`), then the dependency scan (osv-scanner over frontend/package-lock.json)
+#           then the Pact flow against the broker when PACT_BROKER_URL is configured (publish the pacts, the providers'
+#           broker verification of them at this commit with Gradle, can-i-deploy for the pacticipant `storefront`), then
+#           the dependency scan (osv-scanner over frontend/package-lock.json)
 #   image   docker build of platform/docker/Dockerfile.storefront, Trivy image scan (fails on CRITICAL), CycloneDX SBOM
 #           (syft), start-and-health (nginx answers `ok` on /healthz within 90 s, .github/scripts/image-health.sh)
 #   publish on pushes to main only, after gate AND image succeeded: push of <REGISTRY_HOST>/storefront:<sha> and :<branch>
@@ -172,8 +173,51 @@ jobs:
             --consumer-app-version "$GITHUB_SHA" --branch "$PACT_BRANCH" \
             --build-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
-      # The providers verify the new pacts in their own pipelines (dispatched by the broker webhook), so the check waits
-      # while results are unknown: PACT_CAN_I_DEPLOY_RETRIES (repository variable, default 24) polls every 10 s.
+      # can-i-deploy (next step) needs the providers to have verified the storefront's pacts. They are built from the same
+      # commit in this monorepo, so their broker verification runs here, restricted to the storefront's pacts
+      # (PACT_CONSUMER=storefront), and publishes results for provider version GITHUB_SHA, as in service-ci.yml: the
+      # providers' own pipelines would queue behind this job on the one Gradle runner.
+      - name: Set up JDK from .java-version (provider verification)
+        if: steps.pact.outputs.enabled == 'true'
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version-file: .java-version
+
+      - name: Set up Gradle (provider verification)
+        if: steps.pact.outputs.enabled == 'true'
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          # GRADLE_USER_HOME already lives on the runner's own disk (platform/ci-runner), as in service-ci.yml.
+          cache-disabled: true
+          validate-wrappers: true
+
+      - name: Verify the storefront's pacts at their providers
+        if: steps.pact.outputs.enabled == 'true'
+        env:
+          PACT_BROKER_URL: ${{ secrets.PACT_BROKER_URL }}
+          PACT_BROKER_USERNAME: ${{ secrets.PACT_BROKER_USERNAME }}
+          PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
+          PACT_PUBLISH_RESULTS: "true"
+          PACT_PROVIDER_BRANCH: ${{ github.head_ref || github.ref_name }}
+          PACT_CONSUMER: storefront
+        run: |
+          set -euo pipefail
+          .github/scripts/ci-cache.sh gradle
+          tasks=()
+          for pact in build/pacts/storefront-*.json; do
+            provider="$(basename "$pact" .json)"
+            provider="${provider#storefront-}"
+            case "$provider" in
+              gateway) tasks+=(":services:gateway:contractVerify") ;;
+              identity | catalog | cart | order | payment | notification) tasks+=(":services:$provider:infrastructure:contractVerify") ;;
+              *) echo "::warning::$pact names no provider module of this repository" ;;
+            esac
+          done
+          [ "${#tasks[@]}" -eq 0 ] || ./gradlew -q "${tasks[@]}"
+
+      # With the results above in the broker the check normally answers at once; it still waits while results are
+      # unknown: PACT_CAN_I_DEPLOY_RETRIES (repository variable, default 24) polls every 10 s.
       # PACT_ENVIRONMENT (optional) restricts the check to the versions deployed to that environment;
       # PACT_CAN_I_DEPLOY=false switches the check off. Same variables as service-ci.yml.
       - name: Can I deploy?

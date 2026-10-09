@@ -6,7 +6,8 @@
 # Jobs (gate bounded by timeout-minutes: 30 for cache-cold runs, the others by 15; `gate` and `jar` start together, `image` follows `jar`, `publish` joins both):
 #   gate    ./gradlew -q check of the service modules (ktlint, detekt, test layers, architecture rules, Pitest with
 #           its threshold), then the Pact flow against the broker when PACT_BROKER_URL is configured (publish pacts,
-#           provider verification with result publication, can-i-deploy), then the dependency scan (osv-scanner)
+#           provider verification with result publication, the providers' verification of this service's pacts at the
+#           same commit, can-i-deploy), then the dependency scan (osv-scanner)
 #   jar     ./gradlew bootJar of the service, handed over as the artifact jar-<svc> (no tests: the Docker build copies it
 #           instead of compiling a second time, build-arg APP_JAR of platform/docker/Dockerfile)
 #   image   docker build with that jar, Trivy image scan (fails on CRITICAL), CycloneDX SBOM (syft), start-and-health
@@ -214,6 +215,40 @@ jobs:
           PACT_URL: ${{ inputs.pact-url }}
           PACT_CONSUMER: ${{ inputs.consumer }}
         run: ./gradlew -q "$VERIFY_TASK"
+
+      # The consumer side of the same question: can-i-deploy (next step) needs the providers of this service's pacts to
+      # have verified them. In this monorepo those providers are built from the same commit, so their broker
+      # verification runs here, restricted to this service's pacts (PACT_CONSUMER), and publishes results for provider
+      # version GITHUB_SHA. Waiting for the providers' own pipelines does not work on one Gradle runner: they queue
+      # behind this job, and can-i-deploy ran out of retries with "no such version exists". A webhook-dispatched run
+      # (PACT_URL) verifies only the pact it was dispatched for, as the provider, and skips this step.
+      - name: Verify this service's pacts at their providers
+        if: steps.pact.outputs.enabled == 'true' && inputs.pact-url == ''
+        env:
+          PACT_BROKER_URL: ${{ secrets.PACT_BROKER_URL }}
+          PACT_BROKER_USERNAME: ${{ secrets.PACT_BROKER_USERNAME }}
+          PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
+          PACT_PUBLISH_RESULTS: "true"
+          PACT_PROVIDER_BRANCH: ${{ github.head_ref || github.ref_name }}
+          PACT_CONSUMER: ${{ inputs.service }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tasks=()
+          for pact in build/pacts/"$SERVICE"-*.json; do
+            provider="$(basename "$pact" .json)"
+            provider="${provider#"$SERVICE"-}"
+            case "$provider" in
+              gateway) tasks+=(":services:gateway:contractVerify") ;;
+              identity | catalog | cart | order | payment | notification) tasks+=(":services:$provider:infrastructure:contractVerify") ;;
+              *) echo "::warning::$pact names no provider module of this repository; its provider verifies it in its own pipeline" ;;
+            esac
+          done
+          if [ "${#tasks[@]}" -eq 0 ]; then
+            echo "::notice::$SERVICE consumes no provider of this repository"
+            exit 0
+          fi
+          ./gradlew -q "${tasks[@]}"
 
       # Fails the job, naming the pact and the consumer or provider involved, when this version is not compatible with
       # the versions it integrates with. A consumer's new pact is verified by the provider pipeline the webhook
