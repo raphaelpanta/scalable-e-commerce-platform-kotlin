@@ -1,0 +1,66 @@
+{
+  "reflection": [
+    {
+      "type": "com.sun.management.OperatingSystemMXBean",
+      "methods": [
+        {
+          "name": "getCommittedVirtualMemorySize",
+          "parameterTypes": []
+        },
+        {
+          "name": "getTotalSwapSpaceSize",
+          "parameterTypes": []
+        },
+        {
+          "name": "getFreeSwapSpaceSize",
+          "parameterTypes": []
+        },
+        {
+          "name": "getProcessCpuTime",
+          "parameterTypes": []
+        },
+        {
+          "name": "getFreeMemorySize",
+          "parameterTypes": []
+        },
+        {
+          "name": "getTotalMemorySize",
+          "parameterTypes": []
+        },
+        {
+          "name": "getFreePhysicalMemorySize",
+          "parameterTypes": []
+        },
+        {
+          "name": "getTotalPhysicalMemorySize",
+          "parameterTypes": []
+        },
+        {
+          "name": "getCpuLoad",
+          "parameterTypes": []
+        },
+        {
+          "name": "getSystemCpuLoad",
+          "parameterTypes": []
+        },
+        {
+          "name": "getProcessCpuLoad",
+          "parameterTypes": []
+        }
+      ]
+    },
+    {
+      "type": "com.sun.management.UnixOperatingSystemMXBean",
+      "methods": [
+        {
+          "name": "getOpenFileDescriptorCount",
+          "parameterTypes": []
+        },
+        {
+          "name": "getMaxFileDescriptorCount",
+          "parameterTypes": []
+        }
+      ]
+    }
+  ]
+}

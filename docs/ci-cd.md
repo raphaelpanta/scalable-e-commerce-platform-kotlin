@@ -152,8 +152,8 @@ check that does not need the platform:
   Flyway migrates the empty database. Kafka and the OTLP collector keep their unreachable `localhost` defaults;
   `SPRING_KAFKA_ADMIN_AUTO_CREATE=false` keeps the topic admin from waiting for a broker.
 - The gateway has no database: it is started alone with its defaults.
-- The probe runs inside the container (`docker exec ... bash` with `/dev/tcp` to `127.0.0.1:8081`, the same as the image
-  HEALTHCHECK), so no port is published and the runner's host network, a remote engine or Podman all behave the same. It
+- The probe runs inside the container (`docker exec ... wget` to `127.0.0.1:8081`, busybox in the JVM and native
+  images, the same as the image HEALTHCHECK), so no port is published and the runner's host network, a remote engine or Podman all behave the same. It
   polls the readiness group `/actuator/health/readiness` every 2 seconds for up to 90 seconds for `"status":"UP"`.
 - On failure the step prints the last 80 log lines of the service (and 20 of the database) and exits non-zero; an exit of
   the container ends the wait early. A shell `trap` always removes the containers, their volumes and the network.

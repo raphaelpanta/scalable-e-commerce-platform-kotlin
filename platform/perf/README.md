@@ -185,3 +185,8 @@ heap is 40 % of the 768 MiB limit, Netty's direct buffers are capped at 128 MiB 
 OOM-killed in a loop, every request being traced, and its restarts starved the services of CPU); `seed-10k.sql` prices
 are multiples of 10 (the payment simulator declines totals ending in 13 or 14, which showed up as `payment-declined`
 checkout failures).
+
+The rows above predate feature 008 (2026-10-08), which lowered the service default to `mem_limit: 512m` with a 50 % heap,
+an AOT cache in every JVM image, the native Kafka broker and smaller PostgreSQL settings; its before/after runs, with a
+reduced profile (200 browsing and 20 checkout users for 2 minutes), are in platform/docker/README.md, "Memory
+measurements".

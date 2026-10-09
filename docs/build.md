@@ -443,7 +443,8 @@ Non-blocking items left open by the bootstrap feature:
 - **Constitution wording.** `.specify/memory/constitution.md` still says "Spring Boot 3.x"; the build uses the
   current GA major (4.1.1). Amend it to "current GA major" as a PATCH through `/speckit-constitution`.
 - **Refresh cadence for pinned digests and SHAs.** The base images in `platform/docker/Dockerfile`
-  (`eclipse-temurin:25-jdk` and `25-jre`, pinned by digest) and the `uses:` SHAs in
+  (`eclipse-temurin:25-jdk`, `25-jre` and `busybox:1.37-musl`, pinned by digest; `Dockerfile.native` pins
+  `ghcr.io/graalvm/native-image-community:25` and `gcr.io/distroless/base-debian13:nonroot`) and the `uses:` SHAs in
   `.github/workflows/verify.yml` do not move on their own. Refresh both once a month and whenever a security
   advisory names them: resolve the new digest (`docker buildx imagetools inspect eclipse-temurin:25-jre`) or
   commit SHA (`gh api repos/<owner>/<repo>/commits/<tag> --jq .sha`), update the value and its comment

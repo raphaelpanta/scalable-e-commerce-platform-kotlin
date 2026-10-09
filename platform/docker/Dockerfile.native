@@ -1,0 +1,71 @@
+# syntax=docker/dockerfile:1
+# GraalVM native image of one deployable (the gateway or a services/<name>/infrastructure module): the smallest memory
+# footprint of the platform, an alternative to the JVM recipe platform/docker/Dockerfile. Built from the repository root:
+#   docker build -f platform/docker/Dockerfile.native --build-arg SERVICE_MODULE=:services:catalog:infrastructure -t catalog:native .
+# or for the whole stack with the Compose override platform/compose/compose.native.yml (platform/docker/README.md,
+# "Native images"). Base images are pinned by digest (resolved 2026-10-08); refresh them deliberately.
+#
+# Nothing in the repository's Gradle build knows about GraalVM: the init script native/native-image.init.gradle.kts adds
+# Native Build Tools (version: `native-build-tools` in gradle/libs.versions.toml) to this build only, Spring Boot's AOT
+# processing generates the bean definitions and hints, and `nativeCompile` produces one executable. Unlike the JVM
+# recipe the build stage depends on SERVICE_MODULE: a native-image run is per application (6 to 11 minutes and a 7.5 GB
+# peak each on an 8-CPU machine), so build the images one at a time (COMPOSE_PARALLEL_LIMIT=1); the Gradle cache mount
+# still shares downloads and compiled classes between them.
+
+FROM ghcr.io/graalvm/native-image-community:25@sha256:0d936f32bb8acb5bc60c41b33e05f064d7a6aaf36b726538296c54949bd4a3c0 AS build
+ARG SERVICE_MODULE
+# Heap of the native-image builder. Left alone it takes 75 % of the machine's memory, on top of the Gradle daemon, and
+# drove an engine VM with 13 GiB (and a running stack) out of memory; 6 GiB is enough for one service.
+ARG NATIVE_IMAGE_XMX=6g
+# The gradlew start script needs xargs, which the Oracle Linux slim base does not ship.
+RUN microdnf install -y findutils >/dev/null && microdnf clean all >/dev/null
+WORKDIR /workspace
+COPY . .
+# native-image options (NATIVE_IMAGE_OPTIONS is read by native-image itself, so the Gradle build needs no setting):
+#   -march=compatibility       runs on any CPU of the architecture (the default targets the build machine's CPU features)
+#   -H:Preserve=package=...    keeps every class of the platform's own packages with its reflection metadata. The services
+#                              serialise their DTOs and events with Jackson from functional routes and Kafka listeners,
+#                              which Spring's AOT processing cannot see; preserving com.ecommerce.* keeps them working
+#                              without reflection hints in the code (experimental option, hence the unlock flag)
+#   -J-Xmx                     the builder heap above
+#   -H:IncludeResources=db/.*  every Flyway script: Spring's AOT hints cover only the default location db/migration, not
+#                              db/messaging (outbox and processed_event tables) or db/seed, which Flyway would then
+#                              silently skip
+#   -H:ConfigurationFileDirectories   native/metadata/reachability-metadata.json: the JDK management methods Micrometer's
+#                              process and file-descriptor metrics call reflectively. Without them the first scrape of
+#                              /actuator/prometheus throws MissingReflectionRegistrationError, which Reactor treats as
+#                              fatal: the worker dies and the scrape never answers
+#   -R:MaxHeapSize is not set: the heap follows the container limit at run time (ENTRYPOINT)
+ENV NATIVE_IMAGE_OPTIONS="-J-Xmx${NATIVE_IMAGE_XMX} -march=compatibility -H:+UnlockExperimentalVMOptions -H:Preserve=package=com.ecommerce.* -H:IncludeResources=db/.* -H:ConfigurationFileDirectories=/workspace/platform/docker/native/metadata -H:-UnlockExperimentalVMOptions"
+RUN --mount=type=cache,target=/root/.gradle,sharing=locked \
+    set -e; \
+    test -n "${SERVICE_MODULE}" || { echo "build-arg SERVICE_MODULE is required" >&2; exit 1; }; \
+    version="$(sed -n 's/^native-build-tools = "\(.*\)"/\1/p' gradle/libs.versions.toml)"; \
+    test -n "${version}" || { echo "native-build-tools missing from gradle/libs.versions.toml" >&2; exit 1; }; \
+    NATIVE_BUILD_TOOLS_VERSION="${version}" ./gradlew -q --no-daemon -Pkotlin.compiler.execution.strategy=in-process \
+      --init-script platform/docker/native/native-image.init.gradle.kts "${SERVICE_MODULE}:nativeCompile"; \
+    dir="$(echo "${SERVICE_MODULE#:}" | tr : /)/build/native/nativeCompile"; \
+    name="$(echo "${SERVICE_MODULE}" | sed 's#.*:##')"; \
+    test -x "${dir}/${name}"; \
+    mkdir -p /out; \
+    cp "${dir}/${name}" /out/application
+
+# A statically linked busybox for the health probe: the runtime image has no shell, curl or wget otherwise.
+FROM busybox:1.37-musl@sha256:5cec3fc171c87218698e85a52af7087de727372aae264a787b8112901a5b0092 AS probe
+RUN mkdir -p /out && cp /bin/busybox /out/busybox && ln -s busybox /out/wget
+
+# Runtime: distroless glibc base (the executable links glibc dynamically; the musl variant of the GraalVM image exists for
+# amd64 only), no shell, no package manager, the distroless `nonroot` user (uid/gid 65532).
+FROM gcr.io/distroless/base-debian13:nonroot@sha256:a0d70d6a97cd697d9362bc2aae4a6560dd65817e365d0043b07325a97975dc91
+COPY --from=probe /out/ /usr/local/bin/
+COPY --from=build /out/application /app/application
+WORKDIR /app
+EXPOSE 8080 8081
+# Same readiness probe as the JVM image: busybox wget fails on the 503 that /actuator/health/readiness answers while the
+# service is not ready.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD ["wget", "-qO", "/dev/null", "http://127.0.0.1:8081/actuator/health/readiness"]
+# Native heap: 50 % of the container limit (-XX:MaximumHeapSizePercent is the native image's MaxRAMPercentage; no JIT,
+# metaspace or code cache to leave room for, unlike the JVM's 40 %); the 5 s DNS cache keeps DNS discovery of replicas
+# short-lived, as in the JVM image.
+ENTRYPOINT ["/app/application", "-XX:MaximumHeapSizePercent=50", "-Dsun.net.inetaddr.ttl=5"]

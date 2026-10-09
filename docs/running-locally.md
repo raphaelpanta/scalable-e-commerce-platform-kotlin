@@ -23,10 +23,11 @@ installed: the images build the services themselves.
 
 **Memory.** Give the container engine itself, not only the host, about **10 GiB**: the Docker Desktop VM or the Podman
 machine (`podman machine set --cpus 6 --memory 10240`). The `core` and `observability` profiles together run 21
-containers: seven JVMs bounded at 768 MB each (`SERVICE_MEM_LIMIT`), the storefront static server at 64 MB
-(`STOREFRONT_MEM_LIMIT`), Kafka at 1 GiB (`KAFKA_MEM_LIMIT`), six PostgreSQL databases at 256 MB (`DB_MEM_LIMIT`) and
-the observability tools at 512 MB each (`OBS_MEM_LIMIT`). An 8 GiB engine ran out
-of memory; the limits can be lowered in `.env`. Rootless Podman also caps the number of concurrent containers through the
+containers: seven JVMs bounded at 512 MB each (`SERVICE_MEM_LIMIT`; identity and catalog 640 MB; 256 MB with the native
+images of `compose.native.yml`), the storefront static server at 64 MB (`STOREFRONT_MEM_LIMIT`), the native Kafka broker at 384 MB
+(`KAFKA_MEM_LIMIT`), six PostgreSQL databases at 192 MB (`DB_MEM_LIMIT`), Mailpit at 128 MB (`MAILPIT_MEM_LIMIT`) and
+the observability tools at 512 MB each (`OBS_MEM_LIMIT`; Tempo 2 GB). Under load the `core` profile peaks at about
+3.1 to 3.2 GB (4.4 GB before feature 008; platform/docker/README.md, "Memory measurements"). The limits can be changed in `.env`. Rootless Podman also caps the number of concurrent containers through the
 kernel keyring quota (`kernel.keys.maxkeys`): raise it in the machine, or stop unrelated containers, when the 20th
 container fails to start.
 

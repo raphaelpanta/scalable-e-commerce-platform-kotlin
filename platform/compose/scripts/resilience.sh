@@ -106,11 +106,10 @@ replica_ids() {
 }
 
 # request_count <container-id> <uri-prefix>: sum of the server-side http_server_requests_seconds_count series whose uri
-# starts with the prefix, read from the replica's own Prometheus endpoint (management port 8081, not published; the JRE
-# image has no curl, bash's /dev/tcp is enough). Prints 0 when the replica does not answer.
+# starts with the prefix, read from the replica's own Prometheus endpoint (management port 8081, not published; the
+# images have no curl, busybox wget is in both the JVM and the native image). Prints 0 when the replica does not answer.
 request_count() {
-  docker exec "$1" bash -c \
-    'exec 3<>/dev/tcp/127.0.0.1/8081 && printf "GET /actuator/prometheus HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 && cat <&3' 2>/dev/null |
+  docker exec "$1" wget -qO- http://127.0.0.1:8081/actuator/prometheus 2>/dev/null |
     awk -v prefix="uri=\"$2" '/^http_server_requests_seconds_count[{]/ && index($0, prefix) > 0 { sum += $NF } END { printf "%d\n", sum }'
 }
 
