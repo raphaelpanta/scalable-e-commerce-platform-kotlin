@@ -107,7 +107,7 @@ fun arbOrder(
 val arbCaller: Arb<Caller> =
     arbitrary {
         val account = Arb.of(SHOPPER, OTHER_SHOPPER, OPERATOR).bind()
-        Caller(account, Arb.subsequence(Role.entries).map { it.toSet() }.bind())
+        Caller(account, Arb.subsequence(Role.entries).map { roles -> roles.toSet() }.bind())
     }
 
 /** Generated orders behind the order store, with fakes recording what a use case did to them. */

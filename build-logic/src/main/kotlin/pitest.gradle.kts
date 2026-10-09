@@ -45,9 +45,9 @@ pitest.apply {
     val cpus = Runtime.getRuntime().availableProcessors()
     val workers = gradle.startParameter.maxWorkerCount.coerceAtLeast(1)
     threads.set(((2 * cpus + workers - 1) / workers).coerceIn(1, cpus))
-    // Explicit heaps: a JVM without -Xmx takes a quarter of the container's memory as its ceiling, and the Pitest JVMs of
-    // several modules next to the test JVMs and the Gradle and Kotlin daemons then outgrew the CI runner's cap (the
-    // kernel killed the Gradle daemon). Unit tests of one module need far less.
+    // Explicit heaps: a JVM without -Xmx takes a quarter of the container's memory as its ceiling, and the
+    // Pitest JVMs of several modules next to the test JVMs and the Gradle and Kotlin daemons then outgrew the
+    // CI runner's cap (the kernel killed the Gradle daemon). Unit tests of one module need far less.
     jvmArgs.set(listOf("-Xmx512m"))
     mainProcessJvmArgs.set(listOf("-Xmx768m"))
     outputFormats.set(setOf("XML", "HTML"))

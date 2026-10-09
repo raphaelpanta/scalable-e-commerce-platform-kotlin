@@ -40,9 +40,10 @@ dependencies {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
-    // Without it a test JVM takes a quarter of the machine's (or container's) memory as its heap ceiling; with up to
-    // org.gradle.workers.max test tasks at once beside the Gradle and Kotlin daemons that outgrew the CI runner's memory
-    // cap, and the kernel killed the Gradle daemon. A Spring context with Testcontainers clients fits in 1 GB.
+    // Without it a test JVM takes a quarter of the machine's (or container's) memory as its heap ceiling; with
+    // up to org.gradle.workers.max test tasks at once beside the Gradle and Kotlin daemons that outgrew the CI
+    // runner's memory cap, and the kernel killed the Gradle daemon. A Spring context with Testcontainers
+    // clients fits in 1 GB.
     maxHeapSize = "1g"
     // JDK 25 warns when mocking agents attach at run time, when class data sharing meets an appended boot
     // class path, when Netty loads its native transport and when Konsist's Kotlin compiler uses
