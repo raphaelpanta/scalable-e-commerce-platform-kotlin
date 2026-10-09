@@ -1,5 +1,6 @@
 import com.ecommerce.build.MutationExtension
 import com.ecommerce.build.QualityThresholds
+import com.ecommerce.build.heavyTaskLimit
 import com.ecommerce.build.servicePackage
 import info.solidsoft.gradle.pitest.PitestPluginExtension
 
@@ -87,6 +88,7 @@ afterEvaluate {
 }
 
 tasks.named<JavaExec>("pitest") {
+    usesService(heavyTaskLimit())
     // Pitest always prints its mutator table, statistics and an INFO banner. A passing run must be silent
     // (Principle VIII), so stdout is dropped and stderr is kept in build/pitest/stderr.log; on failure the
     // stderr text (for example "Mutation score of 50 is below threshold of 80") becomes the build failure.

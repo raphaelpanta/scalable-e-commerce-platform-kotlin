@@ -1,3 +1,4 @@
+import com.ecommerce.build.heavyTaskLimit
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
 
@@ -45,6 +46,8 @@ tasks.withType<Test>().configureEach {
     // runner's memory cap, and the kernel killed the Gradle daemon. A Spring context with Testcontainers
     // clients fits in 1 GB.
     maxHeapSize = "1g"
+    // At most HeavyTaskLimit's slots of test JVMs, Pitest and npm runs at once (sized from the memory the build sees).
+    usesService(heavyTaskLimit())
     // JDK 25 warns when mocking agents attach at run time, when class data sharing meets an appended boot
     // class path, when Netty loads its native transport and when Konsist's Kotlin compiler uses
     // sun.misc.Unsafe; these flags keep every test layer silent under -q (Principle VIII).
