@@ -34,7 +34,8 @@ jobs:
   verify:
     name: verify
     runs-on: [self-hosted, linux, ecommerce]
-    timeout-minutes: 15
+    # A cache-cold run (new runner, empty build cache) builds and tests every module.
+    timeout-minutes: 40
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - name: Check out the repository

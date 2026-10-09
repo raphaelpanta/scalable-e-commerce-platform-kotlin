@@ -19,9 +19,10 @@
 #     (unreachable: the producer and the topic admin only log warnings; SPRING_KAFKA_ADMIN_* below shortens that wait);
 #   - the gateway has no database and needs nothing: it starts alone with its localhost defaults;
 #   - the storefront is nginx serving a bundle: no database, no JVM environment, the 64m memory bound of Compose;
-#   - the probe runs INSIDE the container (bash /dev/tcp to 127.0.0.1:8081 for the JVM images; busybox wget to
-#     127.0.0.1:8080/healthz for the storefront, whose image has no bash; the same checks as the image HEALTHCHECKs),
-#     so it works with the runner's host network, a remote Docker engine or Podman without publishing any port.
+#   - the probe runs INSIDE the container with busybox wget (127.0.0.1:8081 readiness for the JVM and native images,
+#     127.0.0.1:8080/healthz for the storefront; none of the images has curl; the same checks as the image
+#     HEALTHCHECKs), so it works with the runner's host network, a remote Docker engine or Podman without publishing any
+#     port.
 # Environment: HEALTH_TIMEOUT (seconds, default 90), POSTGRES_IMAGE (default postgres:18-alpine, the tag Compose uses),
 #   GITHUB_RUN_ID / GITHUB_RUN_ATTEMPT (make the container names unique per run; "local" otherwise).
 set -euo pipefail
@@ -76,7 +77,7 @@ if [ "$service" = storefront ]; then
 else
   internal_token="$(random)"
   echo "::add-mask::$internal_token"
-  run_args=(-d --name "$app" --memory 768m
+  run_args=(-d --name "$app" --memory 512m
     -e "INTERNAL_API_TOKEN=$internal_token" -e SEED=false
     -e SPRING_KAFKA_ADMIN_AUTO_CREATE=false -e SPRING_KAFKA_ADMIN_OPERATION_TIMEOUT=5s)
   probe_target=":8081/actuator/health/readiness"
@@ -113,8 +114,7 @@ probe() {
   if [ "$service" = storefront ]; then
     docker exec "$app" wget -qO- http://127.0.0.1:8080/healthz 2>/dev/null
   else
-    docker exec "$app" bash -c \
-      'exec 3<>/dev/tcp/127.0.0.1/8081 && printf "GET /actuator/health/readiness HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 && cat <&3' 2>/dev/null
+    docker exec "$app" wget -qO- http://127.0.0.1:8081/actuator/health/readiness 2>/dev/null
   fi
 }
 

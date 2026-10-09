@@ -38,7 +38,7 @@
           {
             "type": "command",
             "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/stop-full-check.sh",
-            "timeout": 3630,
+            "timeout": 1230,
             "statusMessage": "Full quality check (gradle verify, incremental pitest, frontend lint/test)"
           }
         ]

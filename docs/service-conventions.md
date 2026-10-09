@@ -64,7 +64,7 @@ Kafka are reachable only on the internal network (FR-023).
 
 The storefront container (`platform/docker/Dockerfile.storefront`, nginx serving the web storefront bundle) is not a
 JVM: it listens on **8080** only, its health check is `GET /healthz` answering `ok`, it reads no environment, and
-Compose bounds it with `STOREFRONT_MEM_LIMIT` (default `64m`, against `SERVICE_MEM_LIMIT` 768m for a service). It is
+Compose bounds it with `STOREFRONT_MEM_LIMIT` (default `64m`, against `SERVICE_MEM_LIMIT` 512m for a service). It is
 reached only through the gateway's `storefront` route (`STOREFRONT_URL`).
 
 ## 3. HTTP API rules

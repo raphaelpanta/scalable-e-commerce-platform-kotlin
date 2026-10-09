@@ -7,7 +7,7 @@
 # all outside collaborators"). The image is pushed to the private registry on pushes to main only. The storefront is a Pact
 # consumer only: nothing verifies it as a provider, so there are no webhook inputs; `workflow_dispatch` re-runs the pipeline.
 #
-# Jobs (each bounded by timeout-minutes: 15; `image` follows `gate`, `publish` follows both):
+# Jobs (gate bounded by timeout-minutes: 30 for cache-cold runs, the others by 15; `image` follows `gate`, `publish` follows both):
 #   gate    Node 24, `npm ci`, `npm run lint` (prettier, eslint, tsc, generated types), `npm run test` (Vitest),
 #           `npm run mutate` (Stryker, breaks below 80 %), `npm run pact` (consumer pacts to build/pacts/storefront-*.json),
 #           then the Pact flow against the broker when PACT_BROKER_URL is configured (publish the pacts, can-i-deploy for
@@ -76,7 +76,7 @@ jobs:
   gate:
     name: gate (storefront)
     runs-on: [self-hosted, linux, ecommerce]
-    timeout-minutes: 15
+    timeout-minutes: 30
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - name: Check out the repository

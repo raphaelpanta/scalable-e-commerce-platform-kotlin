@@ -77,10 +77,16 @@ Labels: the runner is started with `LABELS=ecommerce`; GitHub adds `self-hosted`
 select it with `runs-on: [self-hosted, linux, ecommerce]` (all workflows do). Scope: `RUNNER_SCOPE=repo`, `REPO_URL` from
 `.env`. Pick one registration mode:
 
-- **B, recommended: registration token fetched on the host.** Leave `ACCESS_TOKEN` empty and run
-  `scripts/run-ephemeral.sh` (under systemd, tmux or nohup). Per job it fetches a one-hour registration token with the
-  host's `gh` login, starts a freshly created container, waits for it to exit, removes it and empties the work directory.
-  No long-lived token is ever in the container's environment.
+- **B, recommended: on-demand runner with a registration token fetched on the host.** Leave `ACCESS_TOKEN` empty and run
+  `scripts/run-ephemeral.sh` (under systemd, tmux or nohup). While no workflow run is queued or in progress, no runner
+  is up. When work appears, it fetches a one-hour registration token with the host's `gh` login and starts a freshly
+  created, non-ephemeral container that serves job after job (no restart and new registration per job). Once the runner
+  has been idle (not busy and nothing queued) for `RUNNER_IDLE_TIMEOUT` seconds (default 900; poll interval
+  `RUNNER_POLL_INTERVAL`, default 30, both in `.env` or the environment), it stops and removes the container, deletes
+  the registration through the API and empties the work directory, then waits for the next queued run. Ctrl-C or
+  SIGTERM stops the script once the runner is idle; a running job is not cut off. No long-lived token is ever in the
+  container's environment. Jobs of one session share the container and its tool cache (the checkout is cleaned by
+  `actions/checkout`); a new session always starts from a new container.
 - **A, simple: PAT in `.env`.** Set `ACCESS_TOKEN` to a fine-grained personal access token (or a GitHub App token)
   restricted to this one repository with "Administration: read and write" (needed to create registration tokens) and
   nothing else, then `docker compose up -d runner`. With `restart: always` the container restarts after each job and
@@ -88,7 +94,10 @@ select it with `runs-on: [self-hosted, linux, ecommerce]` (all workflows do). Sc
   visible to anything that can `docker inspect` the container, which includes jobs (they have the Docker socket). Rotate
   the token regularly.
 
-Either way `EPHEMERAL=1` (one job per registration), `DISABLE_AUTO_UPDATE=1` (the image carries the runner version) and
+Mode A runs with `EPHEMERAL=1` (one job per registration); mode B passes an empty `EPHEMERAL` (one registration per
+session) and `DISABLE_AUTOMATIC_DEREGISTRATION=true`, because the image's own deregistration needs the registration
+token that `UNSET_CONFIG_VARS` has already removed, fails and leaves an offline runner behind; the script deletes the
+registration itself. Both use `DISABLE_AUTO_UPDATE=1` (the image carries the runner version) and
 `UNSET_CONFIG_VARS=true` (registration settings are removed from the jobs' environment). Check Settings > Actions >
 Runners: one runner, labels `self-hosted`, `Linux`, `X64`, `ecommerce`, status Idle. The runner image's `docker compose`
 can be checked with `docker run --rm --entrypoint docker myoung34/github-runner:2.337.0-ubuntu-noble compose version`;
@@ -240,5 +249,14 @@ docker system prune -f --volumes=false          # reclaim build cache and stoppe
   Linux host; check that nothing else binds the ports and that `docker ps` works inside the job.
 - Images lose their health check: the engine is Podman and the build was not in Docker format (`BUILDAH_FORMAT=docker` is
   set by the runner service and by the workflows).
-- Ephemeral behaviour: `scripts/run-ephemeral.sh` sets `RUNNER_RESTART=no` and recreates the container per job; with plain
-  `docker compose up -d runner` the container restarts instead (mode A above).
+- Resources: the runner container is capped at `RUNNER_CPUS` (9) and `RUNNER_MEM_LIMIT` (10g), below the engine VM
+  (10 CPUs and 14 GiB on the development Mac), because the containers that jobs start through the Docker socket
+  (Testcontainers, the platform workflow's stack) run outside that cap and need the rest. Inside the runner, Gradle uses
+  6 workers and a 4 GB daemon heap (`RUNNER_GRADLE_OPTS`, passed to the jobs as `GRADLE_OPTS`) instead of the 4 workers
+  and 3 GB of `gradle.properties`. The engine VM itself is sized with `podman machine set --cpus --memory` while stopped.
+- On-demand behaviour: `scripts/run-ephemeral.sh` sets `RUNNER_RESTART=no`, keeps one container per session of jobs and
+  removes it after `RUNNER_IDLE_TIMEOUT`; its log (for example `~/ci-runner/run-ephemeral.log` under nohup) has one
+  line per start and stop. With plain `docker compose up -d runner` the container restarts after every job instead
+  (mode A above).
+- Jobs stay queued: check that the script is running (`pgrep -fl run-ephemeral`) and read its log. A failed
+  registration-token request is retried and the loop carries on.

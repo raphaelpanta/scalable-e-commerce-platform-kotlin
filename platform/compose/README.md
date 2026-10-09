@@ -146,16 +146,38 @@ Their `build` stage compiles all seven boot jars in one Gradle invocation and is
 `COMPOSE_PARALLEL_LIMIT=1` (set by the scripts) the first image runs Gradle and the six others reuse the stage from the
 layer cache: a cold `up --build` takes about 4 minutes on the development machine (`platform/docker/README.md`,
 "Start-up time"). The Gradle user home is a cache mount (`sharing=locked`, so concurrent builds wait for each other).
-With podman set `BUILDAH_FORMAT=docker` so the `HEALTHCHECK` survives.
+With podman set `BUILDAH_FORMAT=docker` so the `HEALTHCHECK` survives. Each JVM image also records an AOT cache in a
+short training run at the end of its build (10 to 20 s; `platform/docker/README.md`, "Runtime settings").
+
+**Native images.** The override `compose.native.yml` builds the gateway and the six services as GraalVM native images
+(`platform/docker/Dockerfile.native`, tagged `:native`, 256m each) and leaves everything else as it is:
+
+```bash
+COMPOSE_PARALLEL_LIMIT=1 docker compose -f docker-compose.yml -f compose.native.yml --profile core up -d --build
+```
+
+The first build takes about an hour (one native-image compilation of 6 to 11 minutes per service, a 7.5 GB peak each);
+under the performance profile the native stack peaked at about 1.9 GiB against about 3.1 GiB for the JVM images, at the same
+throughput
+(`platform/docker/README.md`, "Native images" and "Memory measurements"). Add `-f compose.native.yml` to every later
+`docker compose` command of that stack; without it, `up -d` switches back to the JVM images.
 
 ## Resource limits
 
-Every service container is bounded (`SERVICE_MEM_LIMIT`, default 768m, and `SERVICE_CPUS`, default 1.0) so that the
-JVM's `MaxRAMPercentage=40` sizes the heap to the container (307 MiB) and leaves room for its off-heap memory (an earlier
-640m limit with a 75 % heap was OOM-killed under load); databases get `DB_MEM_LIMIT` (256m), Kafka
-`KAFKA_MEM_LIMIT` (1g) with `KAFKA_HEAP_OPTS`, and each observability container `OBS_MEM_LIMIT` (512m) except Tempo, `TEMPO_MEM_LIMIT` (2g: every request is
-traced, and 512m and 1g were OOM-killed in a loop under the performance suite). The storefront (nginx serving static
-files) gets `STOREFRONT_MEM_LIMIT` (64m). The image also caps the JVM's direct
-memory and malloc arenas (platform/docker/README.md, "Runtime settings"). The whole
-`core` + `observability` stack (21 containers) needs about 9 GiB; on a smaller engine VM start `core` alone first. `GATEWAY_PORT`
+Every service container is bounded (`SERVICE_MEM_LIMIT`, default 512m, and `SERVICE_CPUS`, default 1.0) so that the
+JVM's `MaxRAMPercentage=50` sizes the heap to the container (256 MiB) and leaves room for its off-heap memory, which the
+image's AOT cache and native-heap trimming keep at about 130 to 180 MiB (768m with a 40 % heap before feature 008; an
+earlier 640m limit with a 75 % heap was OOM-killed under load). Identity and catalog get 640m (`IDENTITY_MEM_LIMIT`,
+`CATALOG_MEM_LIMIT`): identity's Argon2id hashing fills its heap, and catalog serves every browse request; at 512m both
+ran within a few tens of MiB of the limit under the performance profile. The GraalVM native images of `compose.native.yml` get
+`NATIVE_SERVICE_MEM_LIMIT` (256m). Databases get `DB_MEM_LIMIT` (192m, with 32 MB of shared buffers and at most 50
+connections; the services' R2DBC pools start with 2 connections, `R2DBC_POOL_INITIAL_SIZE`, and grow to 10), the native
+Kafka broker `KAFKA_MEM_LIMIT` (384m, heap through `KAFKA_OPTS`, default `-Xmx192m`), Mailpit `MAILPIT_MEM_LIMIT` (128m)
+and each observability container `OBS_MEM_LIMIT` (512m) except Tempo, `TEMPO_MEM_LIMIT` (2g: every request is traced, and
+512m and 1g were OOM-killed in a loop under the performance suite). The Go containers (Mailpit, the collector, Loki,
+Tempo, Prometheus, Grafana) get a `GOMEMLIMIT` of about 80 % of their limit (`OBS_GOMEMLIMIT`, `TEMPO_GOMEMLIMIT`,
+`MAILPIT_GOMEMLIMIT`; change them together with the limits). The storefront (nginx serving static files) gets
+`STOREFRONT_MEM_LIMIT` (64m). See platform/docker/README.md, "Runtime settings" and "Memory measurements". The `core`
+profile peaks at about 3.1 GiB under load; the `observability` profile adds about 1.1 GiB at rest, more under load
+(Tempo grows with the traced traffic). `GATEWAY_PORT`
 moves the published gateway port when 8080 is taken on the host.

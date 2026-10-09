@@ -19,9 +19,17 @@ services:
     # image tracks the runner release (2.337.0) on Ubuntu 24.04 and includes Docker CLI, Compose, git and jq.
     image: myoung34/github-runner:2.337.0-ubuntu-noble@sha256:1b947d2475cc6f4c3edf0e91dd879b091857e41a311be917016243479bb34101
     # `always`: after its single job the ephemeral runner exits and the container restarts and registers again.
-    # scripts/run-ephemeral.sh sets RUNNER_RESTART=no and recreates the container for every job instead.
+    # scripts/run-ephemeral.sh sets RUNNER_RESTART=no, starts one container per session of jobs and stops it after an
+    # idle timeout instead (README.md, "Ephemeral runner").
     restart: ${RUNNER_RESTART:-always}
     network_mode: host
+    # The runner's own processes (Gradle, its test JVMs, Node) are capped below the engine VM (10 CPUs, 14 GiB on the
+    # development Mac) because the containers that jobs start through the Docker socket (Testcontainers, the platform
+    # workflow's Compose stack of about 3.2 GiB) run outside this cgroup and need the rest, with the registry and the
+    # Pact Broker. A runaway job is then OOM-killed inside the runner instead of taking the whole VM down.
+    cpus: ${RUNNER_CPUS:-9}
+    mem_limit: ${RUNNER_MEM_LIMIT:-10g}
+    memswap_limit: ${RUNNER_MEM_LIMIT:-10g}
     environment:
       REPO_URL: ${REPO_URL:?set REPO_URL in .env}
       RUNNER_SCOPE: repo
@@ -31,7 +39,15 @@ services:
       RUNNER_TOKEN: ${RUNNER_TOKEN:-}
       # self-hosted, linux and the architecture are added automatically: the jobs ask for [self-hosted, linux, ecommerce].
       LABELS: ecommerce
-      EPHEMERAL: "1"
+      # Any non-empty value makes the runner ephemeral (one job, then exit); scripts/run-ephemeral.sh passes an empty
+      # value so that one container serves every queued job of a session.
+      EPHEMERAL: ${RUNNER_EPHEMERAL-1}
+      # The image's own deregistration on exit needs the registration token, which UNSET_CONFIG_VARS has already removed,
+      # so it always fails and leaves an offline runner behind; scripts/run-ephemeral.sh turns it off and deletes the
+      # registration through the API after stopping the container.
+      DISABLE_AUTOMATIC_DEREGISTRATION: ${RUNNER_DISABLE_DEREGISTRATION:-false}
+      # Empty: <RUNNER_NAME_PREFIX>-<random>; the script sets a name so it can look the runner up in the API.
+      RUNNER_NAME: ${RUNNER_NAME:-}
       DISABLE_AUTO_UPDATE: "1"
       RUNNER_NAME_PREFIX: ${RUNNER_NAME_PREFIX:-ecommerce}
       RANDOM_RUNNER_SUFFIX: "true"
@@ -41,9 +57,20 @@ services:
       # Docker image format keeps HEALTHCHECK when the engine is Podman (platform/compose/README.md).
       BUILDAH_FORMAT: docker
       DOCKER_BUILDKIT: "1"
+      # Tool caches outlive the ephemeral container (one fresh container per job): without them every job starts
+      # with an empty Gradle home and downloads and compiles everything, which does not fit the job timeouts. Only
+      # caches live here; the checkout and build outputs stay in RUNNER_WORKDIR, which is emptied after each job.
+      GRADLE_USER_HOME: /opt/ci-cache/gradle
+      # Gradle on the runner may use more than on a laptop (gradle.properties: 4 workers, 3 GB daemon heap, sized so
+      # that parallel Testcontainers do not overload a laptop engine): 6 workers and a 4 GB daemon heap. The quotes keep
+      # the JVM arguments together (gradlew splits GRADLE_OPTS like a shell).
+      GRADLE_OPTS: ${RUNNER_GRADLE_OPTS:--Dorg.gradle.workers.max=6 "-Dorg.gradle.jvmargs=-Xmx4g -XX:+UseParallelGC -Dfile.encoding=UTF-8 --sun-misc-unsafe-memory-access=allow"}
+      npm_config_cache: /opt/ci-cache/npm
+      PLAYWRIGHT_BROWSERS_PATH: /opt/ci-cache/ms-playwright
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${RUNNER_WORKDIR}:${RUNNER_WORKDIR}
+      - runner-cache:/opt/ci-cache
 
   registry:
     image: registry:3.1.2@sha256:ddf754342cfc8acc51a56d5d0ab6af06826461864460636d8bd5c546dab2a7b8
@@ -97,6 +124,8 @@ services:
       PACT_BROKER_BASIC_AUTH_USERNAME: ${PACT_BROKER_BASIC_AUTH_USERNAME:?set PACT_BROKER_BASIC_AUTH_USERNAME in .env}
       PACT_BROKER_BASIC_AUTH_PASSWORD: ${PACT_BROKER_BASIC_AUTH_PASSWORD:?set PACT_BROKER_BASIC_AUTH_PASSWORD in .env}
       PACT_BROKER_ALLOW_PUBLIC_READ: "false"
+      # The heartbeat (no pact data) answers without credentials, so the container healthcheck can reach it.
+      PACT_BROKER_PUBLIC_HEARTBEAT: "true"
       # Webhooks (contract_content_changed -> workflow_dispatch of the provider's pipeline, README "Pact Broker
       # webhooks") may only call the GitHub API over HTTPS.
       PACT_BROKER_WEBHOOK_SCHEME_WHITELIST: https
@@ -107,12 +136,13 @@ services:
       pact-broker-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-q", "--tries=1", "--timeout=5", "-O", "/dev/null", "http://localhost:9292/diagnostic/status/heartbeat"]
+      test: ["CMD", "wget", "-q", "--tries=1", "--timeout=5", "-O", "/dev/null", "http://127.0.0.1:9292/diagnostic/status/heartbeat"]
       interval: 10s
       timeout: 6s
       retries: 12
       start_period: 10s
 
 volumes:
+  runner-cache: {}
   registry-data: {}
   pact-broker-db-data: {}

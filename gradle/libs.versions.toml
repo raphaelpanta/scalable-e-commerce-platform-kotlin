@@ -42,6 +42,10 @@ opentelemetry-logback-appender = "2.28.1-alpha"
 # artifact moved from swagger-request-validator-core, whose 3.0.0 is only a relocation). Jackson 2 based: kept off the
 # runtime classpath, integrationTest only.
 openapi-request-validator = "3.0.0"
+# GraalVM Native Build Tools (Maven Central 2026-09-18). Not applied by any build file: only the native images of
+# platform/docker/Dockerfile.native load it, through platform/docker/native/native-image.init.gradle.kts, which reads
+# this line (the Dockerfile passes it as NATIVE_BUILD_TOOLS_VERSION).
+native-build-tools = "1.1.14"
 
 [libraries]
 # Gradle plugins consumed by build-logic

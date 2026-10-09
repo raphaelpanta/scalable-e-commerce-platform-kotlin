@@ -13,6 +13,12 @@ frontend/node_modules
 frontend/dist
 frontend/build
 frontend/src/api/generated
+# Run output of the frontend's visual suite (rewritten by every verify), and Finder metadata: in the context they would
+# change the `COPY . .` layer of the JVM and native images and force a full Gradle (and native-image) rebuild
+frontend/visual/.dist
+frontend/visual/test-results
+frontend/visual/playwright-report
+**/.DS_Store
 
 # Agent worktrees are nested checkouts, never part of the build context or the repository
 .claude/worktrees/
@@ -31,5 +37,7 @@ scripts/
 # frontend/scripts/generate-api.mjs turns into src/api/generated (a few small files; they also enter the
 # context of the JVM images, where `COPY . .` ignores nothing)
 !platform/docker/storefront
+# ...and the Gradle init script that only platform/docker/Dockerfile.native passes to the build
+!platform/docker/native
 !specs/004-ecommerce-platform-mvp/contracts/openapi
 !specs/005-storefront-dev-bootstrap/contracts/openapi

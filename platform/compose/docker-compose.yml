@@ -33,25 +33,28 @@ x-service-env: &service-env
   <<: *platform-env
   KAFKA_BOOTSTRAP_SERVERS: kafka:9092
   INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?copy .env.example to .env}
+  # R2DBC pool: Spring Boot opens all ten connections at start-up (initial-size = max-size = 10), i.e. ten idle PostgreSQL
+  # backends per replica that each hold their own memory. Start with two and grow on demand up to the same ten; idle
+  # connections above that are closed again after five minutes.
+  SPRING_R2DBC_POOL_INITIAL_SIZE: ${R2DBC_POOL_INITIAL_SIZE:-2}
+  SPRING_R2DBC_POOL_MAX_IDLE_TIME: ${R2DBC_POOL_MAX_IDLE_TIME:-5m}
 
 x-app: &app
   restart: unless-stopped
   stop_grace_period: 30s
   profiles: [core]
-  # Bound every service so the JVM (MaxRAMPercentage=40) sizes itself to the container, not to the whole engine VM;
-  # seven unbounded JVMs exhausted an 8 GiB Podman machine. 768m = a 307 MiB heap plus the JVM's off-heap memory; at
-  # 640m with a 75 % heap the kernel OOM-killed identity under the acceptance suite (platform/docker/README.md).
-  mem_limit: ${SERVICE_MEM_LIMIT:-768m}
+  # Bound every service so the JVM (MaxRAMPercentage=50) sizes itself to the container, not to the whole engine VM;
+  # seven unbounded JVMs exhausted an 8 GiB Podman machine. 512m = a 256 MiB heap plus the JVM's off-heap memory, which
+  # the image's AOT cache and native-heap trimming keep at about 130 to 180 MiB (768m before; platform/docker/README.md,
+  # "Memory measurements"). The native images of compose.native.yml need half of it.
+  mem_limit: ${SERVICE_MEM_LIMIT:-512m}
   cpus: ${SERVICE_CPUS:-1.0}
-  # Probe the readiness health group on the management port (the JRE image has no curl; bash's /dev/tcp is enough), the
-  # same check as the image HEALTHCHECK; declared here so it also applies to images built before the Dockerfile
-  # carried it. `depends_on: condition: service_healthy` therefore waits until a service accepts traffic.
+  # Probe the readiness health group on the management port with busybox wget (a static copy in the JVM and in the native
+  # image; neither has curl), which fails on the 503 the group answers until the service is ready: the same check as the
+  # image HEALTHCHECK, declared here so it also applies to images built without it (Podman without BUILDAH_FORMAT=docker).
+  # `depends_on: condition: service_healthy` therefore waits until a service accepts traffic.
   healthcheck:
-    test:
-      - CMD
-      - bash
-      - -c
-      - "exec 3<>/dev/tcp/127.0.0.1/8081 && printf 'GET /actuator/health/readiness HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '\"status\":\"UP\"' <&3"
+    test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:8081/actuator/health/readiness"]
     interval: 15s
     timeout: 5s
     retries: 8
@@ -61,7 +64,11 @@ x-db: &db
   image: postgres:18-alpine
   restart: unless-stopped
   profiles: [core]
-  mem_limit: ${DB_MEM_LIMIT:-256m}
+  mem_limit: ${DB_MEM_LIMIT:-192m}
+  # Sized for one service's small database: 32 MB of shared buffers instead of 128 MB (shared memory counts against the
+  # limit once touched), at most 50 connections (ten per replica of the pool above, scaled services included) and 16 MB
+  # for VACUUM and index builds.
+  command: ["postgres", "-c", "shared_buffers=32MB", "-c", "max_connections=50", "-c", "maintenance_work_mem=16MB"]
   networks: [internal]
   healthcheck:
     test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
@@ -120,6 +127,10 @@ services:
   identity:
     <<: *app
     image: ecommerce-platform/identity:local
+    # Argon2id hashing allocates 19 MiB per password on the heap, so under sign-in load identity's heap reaches its
+    # ceiling: at 512m it held 470 to 490 MiB of anonymous memory, too little headroom (platform/docker/README.md,
+    # "Memory measurements").
+    mem_limit: ${IDENTITY_MEM_LIMIT:-640m}
     build:
       context: ../..
       dockerfile: platform/docker/Dockerfile
@@ -151,6 +162,9 @@ services:
   catalog:
     <<: *app
     image: ecommerce-platform/catalog:local
+    # The busiest service (every browse request): at 512m one performance run took it to its limit and it stalled
+    # for about ten seconds; 640m keeps it clear of it.
+    mem_limit: ${CATALOG_MEM_LIMIT:-640m}
     build:
       context: ../..
       dockerfile: platform/docker/Dockerfile
@@ -281,13 +295,17 @@ services:
 
   # ------------------------------------------------------------------ core: broker and mail sink
   kafka:
-    image: apache/kafka:4.3.1
-    mem_limit: ${KAFKA_MEM_LIMIT:-1g}
+    # The GraalVM native build of the Apache Kafka broker (same version, KRaft, same KAFKA_* settings): about 200 MB
+    # instead of 550 MB for the JVM broker and a start in seconds. Upstream labels it for local development and testing,
+    # which is what this Compose stack is.
+    image: apache/kafka-native:4.3.1
+    mem_limit: ${KAFKA_MEM_LIMIT:-384m}
     restart: unless-stopped
     profiles: [core]
     networks: [internal]
     environment:
-      KAFKA_HEAP_OPTS: ${KAFKA_HEAP_OPTS:--Xmx512m -Xms256m}
+      # Runtime options of the native broker (KAFKA_HEAP_OPTS belongs to the JVM image and is ignored here).
+      KAFKA_OPTS: ${KAFKA_OPTS:--Xmx192m}
       KAFKA_NODE_ID: "1"
       KAFKA_PROCESS_ROLES: broker,controller
       KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
@@ -296,7 +314,9 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # The image runs as appuser (uid 1000) and has no /var/lib/kafka; its home directory is the writable mount point,
+      # so a new volume takes over its ownership.
+      KAFKA_LOG_DIRS: /home/appuser/data
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_NUM_PARTITIONS: "3"
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
@@ -304,21 +324,24 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
     volumes:
-      - kafka-data:/var/lib/kafka/data
+      - kafka-data:/home/appuser
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      # The native image ships no Kafka CLI scripts; busybox nc checks that the broker listener accepts connections.
+      test: ["CMD", "nc", "-z", "localhost", "9092"]
       interval: 10s
       timeout: 10s
       retries: 20
-      start_period: 20s
+      start_period: 10s
 
   mailpit:
     image: axllent/mailpit:v1.31.3
-    mem_limit: ${OBS_MEM_LIMIT:-512m}
+    # About 30 MB in use; messages live in its SQLite file, not in memory.
+    mem_limit: ${MAILPIT_MEM_LIMIT:-128m}
     restart: unless-stopped
     profiles: [core]
     networks: [internal]
     environment:
+      GOMEMLIMIT: ${MAILPIT_GOMEMLIMIT:-100MiB}
       MP_SMTP_AUTH_ACCEPT_ANY: "true"
       MP_SMTP_AUTH_ALLOW_INSECURE: "true"
       MP_MAX_MESSAGES: "5000"
@@ -340,6 +363,11 @@ services:
     restart: unless-stopped
     profiles: [observability]
     networks: [internal]
+    environment:
+      # Go runtime soft limit, about 80 % of the container limit: the garbage collector works harder as the heap nears it
+      # instead of letting it double before the next collection. Keep OBS_GOMEMLIMIT in step with OBS_MEM_LIMIT (the
+      # same for loki, prometheus and grafana below; TEMPO_GOMEMLIMIT with TEMPO_MEM_LIMIT, MAILPIT_* above).
+      GOMEMLIMIT: ${OBS_GOMEMLIMIT:-400MiB}
     volumes:
       - ../observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
     depends_on:
@@ -352,6 +380,8 @@ services:
     restart: unless-stopped
     profiles: [observability]
     networks: [internal]
+    environment:
+      GOMEMLIMIT: ${OBS_GOMEMLIMIT:-400MiB}
     command: ["-config.file=/etc/loki/loki.yaml"]
     volumes:
       - ../observability/loki.yaml:/etc/loki/loki.yaml:ro
@@ -365,6 +395,8 @@ services:
     restart: unless-stopped
     profiles: [observability]
     networks: [internal]
+    environment:
+      GOMEMLIMIT: ${TEMPO_GOMEMLIMIT:-1600MiB}
     command: ["-target=all", "-config.file=/etc/tempo/tempo.yaml"]
     volumes:
       - ../observability/tempo.yaml:/etc/tempo/tempo.yaml:ro
@@ -376,6 +408,8 @@ services:
     restart: unless-stopped
     profiles: [observability]
     networks: [internal]
+    environment:
+      GOMEMLIMIT: ${OBS_GOMEMLIMIT:-400MiB}
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -393,6 +427,7 @@ services:
     profiles: [observability]
     networks: [internal]
     environment:
+      GOMEMLIMIT: ${OBS_GOMEMLIMIT:-400MiB}
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?copy .env.example to .env}
       GF_AUTH_ANONYMOUS_ENABLED: "false"
@@ -434,13 +469,15 @@ services:
       PACT_BROKER_BASIC_AUTH_USERNAME: ${PACT_BROKER_BASIC_AUTH_USERNAME:?copy .env.example to .env}
       PACT_BROKER_BASIC_AUTH_PASSWORD: ${PACT_BROKER_BASIC_AUTH_PASSWORD:?copy .env.example to .env}
       PACT_BROKER_ALLOW_PUBLIC_READ: "false"
+      # The heartbeat (no pact data) answers without credentials, so the container healthcheck can reach it.
+      PACT_BROKER_PUBLIC_HEARTBEAT: "true"
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:9292:9292"
     depends_on:
       pact-broker-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-q", "--tries=1", "--timeout=5", "-O", "/dev/null", "http://localhost:9292/diagnostic/status/heartbeat"]
+      test: ["CMD", "wget", "-q", "--tries=1", "--timeout=5", "-O", "/dev/null", "http://127.0.0.1:9292/diagnostic/status/heartbeat"]
       interval: 10s
       timeout: 6s
       retries: 12

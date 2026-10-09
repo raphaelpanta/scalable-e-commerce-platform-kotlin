@@ -1,0 +1,57 @@
+# Compose override: the gateway and the six services as GraalVM native images (platform/docker/Dockerfile.native) instead
+# of JVM images, for the smallest memory footprint. Run from this directory:
+#   COMPOSE_PARALLEL_LIMIT=1 docker compose -f docker-compose.yml -f compose.native.yml --profile core up -d --build
+# (add -f ../perf/compose.perf.yml for the acceptance and performance runs, as with the JVM images).
+#
+# Each image is one native-image compilation (6 to 11 minutes and a 7.5 GB peak on the 8-CPU development machine), so
+# build them one at a time; all seven take about an hour, against about 4 minutes for the JVM images.
+# The images are tagged :native, so the JVM images (:local) stay and switching back is a plain `up -d` without this file.
+# Health checks, ports, networks and environment are those of docker-compose.yml: the native image answers the same
+# readiness probe with the same busybox wget. platform/docker/README.md, "Native images", lists the measurements and the
+# limits (no JIT: lower peak throughput on long runs; bean conditions are fixed at build time).
+x-native: &native
+  # No metaspace, code cache or JIT compiler: the heap (50 % of the limit) plus a few tens of MB of native memory.
+  mem_limit: ${NATIVE_SERVICE_MEM_LIMIT:-256m}
+
+services:
+  gateway:
+    <<: *native
+    image: ecommerce-platform/gateway:native
+    build:
+      dockerfile: platform/docker/Dockerfile.native
+
+  identity:
+    <<: *native
+    image: ecommerce-platform/identity:native
+    build:
+      dockerfile: platform/docker/Dockerfile.native
+
+  catalog:
+    <<: *native
+    image: ecommerce-platform/catalog:native
+    build:
+      dockerfile: platform/docker/Dockerfile.native
+
+  cart:
+    <<: *native
+    image: ecommerce-platform/cart:native
+    build:
+      dockerfile: platform/docker/Dockerfile.native
+
+  order:
+    <<: *native
+    image: ecommerce-platform/order:native
+    build:
+      dockerfile: platform/docker/Dockerfile.native
+
+  payment:
+    <<: *native
+    image: ecommerce-platform/payment:native
+    build:
+      dockerfile: platform/docker/Dockerfile.native
+
+  notification:
+    <<: *native
+    image: ecommerce-platform/notification:native
+    build:
+      dockerfile: platform/docker/Dockerfile.native
