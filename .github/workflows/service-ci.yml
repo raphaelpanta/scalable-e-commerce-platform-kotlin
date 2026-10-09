@@ -6,13 +6,15 @@
 # Jobs (gate bounded by timeout-minutes: 30 for cache-cold runs, the others by 15; `gate` and `jar` start together, `image` follows `jar`, `publish` joins both):
 #   gate    ./gradlew -q check of the service modules (ktlint, detekt, test layers, architecture rules, Pitest with
 #           its threshold), then the Pact flow against the broker when PACT_BROKER_URL is configured (publish pacts,
-#           provider verification with result publication, can-i-deploy), then the dependency scan (osv-scanner)
+#           provider verification with result publication, the providers' verification of this service's pacts at the
+#           same commit, can-i-deploy), then the dependency scan (osv-scanner)
 #   jar     ./gradlew bootJar of the service, handed over as the artifact jar-<svc> (no tests: the Docker build copies it
 #           instead of compiling a second time, build-arg APP_JAR of platform/docker/Dockerfile)
 #   image   docker build with that jar, Trivy image scan (fails on CRITICAL), CycloneDX SBOM (syft), start-and-health
 #           (the image boots next to a postgres sidecar and reports UP on /actuator/health/readiness within 90 s)
 #   publish on pushes to main only, after gate AND image succeeded: push of <REGISTRY_HOST>/<service>:<sha> and :<branch>
-#           to the private registry (the image travels from `image` as the artifact image-<svc>)
+#           to the private registry (the image stays in the runners' shared engine, or travels from `image` as the
+#           artifact image-<svc> when the repository variable IMAGE_HANDOVER=artifact)
 #   <svc>   aggregate named after the service; the check `service-ci / <svc>` of the caller job is this one and it
 #           fails unless gate and image succeeded and publish succeeded or was skipped (a skipped gate or image, e.g. a
 #           fork pull request, is a failure)
@@ -131,8 +133,13 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
-          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          # GRADLE_USER_HOME (dependencies, wrapper, local build cache) already lives on the runner's own disk
+          # (platform/ci-runner): restoring and saving it through the GitHub cache service would only cost time.
+          cache-disabled: true
           validate-wrappers: true
+
+      - name: Keep the Gradle configuration cache on the runner
+        run: .github/scripts/ci-cache.sh gradle
 
       # check = ktlint, detekt, unit, integration, contract (consumer + provider with @PactFolder), acceptance and
       # architecture layers, and Pitest with its 80 % threshold for domain and application. Pitest is part of check:
@@ -208,6 +215,40 @@ jobs:
           PACT_URL: ${{ inputs.pact-url }}
           PACT_CONSUMER: ${{ inputs.consumer }}
         run: ./gradlew -q "$VERIFY_TASK"
+
+      # The consumer side of the same question: can-i-deploy (next step) needs the providers of this service's pacts to
+      # have verified them. In this monorepo those providers are built from the same commit, so their broker
+      # verification runs here, restricted to this service's pacts (PACT_CONSUMER), and publishes results for provider
+      # version GITHUB_SHA. Waiting for the providers' own pipelines does not work on one Gradle runner: they queue
+      # behind this job, and can-i-deploy ran out of retries with "no such version exists". A webhook-dispatched run
+      # (PACT_URL) verifies only the pact it was dispatched for, as the provider, and skips this step.
+      - name: Verify this service's pacts at their providers
+        if: steps.pact.outputs.enabled == 'true' && inputs.pact-url == ''
+        env:
+          PACT_BROKER_URL: ${{ secrets.PACT_BROKER_URL }}
+          PACT_BROKER_USERNAME: ${{ secrets.PACT_BROKER_USERNAME }}
+          PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
+          PACT_PUBLISH_RESULTS: "true"
+          PACT_PROVIDER_BRANCH: ${{ github.head_ref || github.ref_name }}
+          PACT_CONSUMER: ${{ inputs.service }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tasks=()
+          for pact in build/pacts/"$SERVICE"-*.json; do
+            provider="$(basename "$pact" .json)"
+            provider="${provider#"$SERVICE"-}"
+            case "$provider" in
+              gateway) tasks+=(":services:gateway:contractVerify") ;;
+              identity | catalog | cart | order | payment | notification) tasks+=(":services:$provider:infrastructure:contractVerify") ;;
+              *) echo "::warning::$pact names no provider module of this repository; its provider verifies it in its own pipeline" ;;
+            esac
+          done
+          if [ "${#tasks[@]}" -eq 0 ]; then
+            echo "::notice::$SERVICE consumes no provider of this repository"
+            exit 0
+          fi
+          ./gradlew -q "${tasks[@]}"
 
       # Fails the job, naming the pact and the consumer or provider involved, when this version is not compatible with
       # the versions it integrates with. A consumer's new pact is verified by the provider pipeline the webhook
@@ -299,8 +340,13 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
-          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+          # GRADLE_USER_HOME (dependencies, wrapper, local build cache) already lives on the runner's own disk
+          # (platform/ci-runner): restoring and saving it through the GitHub cache service would only cost time.
+          cache-disabled: true
           validate-wrappers: true
+
+      - name: Keep the Gradle configuration cache on the runner
+        run: .github/scripts/ci-cache.sh gradle
 
       - name: Build the boot jar
         run: |
@@ -325,12 +371,16 @@ jobs:
           if-no-files-found: error
           path: ci-jar/app.jar
 
+  # Light runner (platform/ci-runner, `runner-light`): the job drives the engine through the socket (docker build, Trivy,
+  # syft, the health check), so it runs next to the Gradle jobs of the main runner instead of queueing behind them.
   image:
     name: image (${{ inputs.service }})
     needs: jar
-    runs-on: [self-hosted, linux, ecommerce]
+    runs-on: [self-hosted, linux, ecommerce-light]
     timeout-minutes: 15
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    outputs:
+      image-id: ${{ steps.build.outputs.image-id }}
     env:
       SERVICE: ${{ inputs.service }}
       REGISTRY_HOST: ${{ vars.REGISTRY_HOST }}
@@ -369,27 +419,34 @@ jobs:
       # APP_JAR makes the build stage copy the jar of the jar job instead of compiling again; SERVICE_MODULE is kept so
       # that the same command without APP_JAR still builds from source (docs/ci-cd.md, "Parallel jobs and the jar").
       - name: Build the image
+        id: build
         run: |
+          set -euo pipefail
           case "$SERVICE" in
             gateway) module=":services:gateway" ;;
             *) module=":services:$SERVICE:infrastructure" ;;
           esac
-          docker build -f platform/docker/Dockerfile --build-arg "SERVICE_MODULE=$module" --build-arg APP_JAR=ci-jar/app.jar \
+          # --load: with a BuildKit builder of the docker-container driver (what buildx sets up next to a Podman engine)
+          # the image would otherwise stay in the build cache, and Trivy, syft and the health check would not find it.
+          docker build --load -f platform/docker/Dockerfile --build-arg "SERVICE_MODULE=$module" --build-arg APP_JAR=ci-jar/app.jar \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             -t "$IMAGE_SHA" -t "$IMAGE_BRANCH" .
+          echo "image-id=$(docker image inspect --format '{{.Id}}' "$IMAGE_SHA")" >> "$GITHUB_OUTPUT"
 
       # Fails on CRITICAL vulnerabilities that have a fix; the image is scanned before it is pushed.
+      # label=disable: Trivy and syft read the image through the engine socket, which SELinux (Fedora CoreOS under podman
+      # machine) keeps a confined container from opening, as for the runners themselves (platform/ci-runner/README.md).
       - name: Image scan (Trivy)
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache/ \
+          docker run --rm --security-opt label=disable -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache/ \
             "$TRIVY_IMAGE" image --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1 --no-progress "$IMAGE_SHA"
 
       # The image SBOM satisfies the SBOM requirement (T116); a Gradle CycloneDX task is deferred (docs/ci-cd.md).
       - name: Generate the SBOM (syft, CycloneDX)
         run: |
           mkdir -p ci-out
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/ci-out:/out" "$SYFT_IMAGE" \
+          docker run --rm --security-opt label=disable -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/ci-out:/out" "$SYFT_IMAGE" \
             scan "docker:$IMAGE_SHA" -o "cyclonedx-json=/out/$SERVICE.cdx.json" -q
 
       - name: Upload the SBOM
@@ -410,13 +467,15 @@ jobs:
         run: .github/scripts/image-health.sh "$SERVICE" "$IMAGE_SHA"
 
       # Hand-over to the publish job, only when a push to main will publish: the image that was scanned and started is
-      # the image that is pushed, whichever runner (and engine) the publish job lands on.
+      # the image that is pushed (the publish job checks its ID). The runners of platform/ci-runner share one engine, so
+      # by default the image simply stays in it; with the repository variable IMAGE_HANDOVER=artifact (runners on
+      # several engines) it travels as the artifact image-<svc> instead (save, upload, download, load).
       - name: Save the image for the publish job
-        if: inputs.publish-image && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: inputs.publish-image && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.IMAGE_HANDOVER == 'artifact'
         run: docker save -o ci-image.tar "$IMAGE_SHA" "$IMAGE_BRANCH"
 
       - name: Upload the image for the publish job
-        if: inputs.publish-image && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: inputs.publish-image && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.IMAGE_HANDOVER == 'artifact'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: image-${{ inputs.service }}
@@ -424,12 +483,18 @@ jobs:
           if-no-files-found: error
           path: ci-image.tar
 
+      # Every pull-request run would otherwise leave an image of a few hundred MB in the engine; the image that the
+      # publish job takes from the engine is removed by the aggregate job, after the push.
+      - name: Remove the image from the engine
+        if: always() && !(inputs.publish-image && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.IMAGE_HANDOVER != 'artifact')
+        run: docker rmi "$IMAGE_SHA" "$IMAGE_BRANCH" >/dev/null 2>&1 || true
+
   # Pushes the image that `image` built, scanned and started, once `gate` AND `image` have succeeded. Runs on pushes to
   # main only (skipped otherwise, which the aggregate accepts). The registry credentials exist only in this job's step.
   publish:
     name: publish (${{ inputs.service }})
     needs: [gate, image]
-    runs-on: [self-hosted, linux, ecommerce]
+    runs-on: [self-hosted, linux, ecommerce-light]
     timeout-minutes: 15
     if: >-
       inputs.publish-image && github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -439,12 +504,26 @@ jobs:
       REGISTRY_HOST: ${{ vars.REGISTRY_HOST }}
     steps:
       - name: Download the image
+        if: vars.IMAGE_HANDOVER == 'artifact'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: image-${{ inputs.service }}
 
       - name: Load the image
+        if: vars.IMAGE_HANDOVER == 'artifact'
         run: docker load -i ci-image.tar
+
+      # The image must be the one the image job built, scanned and started (same ID), whether it stayed in the engine
+      # or came back from the artifact.
+      - name: Check the image against the image job
+        env:
+          IMAGE_ID: ${{ needs.image.outputs.image-id }}
+        run: |
+          set -euo pipefail
+          image="${REGISTRY_HOST:+$REGISTRY_HOST/}$SERVICE:$GITHUB_SHA"
+          actual="$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null)" ||
+            { echo "::error::$image is not in this runner's engine (runners on several engines: set the repository variable IMAGE_HANDOVER=artifact)"; exit 1; }
+          [ "$actual" = "$IMAGE_ID" ] || { echo "::error::$image is $actual, not the image $IMAGE_ID the image job scanned"; exit 1; }
 
       # The credentials exist only in this step and in a throw-away Docker config directory.
       - name: Push the image to the private registry
@@ -474,7 +553,7 @@ jobs:
     name: ${{ inputs.service }}
     needs: [gate, image, publish]
     if: always()
-    runs-on: [self-hosted, linux, ecommerce]
+    runs-on: [self-hosted, linux, ecommerce-light]
     timeout-minutes: 5
     steps:
       - name: Require gate and image to have succeeded (publish too when it ran)
@@ -485,3 +564,16 @@ jobs:
         run: |
           echo "gate: $GATE, image: $IMAGE, publish: $PUBLISH"
           [ "$GATE" = success ] && [ "$IMAGE" = success ] && { [ "$PUBLISH" = success ] || [ "$PUBLISH" = skipped ]; }
+
+      # The image of a push to main stays in the engine for the publish job; it is removed here once that job is over
+      # (pushed, failed or skipped).
+      - name: Remove the image from the engine
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.IMAGE_HANDOVER != 'artifact'
+        env:
+          SERVICE: ${{ inputs.service }}
+          REGISTRY_HOST: ${{ vars.REGISTRY_HOST }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          branch="$(printf '%s' "$REF_NAME" | tr -c 'A-Za-z0-9_.-' '-' | sed 's/^[.-]*//' | cut -c1-120)"
+          repo="${REGISTRY_HOST:+$REGISTRY_HOST/}$SERVICE"
+          docker rmi "$repo:$GITHUB_SHA" "$repo:${branch:-unknown}" >/dev/null 2>&1 || true

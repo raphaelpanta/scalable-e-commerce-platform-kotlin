@@ -3,6 +3,7 @@ import com.ecommerce.build.MonorepoExtension
 import com.ecommerce.build.ScaffoldServiceTask
 import com.ecommerce.build.ToolchainConsistencyTask
 import com.ecommerce.build.VersionLiterals
+import com.ecommerce.build.heavyTaskLimit
 import com.ecommerce.build.verifyConventions
 import org.gradle.util.GradleVersion
 
@@ -76,6 +77,7 @@ if (file("frontend/package.json").exists()) {
             description = "Runs the frontend lint script"
             executable = npm.get()
             args("--silent", "--prefix", "frontend", "run", "lint")
+            usesService(heavyTaskLimit())
         }
     val frontendTest =
         tasks.register<Exec>("frontendTest") {
@@ -83,6 +85,7 @@ if (file("frontend/package.json").exists()) {
             description = "Runs the frontend test script"
             executable = npm.get()
             args("--silent", "--prefix", "frontend", "run", "test")
+            usesService(heavyTaskLimit())
             mustRunAfter(frontendLint)
         }
     val frontendCheck =

@@ -1,5 +1,6 @@
 import com.ecommerce.build.MutationExtension
 import com.ecommerce.build.QualityThresholds
+import com.ecommerce.build.heavyTaskLimit
 import com.ecommerce.build.servicePackage
 import info.solidsoft.gradle.pitest.PitestPluginExtension
 
@@ -38,7 +39,18 @@ pitest.apply {
     junit5PluginVersion.set(catalog.findVersion("pitest-junit5-plugin").get().requiredVersion)
     targetClasses.set(harnessClasses.orElse(mutation.targetPackage.map { setOf("$it.*") }))
     mutationThreshold.convention(QualityThresholds.MINIMUM_MUTATION_THRESHOLD)
-    threads.set(Runtime.getRuntime().availableProcessors())
+    // Pitest forks one minion JVM per thread (about 300 MB each), outside Gradle's worker limit, and up to
+    // org.gradle.workers.max modules run it at once. All CPUs per task oversubscribed the machine several times over
+    // (load average 37 on 10 CPUs on the CI runner, with Testcontainers timing out next to it); each task now gets
+    // twice its share of the CPUs, which still keeps a lone Pitest run busy.
+    val cpus = Runtime.getRuntime().availableProcessors()
+    val workers = gradle.startParameter.maxWorkerCount.coerceAtLeast(1)
+    threads.set(((2 * cpus + workers - 1) / workers).coerceIn(1, cpus))
+    // Explicit heaps: a JVM without -Xmx takes a quarter of the container's memory as its ceiling, and the
+    // Pitest JVMs of several modules next to the test JVMs and the Gradle and Kotlin daemons then outgrew the
+    // CI runner's cap (the kernel killed the Gradle daemon). Unit tests of one module need far less.
+    jvmArgs.set(listOf("-Xmx512m"))
+    mainProcessJvmArgs.set(listOf("-Xmx768m"))
     outputFormats.set(setOf("XML", "HTML"))
     timestampedReports.set(false)
     verbose.set(false)
@@ -76,6 +88,7 @@ afterEvaluate {
 }
 
 tasks.named<JavaExec>("pitest") {
+    usesService(heavyTaskLimit())
     // Pitest always prints its mutator table, statistics and an INFO banner. A passing run must be silent
     // (Principle VIII), so stdout is dropped and stderr is kept in build/pitest/stderr.log; on failure the
     // stderr text (for example "Mutation score of 50 is below threshold of 80") becomes the build failure.

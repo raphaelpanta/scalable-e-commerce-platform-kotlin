@@ -39,5 +39,9 @@ dependencies {
 }
 
 springBoot {
-    buildInfo()
+    // Without the build time: a timestamp in META-INF/build-info.properties changed the main resources on every build,
+    // so every test layer, Pitest and the boot jar of each application missed the build cache and ran again.
+    buildInfo {
+        excludes.set(setOf("time"))
+    }
 }

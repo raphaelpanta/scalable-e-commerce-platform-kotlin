@@ -7,14 +7,13 @@ import com.ecommerce.notification.domain.RetryPolicy
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.property.Arb
-import io.kotest.property.arbitrary.enum
 import io.kotest.property.arbitrary.map
-import io.kotest.property.arbitrary.set
+import io.kotest.property.arbitrary.subsequence
 import io.kotest.property.arbitrary.uuid
 import io.kotest.property.checkAll
 import java.util.UUID
 
-private val roles = Arb.set(Arb.enum<CallerRole>(), 0..CallerRole.entries.size)
+private val roles = Arb.subsequence(CallerRole.entries).map { it.toSet() }
 private val accounts = Arb.uuid().map(::AccountId)
 
 /** A world holding one failed notification (one attempt, the email channel refusing). */

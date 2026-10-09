@@ -60,15 +60,25 @@ jobs:
         if: hashFiles('frontend/stryker.config.*', 'frontend/*/stryker.config.*') != ''
         run: for p in frontend frontend/*/; do [ -f "$p/package-lock.json" ] && npm ci --prefix "$p"; done; true
 
+      # The storefront gate runs Stryker on the same merge commit; its result (kept on the runner, keyed by the commit)
+      # spares this job a second full run (.github/scripts/ci-cache.sh). Another commit's result is never used.
+      - name: Reuse an earlier Stryker run of this commit
+        run: .github/scripts/ci-cache.sh stryker restore
+
       - name: Mutation threshold, baseline ratchet, surviving mutants
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: .github/scripts/pr-gate.sh --skip-verify
 
+      - name: Keep the Stryker results of this commit
+        if: always()
+        run: .github/scripts/ci-cache.sh stryker save
+
+  # Shell tests only: the light runner (platform/ci-runner, `runner-light`) runs them next to verify.
   hook-tests:
     name: hook-tests
-    runs-on: [self-hosted, linux, ecommerce]
+    runs-on: [self-hosted, linux, ecommerce-light]
     timeout-minutes: 10
     if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
@@ -87,7 +97,7 @@ jobs:
     name: pr-gate
     needs: [verify, mutation, hook-tests]
     if: always()
-    runs-on: [self-hosted, linux, ecommerce]
+    runs-on: [self-hosted, linux, ecommerce-light]
     timeout-minutes: 5
     steps:
       # No checkout: this job runs for every pull request, forks included, and executes no pull request code.
