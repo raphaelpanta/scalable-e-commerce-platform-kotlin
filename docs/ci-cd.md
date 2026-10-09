@@ -24,7 +24,7 @@ path-filtered service and platform checks of the pull request (see "Required sta
 | Least privilege | workflow `permissions: contents: read`, checkout with `persist-credentials: false`, no secrets used |
 | Supply chain | every `uses:` is pinned to a full commit SHA with the release in a trailing comment; the Gradle wrapper jar is validated by `gradle/actions/setup-gradle` |
 | One run per ref | `concurrency` group `verify-${{ github.event_name }}-${{ github.ref }}` with `cancel-in-progress: true` (distinct from the caller's `pr-gate-<ref>` group) |
-| Bounded run | `timeout-minutes: 15` |
+| Bounded run | `timeout-minutes: 40` (a cache-cold run builds and tests every module; warm runs take the build cache) |
 | Diagnosis | on failure the `verify-reports` artifact holds `**/build/reports/**`, `**/build/test-results/**` and the Pitest log for 7 days |
 | Mutation hand-over | called with `mutation-reports: true` (pr-gate), a green run uploads `pitest-reports` (a tar of every `mutations.xml`, kept 1 day) for the pr-gate `mutation` job |
 
