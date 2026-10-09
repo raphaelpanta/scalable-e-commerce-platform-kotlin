@@ -268,9 +268,20 @@ names=()
 last_active=()
 for i in "${!services[@]}"; do
   names[i]=""
-  last_active[i]=0
-  # A previous run of the script may have been killed with its containers still up.
-  teardown "${services[i]}" ""
+  last_active[i]=$SECONDS
+  # A previous run of the script may have been stopped with its containers still up: a running runner is adopted (its
+  # job goes on, so the script can be restarted or updated at any time), anything else is removed.
+  id="$("${compose[@]}" ps -q --status running "${services[i]}" 2>/dev/null | head -n 1)"
+  adopted=""
+  if [[ -n "$id" ]]; then
+    adopted="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$id" 2>/dev/null | sed -n 's/^RUNNER_NAME=//p' | head -n 1)"
+  fi
+  if [[ -n "$adopted" ]]; then
+    names[i]="$adopted"
+    log "adopted the running ${services[i]} $adopted"
+  else
+    teardown "${services[i]}" ""
+  fi
 done
 delete_offline_runners
 keep_disk_free

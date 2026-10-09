@@ -108,7 +108,8 @@ Gradle job. Scope: `RUNNER_SCOPE=repo`, `REPO_URL` from `.env`. Pick one registr
   24 hours when a session ends, and those older than an hour as soon as the engine disk has less than
   `RUNNER_MIN_FREE_GIB` (default 8) free, checked every ten polls: a day of image builds left 90 dangling images (18 GB)
   on the development Mac's VM and filled its disk (`RUNNER_PRUNE=false` keeps them). Ctrl-C or SIGTERM stops the script once the
-  runners are idle; a running job is not cut off. No long-lived token is ever in a container's environment. Jobs of one
+  runners are idle; a running job is not cut off. A restarted script adopts runner containers that are still running
+  (their jobs go on), so the script can be updated at any time. No long-lived token is ever in a container's environment. Jobs of one
   session share the container and the caches (the checkout is cleaned by `actions/checkout`); a new session always
   starts from a new container. `scripts/run-ephemeral.sh --print-config` prints the sizing and the work directories it
   would use, without starting anything.
