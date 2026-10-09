@@ -320,15 +320,17 @@ jobs:
           echo "image-id=$(docker image inspect --format '{{.Id}}' "$IMAGE_SHA")" >> "$GITHUB_OUTPUT"
 
       # Fails on CRITICAL vulnerabilities that have a fix; the image is scanned before it is pushed.
+      # label=disable: Trivy and syft read the image through the engine socket, which SELinux (Fedora CoreOS under podman
+      # machine) keeps a confined container from opening, as for the runners themselves (platform/ci-runner/README.md).
       - name: Image scan (Trivy)
         run: |
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache/ \
+          docker run --rm --security-opt label=disable -v /var/run/docker.sock:/var/run/docker.sock -v trivy-cache:/root/.cache/ \
             "$TRIVY_IMAGE" image --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1 --no-progress "$IMAGE_SHA"
 
       - name: Generate the SBOM (syft, CycloneDX)
         run: |
           mkdir -p ci-out
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/ci-out:/out" "$SYFT_IMAGE" \
+          docker run --rm --security-opt label=disable -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/ci-out:/out" "$SYFT_IMAGE" \
             scan "docker:$IMAGE_SHA" -o "cyclonedx-json=/out/storefront.cdx.json" -q
 
       - name: Upload the SBOM
