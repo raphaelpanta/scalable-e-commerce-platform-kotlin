@@ -120,10 +120,19 @@ jobs:
         run: npm run build && npm run budget
 
       # Stryker over src/domain, src/app and src/telemetry; thresholds.break is 80 (frontend/stryker.config.json). CI runs it
-      # in full: the incremental file under build/ is not restored, so a surviving mutant cannot hide behind an old result.
+      # in full for every commit: no incremental file of another commit is ever restored, so a surviving mutant cannot hide
+      # behind an old result. The result of THIS commit is kept for the pr-gate mutation job, which runs Stryker on the
+      # same merge commit and so reuses it instead of mutating everything a second time (.github/scripts/ci-cache.sh).
+      - name: Reuse an earlier Stryker run of this commit
+        run: .github/scripts/ci-cache.sh stryker restore
+
       - name: Mutation tests (Stryker, break at 80 %)
         working-directory: frontend
         run: npm run mutate
+
+      - name: Keep the Stryker results of this commit
+        if: always()
+        run: .github/scripts/ci-cache.sh stryker save
 
       # One pact per provider (identity, catalog, cart, order, payment, gateway), written to the repository root
       # build/pacts/storefront-<provider>.json (docs/service-conventions.md section 6).

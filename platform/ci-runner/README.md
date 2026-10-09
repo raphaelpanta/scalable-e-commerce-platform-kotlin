@@ -221,6 +221,7 @@ same disk):
 | JDK and Node of `setup-java` / `setup-node` | volume `runner-toolcache`, `/opt/hostedtoolcache` | every job that sets them up |
 | Image layers, tool images (Pact CLI, osv-scanner, Trivy, syft, shellcheck), the visual suite's `node_modules` | the engine | image, scan and platform jobs |
 | Trivy vulnerability database | engine volume `trivy-cache` | image jobs |
+| Stryker results of a commit (the storefront gate's run, reused by the pr-gate mutation job on the same merge commit; never another commit's) | `/opt/ci-cache/stryker/<sha>.json`, by `.github/scripts/ci-cache.sh stryker restore|save` | storefront gate, pr-gate mutation |
 | gitleaks (pinned, SHA-256 checked) | `/opt/ci-cache/tools`, put on the PATH by `.github/scripts/ci-cache.sh gitleaks` | verify (the script tests of the pre-push hook) |
 
 The build cache only pays off when task outputs do not change from one build to the next: the boot applications' build
