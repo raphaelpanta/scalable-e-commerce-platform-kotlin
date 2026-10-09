@@ -300,15 +300,17 @@ problem: it exists on every pull request and requires exactly the checks the cha
 `.github/scripts/tests/test-services-aggregate.sh`):
 
 1. It triggers on every pull request (`opened`, `synchronize`, `reopened`), with no `paths:` filter, and runs on a
-   GitHub-hosted runner: it only reads the API, builds nothing, and it may wait up to 40 minutes, which on the single
-   self-hosted runner would occupy the runner the service jobs wait for. Token: `contents`, `checks` and `pull-requests`
-   read; no secrets.
+   GitHub-hosted runner: it only reads the API, builds nothing, and it may wait up to 3 hours (job bound 190 minutes),
+   which on the self-hosted runners would occupy a runner the service jobs wait for. Token: `contents`, `checks`,
+   `pull-requests` and `actions` read; no secrets.
 2. It lists the files of the pull request (`gh api repos/<repo>/pulls/<n>/files`, renames count with both names) and feeds
    them to `.github/scripts/path-filter-check.sh`, the offline simulation of the `paths:` filters. A listed `<ctx>.yml`
    (`storefront.yml` included) expects the check `service-ci / <ctx>`, `platform.yml` expects `platform`. A workflow that is not listed was not
    triggered, which counts as success.
 3. It polls `gh api repos/<repo>/commits/<head sha>/check-runs?filter=latest` every 20 seconds until each expected check
-   has been reported (10 minutes at most) and has completed (40 minutes at most). `success`, `neutral` and `skipped`
+   has been reported (10 minutes at most, unless its workflow run of the head commit is queued or in progress: then it
+   is pending, because `service-ci / <ctx>` is the last job of its run and the Gradle jobs of every pipeline share one
+   runner) and has completed (3 hours at most, `AGG_COMPLETE_TIMEOUT` in `required-checks.yml`). `success`, `neutral` and `skipped`
    pass; `failure`, `cancelled`, `timed_out`, `action_required`, `stale` and `startup_failure` fail at once, as does an
    expected check that never appears (re-run its workflow) or is still running at the deadline. A service or platform check
    that exists although its filter was not predicted is watched too. The step summary lists every watched check.

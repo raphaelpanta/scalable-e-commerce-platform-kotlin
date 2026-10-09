@@ -13,6 +13,7 @@ STUB="$T_OUT/gh"
   echo 'case "$*" in'
   echo '  *"/pulls/"*"/files"*) cat "$STUB_DIR/files.txt" ;;'
   echo '  *"/check-runs"*) cat "$STUB_DIR/runs.tsv" ;;'
+  echo '  *"/actions/runs"*) cat "$STUB_DIR/open.txt" 2>/dev/null ;;'
   echo '  *) echo "unexpected gh call: $*" >&2; exit 2 ;;'
   echo 'esac'
 } >"$STUB"
@@ -21,10 +22,12 @@ export STUB_DIR="$T_OUT" GH_BIN="$STUB" GITHUB_REPOSITORY=acme/shop PR_NUMBER=7 
 export AGG_INTERVAL=0 AGG_APPEAR_TIMEOUT=0 AGG_COMPLETE_TIMEOUT=0
 unset FORK GITHUB_STEP_SUMMARY
 
-# run_agg FILES RUNS: FILES one per line, RUNS tab separated lines (printf %b escapes)
+# run_agg FILES RUNS [OPEN]: FILES one per line, RUNS tab separated lines (printf %b escapes), OPEN the workflow files
+# whose run of the head commit has not finished (the stub prints them as the API's filtered .path values)
 run_agg() {
   printf '%b' "$1" >"$T_OUT/files.txt"
   printf '%b' "$2" >"$T_OUT/runs.tsv"
+  printf '%b' "${3:-}" | sed 's#^#.github/workflows/#' >"$T_OUT/open.txt"
   run_script services-aggregate.sh
 }
 tab='\t'
@@ -61,6 +64,13 @@ assert_contains stdout '`service-ci / cart` | failure'
 run_agg 'services/payment/domain/Foo.kt\n' 'pr-gate'"$tab"'completed'"$tab"'success\n'
 assert_fails "never reported"
 assert_contains stdout 'missing'
+
+# not reported yet, but its workflow run is queued (one busy self-hosted runner): no "missing" before the complete
+# timeout; at that timeout it fails as still running
+run_agg 'services/payment/domain/Foo.kt\n' 'pr-gate'"$tab"'completed'"$tab"'success\n' 'payment.yml\n'
+assert_fails "queued workflow at the complete timeout"
+assert_contains stdout 'workflow run queued or running'
+assert_contains stdout 'still running'
 
 # a check that exists although its workflow was not predicted is watched too
 run_agg 'docs/x.md\n' 'platform'"$tab"'completed'"$tab"'failure\n'
