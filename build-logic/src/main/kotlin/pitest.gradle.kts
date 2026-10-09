@@ -38,7 +38,13 @@ pitest.apply {
     junit5PluginVersion.set(catalog.findVersion("pitest-junit5-plugin").get().requiredVersion)
     targetClasses.set(harnessClasses.orElse(mutation.targetPackage.map { setOf("$it.*") }))
     mutationThreshold.convention(QualityThresholds.MINIMUM_MUTATION_THRESHOLD)
-    threads.set(Runtime.getRuntime().availableProcessors())
+    // Pitest forks one minion JVM per thread (about 300 MB each), outside Gradle's worker limit, and up to
+    // org.gradle.workers.max modules run it at once. All CPUs per task oversubscribed the machine several times over
+    // (load average 37 on 10 CPUs on the CI runner, with Testcontainers timing out next to it); each task now gets
+    // twice its share of the CPUs, which still keeps a lone Pitest run busy.
+    val cpus = Runtime.getRuntime().availableProcessors()
+    val workers = gradle.startParameter.maxWorkerCount.coerceAtLeast(1)
+    threads.set(((2 * cpus + workers - 1) / workers).coerceIn(1, cpus))
     outputFormats.set(setOf("XML", "HTML"))
     timestampedReports.set(false)
     verbose.set(false)
