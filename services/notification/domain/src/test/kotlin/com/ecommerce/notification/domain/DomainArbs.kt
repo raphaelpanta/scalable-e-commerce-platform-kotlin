@@ -12,7 +12,7 @@ import io.kotest.property.arbitrary.list
 import io.kotest.property.arbitrary.long
 import io.kotest.property.arbitrary.map
 import io.kotest.property.arbitrary.orNull
-import io.kotest.property.arbitrary.set
+import io.kotest.property.arbitrary.subsequence
 import io.kotest.property.arbitrary.uuid
 import java.time.Instant
 
@@ -51,7 +51,10 @@ object DomainArbs {
 
     val phone: Arb<PhoneNumber> = phoneText.map { raw -> PhoneNumber.of(raw).getOrElse { error(it) } }
 
-    val channels: Arb<Set<NotificationChannel>> = Arb.set(Arb.enum<NotificationChannel>(), 0..2)
+    // Every subset of the two channels, empty to both. Arb.set(Arb.enum(), 0..2) had to draw both values
+    // within a bounded number of tries and failed now and then ("the target size requirement of 2 could not
+    // be satisfied").
+    val channels: Arb<Set<NotificationChannel>> = Arb.subsequence(NotificationChannel.entries).map { it.toSet() }
 
     val contact: Arb<RecipientContact> =
         arbitrary {

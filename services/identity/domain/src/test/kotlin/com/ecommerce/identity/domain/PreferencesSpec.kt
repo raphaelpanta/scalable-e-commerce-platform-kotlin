@@ -9,9 +9,9 @@ import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.property.Arb
 import io.kotest.property.arbitrary.boolean
-import io.kotest.property.arbitrary.enum
 import io.kotest.property.arbitrary.int
-import io.kotest.property.arbitrary.set
+import io.kotest.property.arbitrary.map
+import io.kotest.property.arbitrary.subsequence
 import io.kotest.property.checkAll
 import java.time.Duration
 
@@ -34,7 +34,7 @@ class PreferencesSpec :
 
         test("sms is permitted only with a verified phone, and only when chosen") {
             checkAll(
-                Arb.set(Arb.enum<NotificationChannel>(), 0..2),
+                Arb.subsequence(NotificationChannel.entries).map { it.toSet() },
                 Arb.boolean(),
                 Arb.boolean(),
             ) { chosen, hasPhone, verified ->

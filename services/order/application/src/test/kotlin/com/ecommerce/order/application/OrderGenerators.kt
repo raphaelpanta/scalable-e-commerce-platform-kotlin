@@ -28,8 +28,9 @@ import io.kotest.property.arbitrary.enum
 import io.kotest.property.arbitrary.int
 import io.kotest.property.arbitrary.list
 import io.kotest.property.arbitrary.long
+import io.kotest.property.arbitrary.map
 import io.kotest.property.arbitrary.of
-import io.kotest.property.arbitrary.set
+import io.kotest.property.arbitrary.subsequence
 import io.kotest.property.arbitrary.uuid
 import java.time.Duration
 import java.time.LocalDate
@@ -106,7 +107,7 @@ fun arbOrder(
 val arbCaller: Arb<Caller> =
     arbitrary {
         val account = Arb.of(SHOPPER, OTHER_SHOPPER, OPERATOR).bind()
-        Caller(account, Arb.set(Arb.enum<Role>(), 0..2).bind())
+        Caller(account, Arb.subsequence(Role.entries).map { it.toSet() }.bind())
     }
 
 /** Generated orders behind the order store, with fakes recording what a use case did to them. */
