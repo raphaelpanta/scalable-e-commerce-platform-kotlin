@@ -426,7 +426,9 @@ jobs:
             gateway) module=":services:gateway" ;;
             *) module=":services:$SERVICE:infrastructure" ;;
           esac
-          docker build -f platform/docker/Dockerfile --build-arg "SERVICE_MODULE=$module" --build-arg APP_JAR=ci-jar/app.jar \
+          # --load: with a BuildKit builder of the docker-container driver (what buildx sets up next to a Podman engine)
+          # the image would otherwise stay in the build cache, and Trivy, syft and the health check would not find it.
+          docker build --load -f platform/docker/Dockerfile --build-arg "SERVICE_MODULE=$module" --build-arg APP_JAR=ci-jar/app.jar \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             -t "$IMAGE_SHA" -t "$IMAGE_BRANCH" .

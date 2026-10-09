@@ -303,7 +303,8 @@ jobs:
         id: build
         run: |
           set -euo pipefail
-          docker build -f platform/docker/Dockerfile.storefront \
+          # --load: a BuildKit builder of the docker-container driver keeps the image in its cache otherwise.
+          docker build --load -f platform/docker/Dockerfile.storefront \
             --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
             -t "$IMAGE_SHA" -t "$IMAGE_BRANCH" .
