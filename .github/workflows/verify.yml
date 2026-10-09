@@ -71,6 +71,10 @@ jobs:
       - name: Install the frontend dependencies
         run: npm ci --prefix frontend --silent --no-audit --no-fund --prefer-offline
 
+      # The repository script tests (scriptsTest) exercise the gitleaks pre-push hook.
+      - name: Put gitleaks on the PATH
+        run: .github/scripts/ci-cache.sh gitleaks
+
       - name: Verify
         run: ./gradlew -q verify
 

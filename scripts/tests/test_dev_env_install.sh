@@ -83,7 +83,13 @@ dev_env_fixture
 bin="$(mk_tmp)"
 cp "$STUBS_DIR"/* "$bin/"
 rm -f "$bin/apt-get"
-PATH="$bin:/usr/bin:/bin" STUB_OS=Linux STUB_ABSENT="jq gitleaks" assert_exit_code 0 dev_env_in "y
+# The host's own tools without its apt-get: an Ubuntu host (the CI runner) has a real one in /usr/bin.
+sys="$(mk_tmp)"
+for f in /usr/bin/* /bin/*; do
+  n="${f##*/}"
+  [ "$n" = apt-get ] || [ -e "$sys/$n" ] || ln -s "$f" "$sys/$n"
+done
+PATH="$bin:$sys" STUB_OS=Linux STUB_ABSENT="jq gitleaks" assert_exit_code 0 dev_env_in "y
 y" init --install
 assert_contains "$LAST_OUT" "INSTALL jq: sudo dnf install -y jq" "dnf jq"
 assert_contains "$LAST_OUT" "INSTALL gitleaks: sudo dnf install -y gitleaks" "dnf gitleaks"

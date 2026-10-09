@@ -104,8 +104,10 @@ Gradle job. Scope: `RUNNER_SCOPE=repo`, `REPO_URL` from `.env`. Pick one registr
   `RUNNER_IDLE_TIMEOUT` seconds (default 900; poll interval `RUNNER_POLL_INTERVAL`, default 30, both in `.env` or the
   environment), it stops and removes its container, deletes the registration through the API and empties the work
   directory; the next queued run starts it again. At startup and before each start it also deletes offline
-  registrations with its name prefix that a crash left behind, and when a session ends it prunes dangling images and
-  build cache older than 72 hours (`RUNNER_PRUNE=false` keeps them). Ctrl-C or SIGTERM stops the script once the
+  registrations with its name prefix that a crash left behind. It prunes dangling images and build cache older than
+  24 hours when a session ends, and those older than an hour as soon as the engine disk has less than
+  `RUNNER_MIN_FREE_GIB` (default 8) free, checked every ten polls: a day of image builds left 90 dangling images (18 GB)
+  on the development Mac's VM and filled its disk (`RUNNER_PRUNE=false` keeps them). Ctrl-C or SIGTERM stops the script once the
   runners are idle; a running job is not cut off. No long-lived token is ever in a container's environment. Jobs of one
   session share the container and the caches (the checkout is cleaned by `actions/checkout`); a new session always
   starts from a new container. `scripts/run-ephemeral.sh --print-config` prints the sizing and the work directories it
@@ -219,6 +221,7 @@ same disk):
 | JDK and Node of `setup-java` / `setup-node` | volume `runner-toolcache`, `/opt/hostedtoolcache` | every job that sets them up |
 | Image layers, tool images (Pact CLI, osv-scanner, Trivy, syft, shellcheck), the visual suite's `node_modules` | the engine | image, scan and platform jobs |
 | Trivy vulnerability database | engine volume `trivy-cache` | image jobs |
+| gitleaks (pinned, SHA-256 checked) | `/opt/ci-cache/tools`, put on the PATH by `.github/scripts/ci-cache.sh gitleaks` | verify (the script tests of the pre-push hook) |
 
 The build cache only pays off when task outputs do not change from one build to the next: the boot applications' build
 information therefore carries no build time (`kotlin-boot-app` convention), otherwise every test layer, Pitest and the
@@ -312,8 +315,8 @@ docker system prune -f --volumes=false          # reclaim build cache and stoppe
   daemon heap (`RUNNER_GRADLE_OPTS`, passed to the jobs as `GRADLE_OPTS`) instead of the 4 workers and 3 GB of
   `gradle.properties`. The engine VM itself is sized with `podman machine set --cpus --memory` while stopped; its disk
   only grows (`podman machine set --disk-size`). `scripts/run-ephemeral.sh --print-config` shows the values in effect.
-- Disk: the script warns in its log when the engine disk has less than 8 GiB free; `docker system df` shows what the
-  images use.
+- Disk: the script prunes when the engine disk has less than `RUNNER_MIN_FREE_GIB` free and warns in its log when that
+  was not enough; `docker system df` shows what the images use.
 - On-demand behaviour: `scripts/run-ephemeral.sh` sets `RUNNER_RESTART=no`, keeps one container per runner and session
   of jobs and removes it after `RUNNER_IDLE_TIMEOUT`; its log (for example `~/ci-runner/run-ephemeral.log` under nohup)
   has one line per start and stop. With plain `docker compose up -d runner` the container restarts after every job instead

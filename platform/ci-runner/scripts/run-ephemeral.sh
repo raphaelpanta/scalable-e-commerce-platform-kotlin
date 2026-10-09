@@ -27,7 +27,10 @@
 #   RUNNER_CPUS, RUNNER_MEM_LIMIT, RUNNER_GRADLE_OPTS   caps of `runner` and the Gradle settings of its jobs (default:
 #                          all engine CPUs but one, the engine memory less 4 GiB, workers and heap sized to them)
 #   RUNNER_LIGHT_CPUS, RUNNER_LIGHT_MEM_LIMIT           caps of `runner-light` (default 2 CPUs, 1536m)
-#   RUNNER_PRUNE           false: keep dangling images and build cache older than 72 h (default: pruned between sessions)
+#   RUNNER_PRUNE           false: never prune (default: dangling images and build cache older than 24 h are pruned when a
+#                          session ends, and those older than 1 h as soon as the engine disk has less than
+#                          RUNNER_MIN_FREE_GIB free, checked every ten polls)
+#   RUNNER_MIN_FREE_GIB    free space the engine disk should keep (default 8; a cache-cold verify needs about that)
 # Needs: gh (logged in with a token that may create registration tokens and manage runners of the repository),
 #   docker (or podman's docker CLI) with compose.
 set -euo pipefail
@@ -65,6 +68,8 @@ poll="$(setting RUNNER_POLL_INTERVAL 30)"
 prefix="$(setting RUNNER_NAME_PREFIX ecommerce)"
 light="$(setting RUNNER_LIGHT true)"
 prune="$(setting RUNNER_PRUNE true)"
+min_free_gib="$(setting RUNNER_MIN_FREE_GIB 8)"
+[[ "$min_free_gib" =~ ^[0-9]+$ ]] || { echo "RUNNER_MIN_FREE_GIB must be whole GiB" >&2; exit 1; }
 
 if docker compose version >/dev/null 2>&1; then compose=(docker compose); else compose=(docker-compose); fi
 compose+=(--profile light)
@@ -227,20 +232,33 @@ teardown() {
   empty_workdir "$service"
 }
 
-# prune_engine: between sessions, dangling images (every CI image build leaves the previous one untagged) and build
-# cache older than 72 h; tagged images, volumes and running containers are never touched.
+# prune_engine <age>: dangling images (every image build leaves the previous one untagged; a day of CI and local
+# builds left 90 of them, 18 GB, on the development Mac's VM and filled its disk) and build cache older than <age>;
+# tagged images, volumes and running containers are never touched.
 prune_engine() {
   [[ "$prune" != "false" ]] || return 0
-  docker image prune -f --filter until=72h >/dev/null 2>&1 || true
-  docker builder prune -f --filter until=72h >/dev/null 2>&1 || true
+  docker image prune -f --filter "until=$1" >/dev/null 2>&1 || true
+  docker builder prune -f --filter "until=$1" >/dev/null 2>&1 || true
 }
 
+# free_gib: free space of the engine disk that holds the work directory (empty when it cannot be read).
 # shellcheck disable=SC2016  # $4 is expanded by awk inside the container
-low_disk_warning() {
+free_gib() {
   local free
   free="$(docker run --rm --entrypoint sh -v "$RUNNER_WORKDIR:/w" "${compose_image}" -c 'df -Pk /w | awk "NR==2 { print \$4 }"' 2>/dev/null || true)"
-  [[ "$free" =~ ^[0-9]+$ ]] || return 0
-  ((free >= 8 * 1024 * 1024)) || log "warning: only $((free / 1024 / 1024)) GiB free on the engine disk; a cache-cold verify needs about 8 GiB" >&2
+  [[ "$free" =~ ^[0-9]+$ ]] && echo $((free / 1024 / 1024))
+}
+
+# keep_disk_free: prunes what is older than an hour when the engine disk is below RUNNER_MIN_FREE_GIB, and warns when
+# that was not enough. A full disk fails every job at once (image builds, Testcontainers, npm, Gradle).
+keep_disk_free() {
+  local free
+  free="$(free_gib)"
+  [[ -n "$free" && "$free" -lt "$min_free_gib" ]] || return 0
+  prune_engine 1h
+  free="$(free_gib)"
+  [[ -z "$free" || "$free" -ge "$min_free_gib" ]] ||
+    log "warning: only ${free} GiB free on the engine disk after pruning (RUNNER_MIN_FREE_GIB=$min_free_gib); free space or grow the disk" >&2
 }
 
 # --- Main loop --------------------------------------------------------------------------------------------------------
@@ -255,11 +273,14 @@ for i in "${!services[@]}"; do
   teardown "${services[i]}" ""
 done
 delete_offline_runners
-low_disk_warning
+keep_disk_free
 log "waiting for queued runs (runners: ${services[*]}; idle timeout ${idle_timeout}s, poll ${poll}s)"
 sessions=0    # runner containers removed so far (--once ends after the first session)
 dirty=false   # a session ended since the last prune
+polls=0
 while true; do
+  polls=$((polls + 1))
+  ((polls % 10 != 0)) || keep_disk_free
   pending="$(pending_runs)"
   want=false
   [[ "$stop" == "true" || -z "$pending" || "$pending" -eq 0 ]] || want=true
@@ -323,8 +344,8 @@ while true; do
 
   if ((active == 0)); then
     if [[ "$dirty" == "true" ]]; then
-      prune_engine
-      low_disk_warning
+      prune_engine 24h
+      keep_disk_free
       dirty=false
     fi
     [[ "$stop" == "false" ]] || break

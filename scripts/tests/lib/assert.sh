@@ -15,6 +15,16 @@ PROJECT_ROOT="$(cd "$TESTS_DIR/../.." && pwd)"
 # shellcheck disable=SC2034  # read by the tests that source this file
 STUB_GH="$TESTS_DIR/stubs/gh"
 
+# A CI checkout has no git identity, and bootstrap-repo.sh (like `git commit`) refuses to run without one. Only then do
+# the tests get one, the author of the checked-out commit, through git's environment configuration (git 2.31+), which
+# every git call of the tests and of the scripts under test sees; a developer's own identity is left alone.
+if [ -z "$(git config user.name 2>/dev/null)" ] || [ -z "$(git config user.email 2>/dev/null)" ]; then
+  _t_name="$(git -C "$PROJECT_ROOT" log -1 --format=%an 2>/dev/null || true)"
+  _t_email="$(git -C "$PROJECT_ROOT" log -1 --format=%ae 2>/dev/null || true)"
+  export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=user.name GIT_CONFIG_KEY_1=user.email \
+    GIT_CONFIG_VALUE_0="${_t_name:-CI}" GIT_CONFIG_VALUE_1="${_t_email:-ci@example.invalid}"
+fi
+
 _TMP_DIRS=()
 _cleanup_tmp() {
   local d
