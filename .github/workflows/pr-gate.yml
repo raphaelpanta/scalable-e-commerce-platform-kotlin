@@ -61,8 +61,9 @@ jobs:
         run: for p in frontend frontend/*/; do [ -f "$p/package-lock.json" ] && npm ci --prefix "$p"; done; true
 
       # The storefront gate runs Stryker on the same merge commit; its result (kept on the runner, keyed by the commit)
-      # spares this job a second full run (.github/scripts/ci-cache.sh). Another commit's result is never used.
-      - name: Reuse an earlier Stryker run of this commit
+      # spares this job a second full run; without it, a pull request starts incrementally from the newest earlier
+      # result (.github/scripts/ci-cache.sh).
+      - name: Reuse an earlier Stryker run
         run: .github/scripts/ci-cache.sh stryker restore
 
       - name: Mutation threshold, baseline ratchet, surviving mutants

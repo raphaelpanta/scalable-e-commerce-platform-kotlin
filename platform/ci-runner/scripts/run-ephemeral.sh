@@ -99,6 +99,11 @@ mem_cap_gib="${RUNNER_MEM_LIMIT%[gG]}"
 [[ "$mem_cap_gib" =~ ^[0-9]+$ ]] || mem_cap_gib="$default_mem_gib"
 workers=$(( RUNNER_CPUS > 3 ? RUNNER_CPUS - 2 : 1 ))
 [[ "$workers" -le 6 ]] || workers=6
+# ...and at most one worker per 2.5 GiB of the cap: under 10 GB, six workers (compilations and analyses feeding the
+# Kotlin and Gradle daemons at once) took the container to its limit and the kernel killed the Gradle daemon.
+mem_workers=$(( mem_cap_gib * 2 / 5 ))
+[[ "$mem_workers" -ge 1 ]] || mem_workers=1
+[[ "$workers" -le "$mem_workers" ]] || workers="$mem_workers"
 # A 4 GB daemon heap under a 10 GB cap got the daemon OOM-killed next to the Kotlin daemon and the test JVMs.
 heap=$(( mem_cap_gib >= 12 ? 4 : (mem_cap_gib >= 7 ? 3 : 2) ))
 RUNNER_GRADLE_OPTS="$(setting RUNNER_GRADLE_OPTS "-Dorg.gradle.workers.max=$workers \"-Dorg.gradle.jvmargs=-Xmx${heap}g -XX:+UseParallelGC -Dfile.encoding=UTF-8 --sun-misc-unsafe-memory-access=allow\"")"

@@ -123,11 +123,13 @@ jobs:
         working-directory: frontend
         run: npm run build && npm run budget
 
-      # Stryker over src/domain, src/app and src/telemetry; thresholds.break is 80 (frontend/stryker.config.json). CI runs it
-      # in full for every commit: no incremental file of another commit is ever restored, so a surviving mutant cannot hide
-      # behind an old result. The result of THIS commit is kept for the pr-gate mutation job, which runs Stryker on the
-      # same merge commit and so reuses it instead of mutating everything a second time (.github/scripts/ci-cache.sh).
-      - name: Reuse an earlier Stryker run of this commit
+      # Stryker over src/domain, src/app and src/telemetry; thresholds.break is 80 (frontend/stryker.config.json). On a pull
+      # request it starts from the newest earlier result and Stryker's incremental mode re-runs only the mutants of changed
+      # source and test files (minutes instead of about 16); pushes to main start without a file, so every commit that
+      # lands is mutated in full (a change to a helper that is neither mutated code nor a test can leave an incremental
+      # result stale until then). The result of THIS commit is kept for the pr-gate mutation job, which runs Stryker on
+      # the same merge commit and reuses it (.github/scripts/ci-cache.sh).
+      - name: Reuse an earlier Stryker run
         run: .github/scripts/ci-cache.sh stryker restore
 
       - name: Mutation tests (Stryker, break at 80 %)

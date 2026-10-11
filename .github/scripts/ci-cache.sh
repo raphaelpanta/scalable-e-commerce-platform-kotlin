@@ -19,8 +19,11 @@
 #   stryker restore|save
 #            frontend/build/stryker-incremental.json of THIS commit (GITHUB_SHA): the storefront gate and the pr-gate
 #            mutation job both run Stryker on the same pull-request merge commit, about 16 minutes each. `save` keeps the
-#            first run's result, `restore` hands it to the second, which then re-runs nothing it already ran. A new
-#            commit always starts without a file, so CI still mutates every commit in full. Kept 7 days.
+#            first run's result, `restore` hands it to the second, which then re-runs nothing it already ran. On a
+#            pull request without a result for its commit, `restore` hands over the newest earlier result instead:
+#            Stryker's incremental mode compares the source and test files and re-runs only the mutants of what
+#            changed (a few minutes instead of about 16). Pushes to main always start without a file, so every commit
+#            that lands is mutated in full. Kept 7 days.
 #
 # `gradle`, `frontend` and `stryker` are no-ops (exit 0) without CI_CACHE_DIR, e.g. on a GitHub-hosted runner or a laptop.
 # Usage: ci-cache.sh gradle|frontend|gitleaks|stryker restore|stryker save   (from the repository root, after the checkout)
@@ -86,6 +89,14 @@ case "$1" in
           mkdir -p "${local_file%/*}"
           cp "$dir/$GITHUB_SHA.json" "$local_file"
           echo "Stryker: reusing the results of an earlier run of $GITHUB_SHA"
+        elif [ "${GITHUB_EVENT_NAME:-}" = pull_request ]; then
+          # shellcheck disable=SC2012  # file names are commit SHAs: no spaces or newlines
+          newest="$(ls -t "$dir"/*.json 2>/dev/null | head -n 1)"
+          if [ -n "$newest" ]; then
+            mkdir -p "${local_file%/*}"
+            cp "$newest" "$local_file"
+            echo "Stryker: incremental run from the results of $(basename "$newest" .json)"
+          fi
         fi
         ;;
       save)
