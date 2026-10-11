@@ -135,7 +135,8 @@ jobs:
         with:
           # GRADLE_USER_HOME (dependencies, wrapper, local build cache) already lives on the runner's own disk
           # (platform/ci-runner): restoring and saving it through the GitHub cache service would only cost time.
-          cache-disabled: true
+          # The GitHub cache only on GitHub-hosted runners: self-hosted ones keep GRADLE_USER_HOME on their disk.
+          cache-disabled: ${{ runner.environment == 'self-hosted' }}
           validate-wrappers: true
 
       - name: Keep the Gradle configuration cache on the runner
@@ -345,7 +346,8 @@ jobs:
         with:
           # GRADLE_USER_HOME (dependencies, wrapper, local build cache) already lives on the runner's own disk
           # (platform/ci-runner): restoring and saving it through the GitHub cache service would only cost time.
-          cache-disabled: true
+          # The GitHub cache only on GitHub-hosted runners: self-hosted ones keep GRADLE_USER_HOME on their disk.
+          cache-disabled: ${{ runner.environment == 'self-hosted' }}
           validate-wrappers: true
 
       - name: Keep the Gradle configuration cache on the runner

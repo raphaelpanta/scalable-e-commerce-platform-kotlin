@@ -209,9 +209,11 @@ deployed or released, and on the same branch) whenever it runs.
 
 ## Caches
 
-Everything a job would otherwise download or rebuild lives on the runner host, so no workflow uses the GitHub cache
-service (restoring and saving gigabytes over the network costs more than it saves when the data already sits on the
-same disk):
+Everything a job would otherwise download or rebuild lives on the runner host, so on these runners no workflow uses the
+GitHub cache service (restoring and saving gigabytes over the network costs more than it saves when the data already
+sits on the same disk). The workflows switch it on only for a job that runs on a GitHub-hosted runner
+(`runner.environment == 'github-hosted'`): `setup-gradle` caches the Gradle user home and `setup-node` the npm
+downloads.
 
 | What | Where | Used by |
 | --- | --- | --- |

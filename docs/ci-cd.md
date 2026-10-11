@@ -28,10 +28,12 @@ path-filtered service and platform checks of the pull request (see "Required sta
 | Diagnosis | on failure the `verify-reports` artifact holds `**/build/reports/**`, `**/build/test-results/**` and the Pitest log for 7 days |
 | Mutation hand-over | called with `mutation-reports: true` (pr-gate), a green run uploads `pitest-reports` (a tar of every `mutations.xml`, kept 1 day) for the pr-gate `mutation` job |
 
-No job uses the GitHub cache service: the self-hosted runners keep the Gradle user home (dependencies, wrapper, the local
-build cache), the Gradle configuration cache, the npm cache, the Playwright browsers and the JDK and Node of
-`setup-java`/`setup-node` on their own disk, so `setup-gradle` runs with `cache-disabled: true` and `setup-node` without
-`cache:` (platform/ci-runner/README.md, "Caches"). `verify` sets up Node 24 and installs the frontend dependencies before
+On the self-hosted runners no job uses the GitHub cache service: they keep the Gradle user home (dependencies, wrapper,
+the local build cache), the Gradle configuration cache, the npm cache, the Playwright browsers and the JDK and Node of
+`setup-java`/`setup-node` on their own disk (platform/ci-runner/README.md, "Caches"). A job that runs on a GitHub-hosted
+runner (`runner.environment == 'github-hosted'`), where nothing outlives the job, uses it instead: `setup-gradle` turns
+its cache on (`cache-disabled` is true only on self-hosted runners) and `setup-node` caches npm downloads keyed by
+`frontend/package-lock.json`. `verify` sets up Node 24 and installs the frontend dependencies before
 `./gradlew -q verify`, which runs the storefront's lint and tests; `.github/scripts/ci-cache.sh frontend` keeps the
 ESLint, Prettier, tsc and Vitest caches of `frontend/node_modules` on the runner across jobs.
 
