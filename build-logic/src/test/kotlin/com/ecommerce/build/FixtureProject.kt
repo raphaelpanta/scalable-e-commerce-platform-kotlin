@@ -123,13 +123,20 @@ class FixtureProject private constructor(
          * provisioned for build-logic), so fixture builds resolve their toolchain without downloading. The
          * daemon heaps are smaller than the repository's (3 GB Gradle, 2 GB Kotlin): a fixture compiles a few
          * files, and with two test JVMs (maxParallelForks) the repository's heaps let the fixture daemons claim
-         * about 10 GB, beyond the CI runner's whole memory cap, where the kernel killed one mid-build.
+         * about 10 GB, beyond the CI runner's whole memory cap, where the kernel killed one mid-build. Kotlin
+         * compiles inside the fixture's Gradle daemon, so no extra Kotlin daemon (140 to 350 MB each) stays up.
          */
         private fun writeGradleProperties(dir: File) {
             val properties = dir.resolve("gradle.properties")
             val base = repoRoot.resolve("gradle.properties").readText()
             val javaHome = File(System.getProperty("java.home")).absolutePath
-            val replaced = listOf("org.gradle.java.installations.", "org.gradle.jvmargs=", "kotlin.daemon.jvmargs=")
+            val replaced =
+                listOf(
+                    "org.gradle.java.installations.",
+                    "org.gradle.jvmargs=",
+                    "kotlin.daemon.jvmargs=",
+                    "kotlin.compiler.execution.strategy=",
+                )
             properties.writeText(
                 base
                     .lineSequence()
@@ -138,7 +145,7 @@ class FixtureProject private constructor(
                     "\norg.gradle.java.installations.auto-download=false" +
                     "\norg.gradle.java.installations.paths=$javaHome" +
                     "\norg.gradle.jvmargs=$FIXTURE_DAEMON_JVM_ARGS" +
-                    "\nkotlin.daemon.jvmargs=-Xmx768m\n",
+                    "\nkotlin.compiler.execution.strategy=in-process\n",
             )
         }
 
