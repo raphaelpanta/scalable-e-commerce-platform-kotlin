@@ -218,6 +218,7 @@ same disk):
 | Gradle user home: dependencies, wrapper distribution, JDK toolchains, **local build cache** | volume `runner-cache`, `/opt/ci-cache/gradle` (`GRADLE_USER_HOME`) | every Gradle job; `setup-gradle` runs with `cache-disabled: true` |
 | Gradle configuration cache | `/opt/ci-cache/gradle-configuration-cache/<workspace>`, linked into `.gradle/` by `.github/scripts/ci-cache.sh gradle` | every Gradle job |
 | npm download cache | `/opt/ci-cache/npm` (`npm_config_cache`); `npm ci --prefer-offline` | the storefront, verify, mutation and platform jobs |
+| Frontend tool caches: ESLint, Prettier and `tsc --incremental` (`frontend/node_modules/.cache`), Vite and Vitest (`frontend/node_modules/.vite`) | `/opt/ci-cache/frontend/<workspace>`, linked into `node_modules` after `npm ci` by `.github/scripts/ci-cache.sh frontend`; the tools check entries by file content, so a warm `npm run lint` takes 4 s instead of 25 | storefront gate, verify |
 | Playwright browsers | `/opt/ci-cache/ms-playwright` (`PLAYWRIGHT_BROWSERS_PATH`) | the platform job |
 | JDK and Node of `setup-java` / `setup-node` | volume `runner-toolcache`, `/opt/hostedtoolcache` | every job that sets them up |
 | Image layers, tool images (Pact CLI, osv-scanner, Trivy, syft, shellcheck), the visual suite's `node_modules` | the engine | image, scan and platform jobs |
@@ -236,6 +237,20 @@ Images of pull-request runs are removed by the image job; on `main` the image st
 runners on several engines), which checks its ID and is followed by the removal in the aggregate job.
 
 To start from a cold cache: `docker volume rm ci-runner_runner-cache ci-runner_runner-toolcache` while no runner is up.
+
+### Parallelism and sizing
+
+- `runner` gets all engine CPUs but one and the engine memory less 4 GiB (`--print-config` shows it: 9 CPUs and 10 GiB
+  on a 10-CPU, 14 GiB engine); Gradle runs one worker per CPU left after its daemons, at most 6, with a 3 GB daemon heap
+  below a 12 GB cap (a 4 GB heap under the 10 GB cap got the daemon OOM-killed) and 4 GB from 12 GB up.
+- Test JVMs, Pitest and npm runs share the build's `HeavyTaskLimit` slots, sized from the memory the build sees (two
+  under the 10 GB cap); compilation and the other tasks keep every worker. Modules build in parallel
+  (`org.gradle.parallel`).
+- Vitest runs its test files in parallel on worker threads (`pool: 'threads'`, 515 tests in about 8 s).
+- `runner-light` (2 CPUs, 1.5 GiB) takes the image, scan, publish and aggregate jobs next to a Gradle job.
+- `CONTAINER_ENGINE=docker` in the runners' environment: the image's nested podman answers `podman info` but cannot run
+  containers inside the runner ("'overlay' is not supported over overlayfs"), so `frontend/scripts/visual.mjs` uses
+  the docker CLI, which reaches the engine through the mounted socket.
 
 ## Public-repository safeguards
 

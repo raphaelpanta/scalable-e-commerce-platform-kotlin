@@ -8,6 +8,11 @@
 #            seconds per Gradle job); Gradle checks every entry against the build scripts, properties and
 #            environment it was computed from, so a stale entry is never used. Keyed by the workspace path, which
 #            Gradle requires to be unchanged.
+#   frontend frontend/node_modules/.cache (ESLint, Prettier and tsc incremental caches of `npm run lint`) and
+#            frontend/node_modules/.vite (Vite's dependency cache and Vitest's results, which order the slowest test files
+#            first). `npm ci` deletes node_modules, so call this after it: it links both directories into CI_CACHE_DIR,
+#            keyed by the workspace path like the Gradle entry (the two runners never share one). The tools validate
+#            their entries by file content, so a stale entry only costs a re-check. A warm lint takes 4 s instead of 25.
 #   gitleaks gitleaks GITLEAKS_VERSION on the job's PATH (GITHUB_PATH), which the pre-push hook and its tests in
 #            scripts/tests need (developers install it with Homebrew). Downloaded once from the gitleaks release,
 #            checked against the pinned SHA-256 and kept in CI_CACHE_DIR/tools (RUNNER_TEMP without it).
@@ -17,15 +22,15 @@
 #            first run's result, `restore` hands it to the second, which then re-runs nothing it already ran. A new
 #            commit always starts without a file, so CI still mutates every commit in full. Kept 7 days.
 #
-# `gradle` and `stryker` are no-ops (exit 0) without CI_CACHE_DIR, e.g. on a GitHub-hosted runner or a laptop.
-# Usage: ci-cache.sh gradle|gitleaks|stryker restore|stryker save   (from the repository root, after the checkout)
+# `gradle`, `frontend` and `stryker` are no-ops (exit 0) without CI_CACHE_DIR, e.g. on a GitHub-hosted runner or a laptop.
+# Usage: ci-cache.sh gradle|frontend|gitleaks|stryker restore|stryker save   (from the repository root, after the checkout)
 set -euo pipefail
 
 GITLEAKS_VERSION=8.30.1
 GITLEAKS_SHA256_LINUX_ARM64=e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080
 GITLEAKS_SHA256_LINUX_X64=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
 
-usage() { echo "Usage: ci-cache.sh gradle|gitleaks|stryker restore|stryker save" >&2; exit 64; }
+usage() { echo "Usage: ci-cache.sh gradle|frontend|gitleaks|stryker restore|stryker save" >&2; exit 64; }
 [ $# -ge 1 ] && [ $# -le 2 ] || usage
 [ $# -eq 1 ] || [ "$1" = stryker ] || usage
 
@@ -57,6 +62,17 @@ case "$1" in
     mkdir -p "$target" .gradle
     rm -rf .gradle/configuration-cache
     ln -s "$target" .gradle/configuration-cache
+    ;;
+  frontend)
+    [ -n "${CI_CACHE_DIR:-}" ] || exit 0
+    [ -d frontend/node_modules ] || { echo "ci-cache.sh frontend: run npm ci first" >&2; exit 1; }
+    key="$(pwd -P | cksum | cut -d' ' -f1)"
+    for dir in .cache .vite; do
+      target="$CI_CACHE_DIR/frontend/$key/$dir"
+      mkdir -p "$target"
+      rm -rf "frontend/node_modules/$dir"
+      ln -s "$target" "frontend/node_modules/$dir"
+    done
     ;;
   stryker)
     case "${2:-}" in restore | save) ;; *) usage ;; esac

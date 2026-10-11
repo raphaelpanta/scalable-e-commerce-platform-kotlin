@@ -96,6 +96,10 @@ jobs:
         working-directory: frontend
         run: npm ci --silent --no-audit --no-fund --prefer-offline
 
+      # ESLint, Prettier, tsc and Vitest caches on the runner's disk (lint: 25 s cold, 4 s warm; .github/scripts/ci-cache.sh).
+      - name: Keep the frontend tool caches on the runner
+        run: .github/scripts/ci-cache.sh frontend
+
       # prettier --check, eslint --max-warnings 0, tsc --noEmit and the freshness of src/api/generated.
       - name: Lint
         working-directory: frontend

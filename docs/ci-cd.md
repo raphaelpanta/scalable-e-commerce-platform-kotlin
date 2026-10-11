@@ -32,7 +32,12 @@ No job uses the GitHub cache service: the self-hosted runners keep the Gradle us
 build cache), the Gradle configuration cache, the npm cache, the Playwright browsers and the JDK and Node of
 `setup-java`/`setup-node` on their own disk, so `setup-gradle` runs with `cache-disabled: true` and `setup-node` without
 `cache:` (platform/ci-runner/README.md, "Caches"). `verify` sets up Node 24 and installs the frontend dependencies before
-`./gradlew -q verify`, which runs the storefront's lint and tests.
+`./gradlew -q verify`, which runs the storefront's lint and tests; `.github/scripts/ci-cache.sh frontend` keeps the
+ESLint, Prettier, tsc and Vitest caches of `frontend/node_modules` on the runner across jobs.
+
+The dependency scan (osv-scanner) fails a service's gate on any known vulnerability in its runtime class path. When the
+Spring Boot BOM still manages a vulnerable version, the fixed release is raised as a constraint in `kotlin-boot-app`,
+with the version under "Security floors" in `gradle/libs.versions.toml` (Jackson 3, lz4-java and SCRAM since 2026-10-11).
 
 ## Runner requirements
 
