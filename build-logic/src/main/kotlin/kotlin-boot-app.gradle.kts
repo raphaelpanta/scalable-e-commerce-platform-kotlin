@@ -22,6 +22,13 @@ registerTestLayer("acceptanceTest")
 
 dependencies {
     "implementation"(platform(SpringBootPlugin.BOM_COORDINATES))
+    // Security floors above the Boot BOM (gradle/libs.versions.toml, "Security floors"): the Jackson BOM aligns
+    // every Jackson 3 module on the fixed release; the constraints only raise lz4-java and SCRAM where they are
+    // already on the class path (Kafka client, PostgreSQL drivers) and add nothing otherwise.
+    "implementation"(platform(library("jackson3-bom")))
+    constraints {
+        listOf("lz4-java", "scram-client", "scram-common").forEach { "implementation"(library(it)) }
+    }
     listOf(
         "spring-boot-starter-webflux",
         "spring-boot-starter-actuator",

@@ -46,8 +46,19 @@ openapi-request-validator = "3.0.0"
 # platform/docker/Dockerfile.native load it, through platform/docker/native/native-image.init.gradle.kts, which reads
 # this line (the Dockerfile passes it as NATIVE_BUILD_TOOLS_VERSION).
 native-build-tools = "1.1.14"
+# Security floors above the Spring Boot 4.1.1 BOM (osv-scanner in service-ci, 2026-10-11): Boot still manages Jackson
+# 3.1.5, lz4-java 1.10.1 (through kafka-clients) and SCRAM 3.2 (through the PostgreSQL drivers), all with published
+# advisories; these are the first fixed releases. Remove each line once the Boot BOM manages at least that version.
+jackson3 = "3.1.7"
+lz4-java = "1.11.4"
+scram = "3.3"
 
 [libraries]
+# Security floors (see the versions above), applied as constraints by kotlin-boot-app
+jackson3-bom = { module = "tools.jackson:jackson-bom", version.ref = "jackson3" }
+lz4-java = { module = "at.yawk.lz4:lz4-java", version.ref = "lz4-java" }
+scram-client = { module = "com.ongres.scram:scram-client", version.ref = "scram" }
+scram-common = { module = "com.ongres.scram:scram-common", version.ref = "scram" }
 # Gradle plugins consumed by build-logic
 kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
 kotlin-allopen-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-allopen", version.ref = "kotlin" }
