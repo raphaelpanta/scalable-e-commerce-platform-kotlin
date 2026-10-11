@@ -10,7 +10,8 @@ source "$(dirname "$0")/lib/dev_env_fixture.sh"
 # The step line of step ID (check lines of the same name carry `found` or a parenthesised reason after the name).
 step_of() { printf '%s\n' "$1" | grep -E "^(OK|CHANGE|SKIP|DRY-RUN|FAIL) +$2 " | grep -Ev "^(FAIL|PASS|SKIP)  $2 +(found |\()" | head -n1; }
 steps_order() { printf '%s\n' "$1" | grep -E '^(OK|CHANGE|SKIP|DRY-RUN) +(env|secret|port|hooks|engine|ryuk) ' | awk '{ print $2 }' | tr '\n' ' ' | sed 's/ $//'; }
-file_mode() { stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"; }
+# GNU first: GNU `stat -f` means --file-system and succeeds with the wrong output.
+file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"; }
 is_base64() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9+/]+=*$'; }
 tmp_files_left() { # names of .env temporary files left in the compose directory (empty when none)
   local f out=""

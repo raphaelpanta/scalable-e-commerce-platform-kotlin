@@ -11,7 +11,10 @@
 #      that counts as success.
 #   2. The check runs of the head commit (`gh api repos/<repo>/commits/<sha>/check-runs`) are polled until every
 #      expected check has been reported (AGG_APPEAR_TIMEOUT seconds) and has completed (AGG_COMPLETE_TIMEOUT).
-#      A check that exists although its workflow was not predicted is watched as well.
+#      A check that exists although its workflow was not predicted is watched as well. An expected check whose
+#      workflow run of the head commit is queued or in progress (`gh api repos/<repo>/actions/runs?head_sha=<sha>`)
+#      is waited for until AGG_COMPLETE_TIMEOUT, not AGG_APPEAR_TIMEOUT: `service-ci / <ctx>` is the last job of its
+#      run, so on a busy self-hosted runner it appears long after the run was queued.
 #   3. success, neutral and skipped conclusions pass; failure, cancelled, timed_out, action_required, stale and
 #      startup_failure fail at once. An expected check that never appears fails (re-run the workflow). A pull request
 #      from a fork fails: the service pipelines never run on the self-hosted runner for forks (pr-gate does the same).
@@ -19,6 +22,7 @@
 # Usage (environment): GH_TOKEN (read access to checks and pull requests), GITHUB_REPOSITORY, PR_NUMBER, HEAD_SHA,
 #   FORK=true|false (default false); optional AGG_INTERVAL (20 s), AGG_APPEAR_TIMEOUT (600 s), AGG_COMPLETE_TIMEOUT
 #   (2400 s), GH_BIN (default gh), GITHUB_STEP_SUMMARY. Exit status 0 when the aggregate is green, 1 otherwise.
+#   GH_TOKEN also needs `actions: read` for the workflow runs.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -66,6 +70,13 @@ done
 echo "services-aggregate: expected checks: $(printf '%s' "$expected" | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
 
 # --- 2./3. poll the check runs of the head commit
+workflow_of() { # CHECK NAME -> workflow file name
+  case "$1" in
+    platform) echo platform.yml ;;
+    "service-ci / "*) echo "${1#service-ci / }.yml" ;;
+  esac
+}
+
 is_watched() { # NAME: expected or a service/platform check that exists anyway
   printf '%s' "$expected" | grep -qxF -- "$1" && return 0
   case "$1" in
@@ -88,6 +99,10 @@ while true; do
     sleep "$INTERVAL"
     continue
   fi
+  # Workflow files of the head commit's runs that have not finished; empty when the API does not answer (the appear
+  # timeout then applies as before).
+  open_workflows="$("$GH" api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$HEAD_SHA&per_page=100" \
+    --jq '.workflow_runs[] | select(.status != "completed") | .path' 2>/dev/null | sed 's#.*/##')" || open_workflows=""
   api_failures=0
 
   elapsed=$((SECONDS - start))
@@ -100,7 +115,10 @@ while true; do
     [ -n "$name" ] || continue
     line="$(printf '%s\n' "$runs" | awk -F'\t' -v n="$name" '$1 == n { print; exit }')"
     if [ -z "$line" ]; then
-      if [ "$elapsed" -ge "$APPEAR_TIMEOUT" ]; then
+      if printf '%s\n' "$open_workflows" | grep -qxF -- "$(workflow_of "$name")"; then
+        verdict="waiting to be reported (workflow run queued or running)"
+        pending=1
+      elif [ "$elapsed" -ge "$APPEAR_TIMEOUT" ]; then
         verdict="missing (never reported)"
         failed=1
       else

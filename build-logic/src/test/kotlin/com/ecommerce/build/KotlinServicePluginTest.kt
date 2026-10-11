@@ -1,6 +1,7 @@
 package com.ecommerce.build
 
 import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldBeIn
 import io.kotest.matchers.file.shouldExist
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -39,8 +40,10 @@ class KotlinServicePluginTest :
                 run.output shouldNotContain it
             }
             run.result.task("$INFRA:contractTest")?.outcome shouldBe TaskOutcome.FAILED
+            // Passed: run now, or taken from the build cache (the layers are cacheable since the build information
+            // carries no build time).
             listOf("test", "integrationTest", "acceptanceTest").forEach {
-                run.result.task("$INFRA:$it")?.outcome shouldBe TaskOutcome.SUCCESS
+                run.result.task("$INFRA:$it")?.outcome shouldBeIn listOf(TaskOutcome.SUCCESS, TaskOutcome.FROM_CACHE)
             }
         }
 

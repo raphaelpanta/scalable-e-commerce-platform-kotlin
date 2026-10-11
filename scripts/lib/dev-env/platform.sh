@@ -134,10 +134,17 @@ smoke_isolation() {
   fi
 }
 
+# Retried like the entry check: the storefront route goes through the same gateway, and one slow first answer (or a
+# probe cut off by its timeout on a busy machine) must not fail the smoke run.
 smoke_storefront() {
-  local headers status ctype csp found
-  headers="$(fetch_headers "http://localhost:$GATEWAY_PORT_EFFECTIVE/")"
-  status="$(printf '%s\n' "$headers" | head -n1 | awk '{ print $2 }')"
+  local headers status ctype csp found deadline=$((SECONDS + ${DEV_ENV_SMOKE_SECONDS:-60}))
+  while :; do
+    headers="$(fetch_headers "http://localhost:$GATEWAY_PORT_EFFECTIVE/")"
+    status="$(printf '%s\n' "$headers" | head -n1 | awk '{ print $2 }')"
+    [ "$status" = 200 ] && break
+    [ "$SECONDS" -lt "$deadline" ] || break
+    sleep "${DEV_ENV_POLL_SECONDS:-3}"
+  done
   ctype="$(printf '%s\n' "$headers" | grep -i '^content-type:' | head -n1 | cut -d: -f2- | tr -d ' ')"
   csp="$(printf '%s\n' "$headers" | grep -i '^content-security-policy:' | head -n1 | cut -d: -f2-)"
   found="${status:-000}"

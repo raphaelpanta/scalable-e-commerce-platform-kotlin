@@ -122,9 +122,13 @@ ENV JAVA_TOOL_OPTIONS="-XX:+UseSerialGC -XX:+UseCompactObjectHeaders -XX:MaxRAMP
 # needs no database, broker or collector: Flyway, the Kafka listeners and the topic admin are switched off for it, and the
 # variables a service refuses to start without get throw-away values (database user and password, the internal token,
 # identity's signing key and the gateway's session key from the `layers` stage). The cache must be written by this JRE with these JAVA_TOOL_OPTIONS;
-# a failed run fails the build rather than ship an image whose JVM would log AOT errors at every start.
+# a failed run fails the build rather than ship an image whose JVM would log AOT errors at every start. BuildKit traces
+# every RUN step and hands it OTEL_* variables (OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=unix:///dev/otel-grpc.sock), which
+# the OpenTelemetry exporter of the application rejects ("must start with http:// or https://"), so the training run
+# starts without them; buildah (Podman) sets none.
 RUN --mount=type=bind,from=layers,source=/layers/training,target=/training \
     set -e; \
+    for v in $(env | sed -n 's/^\(OTEL_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "${v}"; done; \
     ctx="$(echo "${SERVICE_MODULE}" | cut -d: -f3 | tr '[:lower:]' '[:upper:]')"; \
     if ! env "${ctx}_DB_USER=training" "${ctx}_DB_PASSWORD=training" INTERNAL_API_TOKEN=training SEED=false \
         IDENTITY_SIGNING_KEY="$(cat /training/signing-key)" BROWSER_SESSION_KEY="$(cat /training/session-key)" \

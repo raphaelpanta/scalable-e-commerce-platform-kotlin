@@ -1,8 +1,10 @@
+import com.sun.management.OperatingSystemMXBean
 import dev.detekt.gradle.Detekt
 import dev.detekt.gradle.extensions.FailOnSeverity
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.gradle.api.tasks.testing.logging.TestLogEvent
 import org.jlleitschuh.gradle.ktlint.reporter.ReporterType
+import java.lang.management.ManagementFactory
 
 plugins {
     `kotlin-dsl`
@@ -63,7 +65,14 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
     systemProperty("repo.root", rootDir.parentFile.absolutePath)
-    maxParallelForks = 2
+    // Every fork drives TestKit builds with their own Gradle and Kotlin daemons, outside the main build's
+    // HeavyTaskLimit: one fork where memory is short (the CI runner's 10 GB cap, shared with the main build in
+    // verify), two from 12 GiB up. The test JVM itself only drives TestKit; without a bound it takes a quarter of the
+    // machine's memory.
+    val totalMemoryGib =
+        (ManagementFactory.getOperatingSystemMXBean() as OperatingSystemMXBean).totalMemorySize shr 30
+    maxParallelForks = if (totalMemoryGib >= 12) 2 else 1
+    maxHeapSize = "768m"
     jvmArgs("-XX:+EnableDynamicAgentLoading")
     failOnNoDiscoveredTests.set(false)
     // Same quiet failure report as the kotlin-base convention (Principle VIII).

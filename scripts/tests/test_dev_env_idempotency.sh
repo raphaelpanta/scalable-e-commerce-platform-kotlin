@@ -6,7 +6,8 @@ set -uo pipefail
 source "$(dirname "$0")/lib/assert.sh"
 source "$(dirname "$0")/lib/dev_env_fixture.sh"
 
-mtime() { stat -f '%m' "$1" 2>/dev/null || stat -c '%Y' "$1"; }
+# GNU first: GNU `stat -f` means --file-system and succeeds with the wrong output.
+mtime() { stat -c '%Y' "$1" 2>/dev/null || stat -f '%m' "$1"; }
 checksum() { cksum <"$1" | awk '{ print $1 }'; }
 
 test_case "second init on a configured clone: zero CHANGE lines, .env and properties untouched, exit 0, under 10 s"

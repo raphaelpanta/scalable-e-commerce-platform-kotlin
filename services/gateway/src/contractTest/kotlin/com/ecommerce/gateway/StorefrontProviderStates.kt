@@ -76,7 +76,8 @@ private val CART_COOKIES = setOf("cart", "__Host-cart")
  * The sealed cookie values only this provider can mint are made available in two ways: as provider-state values
  * (`sessionCookie`, `cartCookie`) for consumer requests that use `fromProviderState` generators, and by rewriting
  * the `Cookie` header of the replayed request, where any `session`/`__Host-session` or `cart`/`__Host-cart` value
- * is replaced by the state's sealed value. Shared by [StorefrontGatewayProviderIT] (pact folder).
+ * is replaced by the state's sealed value. Shared by [StorefrontGatewayProviderIT] (pact folder) and
+ * [GatewayBrokerVerificationTest] (Pact Broker).
  */
 @SpringBootTest(webEnvironment = RANDOM_PORT)
 // Abstract: JUnit runs only the subclass, which chooses the pact source; one method per provider state of the matrix.

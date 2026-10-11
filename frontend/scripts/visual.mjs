@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Runs the visual suite (frontend/visual, research §6) inside mcr.microsoft.com/playwright:v1.63.0-noble
-// through podman, or docker when podman is missing, so every host renders the same pixels:
+// through podman, or docker when podman does not answer, so every host renders the same pixels:
 //
 //   npm run visual [-- <playwright test args>]     e.g. -- --grep @quality, -- --update-snapshots
 //
@@ -24,14 +24,17 @@ const VOLUME_PREFIX = 'storefront-visual-node-modules-';
 const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 
+// An engine counts only when it answers `info`: the CI runner image ships a podman binary that cannot run containers
+// inside the runner container (overlay over overlayfs) next to the docker CLI that reaches the host engine through the
+// mounted socket. CONTAINER_ENGINE=podman|docker skips the probe.
 function available(command) {
-  const probe = spawnSync(command, ['--version'], { stdio: 'ignore' });
+  const probe = spawnSync(command, ['info'], { stdio: 'ignore', timeout: 30_000 });
   return probe.status === 0;
 }
 
-const engine = ['podman', 'docker'].find(available);
+const engine = process.env.CONTAINER_ENGINE || ['podman', 'docker'].find(available);
 if (engine === undefined) {
-  process.stderr.write('visual: neither podman nor docker is available\n');
+  process.stderr.write('visual: neither podman nor docker answers (podman info, docker info)\n');
   process.exit(2);
 }
 

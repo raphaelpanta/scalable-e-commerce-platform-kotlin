@@ -3,6 +3,7 @@ import com.ecommerce.build.MonorepoExtension
 import com.ecommerce.build.ScaffoldServiceTask
 import com.ecommerce.build.ToolchainConsistencyTask
 import com.ecommerce.build.VersionLiterals
+import com.ecommerce.build.heavyTaskLimit
 import com.ecommerce.build.verifyConventions
 import org.gradle.util.GradleVersion
 
@@ -76,6 +77,7 @@ if (file("frontend/package.json").exists()) {
             description = "Runs the frontend lint script"
             executable = npm.get()
             args("--silent", "--prefix", "frontend", "run", "lint")
+            usesService(heavyTaskLimit())
         }
     val frontendTest =
         tasks.register<Exec>("frontendTest") {
@@ -83,6 +85,11 @@ if (file("frontend/package.json").exists()) {
             description = "Runs the frontend test script"
             executable = npm.get()
             args("--silent", "--prefix", "frontend", "run", "test")
+            // Inside the build Vitest shares the machine with the test JVMs, Pitest and the daemons: two workers (one
+            // jsdom each) instead of one per CPU. Under the CI runner's 10 GB cap nine workers pushed the container to
+            // its limit and three UI tests timed out. `npm run test` on its own keeps every core.
+            environment("VITEST_MAX_WORKERS", "2")
+            usesService(heavyTaskLimit())
             mustRunAfter(frontendLint)
         }
     val frontendCheck =

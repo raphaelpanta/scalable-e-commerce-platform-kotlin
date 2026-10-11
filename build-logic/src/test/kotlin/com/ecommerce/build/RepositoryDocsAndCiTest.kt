@@ -64,7 +64,8 @@ class RepositoryDocsAndCiTest :
             read(".github/workflows/pr-gate.yml") shouldContain "uses: ./.github/workflows/verify.yml"
             topLevelBlock(workflow, "permissions") shouldBe listOf("contents: read")
             workflow.lines().count { it.trim() == "permissions:" || it.trim().startsWith("permissions: ") } shouldBe 1
-            workflow shouldContain "timeout-minutes: 15"
+            // 40 minutes: a cache-cold run (new runner volume, empty build cache) builds and tests every module.
+            workflow shouldContain "timeout-minutes: 40"
             workflow.lines().map(String::trim) shouldContainAll listOf("run: ./gradlew -q verify")
             workflow shouldContain "github.event.pull_request.head.repo.full_name == github.repository"
         }

@@ -54,11 +54,27 @@ jobs:
       - name: Unpack the Pitest reports
         run: tar -xf pitest-reports.tar && rm -f pitest-reports.tar
 
+      # The self-hosted runner image carries no Node (GitHub's hosted images do): the same Node 24 as the storefront gate.
+      - name: Set up Node from frontend/.nvmrc
+        if: hashFiles('frontend/stryker.config.*', 'frontend/*/stryker.config.*') != ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: frontend/.nvmrc
+          # npm cache from the GitHub cache service only on GitHub-hosted runners (self-hosted: npm_config_cache).
+          cache: ${{ runner.environment == 'github-hosted' && 'npm' || '' }}
+          cache-dependency-path: frontend/package-lock.json
+
       # Stryker runs for every frontend package with a stryker.config.*: since feature 005 that is frontend/
       # (docs/harness.md). The step stays conditional so that a checkout without a frontend still passes.
       - name: Install frontend dependencies for Stryker
         if: hashFiles('frontend/stryker.config.*', 'frontend/*/stryker.config.*') != ''
         run: for p in frontend frontend/*/; do [ -f "$p/package-lock.json" ] && npm ci --prefix "$p"; done; true
+
+      # The storefront gate runs Stryker on the same merge commit; its result (kept on the runner, keyed by the commit)
+      # spares this job a second full run; without it, a pull request starts incrementally from the newest earlier
+      # result (.github/scripts/ci-cache.sh).
+      - name: Reuse an earlier Stryker run
+        run: .github/scripts/ci-cache.sh stryker restore
 
       - name: Mutation threshold, baseline ratchet, surviving mutants
         env:
@@ -66,9 +82,14 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: .github/scripts/pr-gate.sh --skip-verify
 
+      - name: Keep the Stryker results of this commit
+        if: always()
+        run: .github/scripts/ci-cache.sh stryker save
+
+  # Shell tests only: the light runner (platform/ci-runner, `runner-light`) runs them next to verify.
   hook-tests:
     name: hook-tests
-    runs-on: [self-hosted, linux, ecommerce]
+    runs-on: [self-hosted, linux, ecommerce-light]
     timeout-minutes: 10
     if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
@@ -87,7 +108,7 @@ jobs:
     name: pr-gate
     needs: [verify, mutation, hook-tests]
     if: always()
-    runs-on: [self-hosted, linux, ecommerce]
+    runs-on: [self-hosted, linux, ecommerce-light]
     timeout-minutes: 5
     steps:
       # No checkout: this job runs for every pull request, forks included, and executes no pull request code.
