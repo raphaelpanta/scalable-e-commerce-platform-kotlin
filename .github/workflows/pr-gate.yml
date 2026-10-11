@@ -54,6 +54,13 @@ jobs:
       - name: Unpack the Pitest reports
         run: tar -xf pitest-reports.tar && rm -f pitest-reports.tar
 
+      # The self-hosted runner image carries no Node (GitHub's hosted images do): the same Node 24 as the storefront gate.
+      - name: Set up Node from frontend/.nvmrc
+        if: hashFiles('frontend/stryker.config.*', 'frontend/*/stryker.config.*') != ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: frontend/.nvmrc
+
       # Stryker runs for every frontend package with a stryker.config.*: since feature 005 that is frontend/
       # (docs/harness.md). The step stays conditional so that a checkout without a frontend still passes.
       - name: Install frontend dependencies for Stryker
