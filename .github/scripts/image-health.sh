@@ -17,7 +17,8 @@
 #     (SEED=false). INTERNAL_API_TOKEN is random; identity also gets a random Ed25519 IDENTITY_SIGNING_KEY (required
 #     outside the dev/test profiles, same format as platform/compose/scripts/lib.sh ensure_env). Kafka and the OTLP collector stay on their localhost defaults
 #     (unreachable: the producer and the topic admin only log warnings; SPRING_KAFKA_ADMIN_* below shortens that wait);
-#   - the gateway has no database and needs nothing: it starts alone with its localhost defaults;
+#   - the gateway has no database: it starts alone with its localhost defaults and a random BROWSER_SESSION_KEY (32
+#     random bytes, Base64; it refuses to start without one, as in Compose);
 #   - the storefront is nginx serving a bundle: no database, no JVM environment, the 64m memory bound of Compose;
 #   - the probe runs INSIDE the container with busybox wget (127.0.0.1:8081 readiness for the JVM and native images,
 #     127.0.0.1:8080/healthz for the storefront; none of the images has curl; the same checks as the image
@@ -92,7 +93,8 @@ if [ "$service" != gateway ] && [ "$service" != storefront ]; then
   docker run -d --name "$db" --network "$net" --memory 256m --tmpfs /var/lib/postgresql \
     -e POSTGRES_USER=app -e "POSTGRES_PASSWORD=$db_password" -e "POSTGRES_DB=$service" "$postgres_image" >/dev/null
   started_db=true
-  for _ in $(seq 1 30); do
+  # Up to 90 s: on a shared runner the first start of postgres (initdb) can take well over 30 s.
+  for _ in $(seq 1 90); do
     docker exec "$db" pg_isready -q -U app -d "$service" && break
     sleep 1
   done
@@ -106,6 +108,14 @@ if [ "$service" = identity ]; then
   # The mask is a GitHub Actions workflow command: keep local runs quiet.
   [ -z "${GITHUB_ACTIONS:-}" ] || echo "::add-mask::$signing_key"
   run_args+=(-e "IDENTITY_SIGNING_KEY=$signing_key")
+fi
+
+# The gateway refuses to start without the key that seals the browser session and cart cookies (same format as
+# platform/compose/scripts/lib.sh ensure_env: 32 random bytes, Base64).
+if [ "$service" = gateway ]; then
+  session_key="$(openssl rand -base64 32 | tr -d '\n')"
+  [ -z "${GITHUB_ACTIONS:-}" ] || echo "::add-mask::$session_key"
+  run_args+=(-e "BROWSER_SESSION_KEY=$session_key")
 fi
 
 docker run "${run_args[@]}" "$image" >/dev/null

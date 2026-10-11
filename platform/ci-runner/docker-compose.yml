@@ -70,6 +70,10 @@ x-runner: &runner
     # The same Testcontainers settings as on the development machine (docs/build.md): Ryuk is off (on Podman its
     # containers outlive the session and exhaust the kernel keyring); the JVM shutdown hook removes the containers.
     TESTCONTAINERS_RYUK_DISABLED: "true"
+    # The image ships a podman binary next to the docker CLI. Nested podman answers `podman info` but cannot run
+    # containers inside this container ("'overlay' is not supported over overlayfs"), so scripts that pick an engine
+    # (frontend/scripts/visual.mjs) must use the docker CLI, which reaches the engine through the mounted socket.
+    CONTAINER_ENGINE: docker
 
 services:
   # Runs every job: Gradle, Node, Testcontainers, the platform stack. Labels: self-hosted, linux and the architecture are

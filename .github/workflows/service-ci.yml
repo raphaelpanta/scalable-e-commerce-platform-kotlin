@@ -185,13 +185,16 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          pacts=(build/pacts/"$SERVICE"-*.json build/pacts/platform-probe-"$SERVICE".json)
-          if [ "${#pacts[@]}" -eq 0 ]; then
+          # nullglob drops the wildcard pattern when nothing matches, but not the literal health-pact name: keep only files
+          # that exist (the gateway has no platform-probe pact).
+          files=()
+          for pact in build/pacts/"$SERVICE"-*.json build/pacts/platform-probe-"$SERVICE".json; do
+            [ ! -f "$pact" ] || files+=("$PWD/$pact")
+          done
+          if [ "${#files[@]}" -eq 0 ]; then
             echo "::notice::$SERVICE wrote no consumer pact to build/pacts: nothing to publish"
             exit 0
           fi
-          files=()
-          for pact in "${pacts[@]}"; do files+=("$PWD/$pact"); done
           creds=()
           [ -z "$PACT_BROKER_USERNAME" ] || creds+=(-e PACT_BROKER_USERNAME -e PACT_BROKER_PASSWORD)
           docker run --rm --network host -w "$PWD" -v "$PWD:$PWD" -e PACT_BROKER_BASE_URL "${creds[@]}" \

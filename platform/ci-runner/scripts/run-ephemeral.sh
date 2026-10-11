@@ -99,7 +99,8 @@ mem_cap_gib="${RUNNER_MEM_LIMIT%[gG]}"
 [[ "$mem_cap_gib" =~ ^[0-9]+$ ]] || mem_cap_gib="$default_mem_gib"
 workers=$(( RUNNER_CPUS > 3 ? RUNNER_CPUS - 2 : 1 ))
 [[ "$workers" -le 6 ]] || workers=6
-heap=$(( mem_cap_gib >= 10 ? 4 : (mem_cap_gib >= 7 ? 3 : 2) ))
+# A 4 GB daemon heap under a 10 GB cap got the daemon OOM-killed next to the Kotlin daemon and the test JVMs.
+heap=$(( mem_cap_gib >= 12 ? 4 : (mem_cap_gib >= 7 ? 3 : 2) ))
 RUNNER_GRADLE_OPTS="$(setting RUNNER_GRADLE_OPTS "-Dorg.gradle.workers.max=$workers \"-Dorg.gradle.jvmargs=-Xmx${heap}g -XX:+UseParallelGC -Dfile.encoding=UTF-8 --sun-misc-unsafe-memory-access=allow\"")"
 light_cpus_default=$(( engine_cpus >= 2 ? 2 : 1 ))
 RUNNER_LIGHT_CPUS="$(setting RUNNER_LIGHT_CPUS "$light_cpus_default")"

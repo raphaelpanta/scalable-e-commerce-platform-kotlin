@@ -6,8 +6,12 @@ import org.gradle.api.services.BuildService
 import org.gradle.api.services.BuildServiceParameters
 import java.lang.management.ManagementFactory
 
-/** Memory the Gradle daemon, the Kotlin daemon and a Node process take next to the heavy tasks, in GiB. */
-private const val RESERVED_GIB = 6
+/**
+ * Memory the Gradle daemon, the Kotlin daemon and a Node process take next to the heavy tasks, in GiB. Six GiB still
+ * left the CI runner's Gradle daemon (3 to 4 GB heap) OOM-killed under its 10 GB cap with three heavy tasks; seven
+ * keeps a margin there (two slots).
+ */
+private const val RESERVED_GIB = 7
 
 /** Heavy tasks per GiB left over: a test or Pitest JVM (1 GB heap, see kotlin-base and pitest) uses about 1.3 GB. */
 private const val SLOTS_PER_FOUR_GIB = 3
@@ -22,9 +26,9 @@ private const val BYTES_PER_GIB = 1L shl 30
  * Bounds how many memory-heavy tasks run at once: test JVMs, Pitest and the frontend's npm scripts (each 1 to 1.5 GB
  * resident), while compilation and the other tasks keep every Gradle worker. On the CI runner, a container capped at
  * 10 GB, six heavy tasks next to the Gradle daemon (2.8 GB), the Kotlin daemon (1.6 GB) and ESLint (1.5 GB) reached
- * the cap and the kernel killed the Gradle daemon. The number of slots follows the memory the build sees (the
- * container's limit inside a container): three under a 10 GB cap, more than `org.gradle.workers.max` on a 16 GB
- * laptop, where it changes nothing. `-Pharness.heavyTasks=<n>` sets it.
+ * the cap and the kernel killed the Gradle daemon, and so did three. The number of slots follows the memory the build
+ * sees (the container's limit inside a container): two under a 10 GB cap, more than `org.gradle.workers.max` on a
+ * 16 GB laptop, where it changes nothing. `-Pharness.heavyTasks=<n>` sets it.
  */
 abstract class HeavyTaskLimit : BuildService<BuildServiceParameters.None>
 
