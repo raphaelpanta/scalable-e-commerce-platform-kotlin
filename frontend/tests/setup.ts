@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import * as fc from 'fast-check';
 import { afterAll, afterEach, beforeAll } from 'vitest';
 
@@ -18,6 +18,11 @@ fc.configureGlobal({
   ...(seedFromEnvironment === undefined ? {} : { seed: Number(seedFromEnvironment) }),
   verbose: fc.VerbosityLevel.VeryVerbose,
 });
+
+// findBy* and waitFor retry until this deadline (1 s by default). On a loaded machine (the CI runner's verify, where
+// Vitest shares the CPUs with the Gradle build) a fetch-and-render cycle took longer, and three UI tests failed on a
+// state they would have reached; a passing test returns as soon as its assertion holds, so this costs nothing there.
+configure({ asyncUtilTimeout: 5_000 });
 
 beforeAll(() => {
   // MSW 3 names the option `onUnhandledFrame` (`onUnhandledRequest` in MSW 2): same semantics.
